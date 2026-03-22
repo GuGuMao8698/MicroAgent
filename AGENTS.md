@@ -16,7 +16,7 @@ This file provides guidance to codex when working with code in this repository.
 
 
 ## Project Progress
-- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `未开始`
+- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `进行中`
 
 - `V1` : Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理 : `未开始`
 

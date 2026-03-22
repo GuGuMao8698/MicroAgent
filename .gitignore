@@ -1,0 +1,9 @@
+# Runtime data
+data/uploads/*
+data/tmp/*
+data/local_index/*
+
+# Keep directory placeholders
+!data/uploads/.gitkeep
+!data/tmp/.gitkeep
+!data/local_index/.gitkeep
