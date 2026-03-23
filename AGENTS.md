@@ -3,7 +3,7 @@ This file provides guidance to codex when working with code in this repository.
 
 
 ## Project Overview
-`ragflow-lite` is a personal project aiming to build a RAG system close to RAGFlow for complex documents, with a focus on document import and parsing, chunking, retrieval, grounded citations, and an ingestion pipeline that evolves toward async processing. The repository is still in an early planning stage, so current guidance should follow the project plan rather than assume an existing implementation.
+`ragflow-lite` is a personal project to build a RAG system closer to `RAGFlow`, with a focus on document import and parsing, chunking, retrieval, grounded answers, and an ingestion pipeline that can evolve over time. Work should respect the current implementation stage instead of assuming later-stage capabilities already exist.
 
 
 ## Technology Stack
@@ -27,4 +27,9 @@ This file provides guidance to codex when working with code in this repository.
 - `V4` : OCR/layout/table、query rewrite/multi-query/eval、或平台增强方向做深 : `未开始`
 
 
-## Concurrency Rules
+## Current Working Focus
+- 当前只聚焦 `txt` / `md` 的最小同步 RAG 闭环：`upload -> parse -> normalize -> chunk -> embed -> index -> retrieve -> answer`
+- 优先做最小正确改动，保持 `api`、`application`、`domain`、`infrastructure` 分层清晰
+- 默认优先本地可跑通方案和本地文件持久化，先把主链路做实
+- 暂不提前引入 `pdf`、`Infinity` 集成、hybrid retrieval、citation、异步任务或数据库状态管理
+- 不修改 `/计划` 下的内容，除非用户明确要求

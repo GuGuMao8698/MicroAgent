@@ -1,7 +1,12 @@
 # Runtime data
+.venv/
 data/uploads/*
 data/tmp/*
 data/local_index/*
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
 
 # Keep directory placeholders
 !data/uploads/.gitkeep
