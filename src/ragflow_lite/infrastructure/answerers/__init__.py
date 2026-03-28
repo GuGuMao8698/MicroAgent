@@ -1,6 +1,6 @@
-from ragflow_lite.infrastructure.answerers.extractive import (
-    FALLBACK_ANSWER,
-    ExtractiveAnswerer,
+from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
+from ragflow_lite.infrastructure.answerers.openai_responses import (
+    OpenAIResponsesAnswerer,
 )
 
-__all__ = ["ExtractiveAnswerer", "FALLBACK_ANSWER"]
+__all__ = ["FALLBACK_ANSWER", "OpenAIResponsesAnswerer"]

@@ -13,12 +13,12 @@ from fastapi import Depends, Request
 from ragflow_lite.application import IngestionPipeline, QueryService, normalize_text
 from ragflow_lite.config import Settings
 from ragflow_lite.infrastructure import (
+    ArkMultimodalTextEmbedder,
     CompositeParser,
-    DeterministicHashEmbedder,
-    ExtractiveAnswerer,
     FixedWindowChunker,
     LocalDocumentStore,
     LocalJsonVectorIndex,
+    OpenAIResponsesAnswerer,
 )
 
 
@@ -37,15 +37,32 @@ def build_services(settings: Settings) -> AppServices:
     这里显式完成“配置 -> 具体实现 -> 业务流程”的连接，便于后续替换
     parser、embedder 或 index，而不需要改动路由层。
     """
+    ark_runtime_config, openai_runtime_config = (
+        settings.require_runtime_provider_configs()
+    )
+
     document_store = LocalDocumentStore(settings.uploads_dir, settings.temp_dir)
     parser = CompositeParser()
     chunker = FixedWindowChunker(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )
-    embedder = DeterministicHashEmbedder(dimensions=settings.embedding_dimensions)
-    vector_index = LocalJsonVectorIndex(settings.local_index_dir)
-    answerer = ExtractiveAnswerer()
+    embedder = ArkMultimodalTextEmbedder(
+        api_key=ark_runtime_config.api_key,
+        model=ark_runtime_config.model,
+        dimensions=ark_runtime_config.dimensions,
+    )
+    vector_index = LocalJsonVectorIndex(
+        settings.local_index_dir,
+        embedding_signature=embedder.signature,
+    )
+    answerer = OpenAIResponsesAnswerer(
+        api_key=openai_runtime_config.api_key,
+        model=openai_runtime_config.model,
+        reasoning_effort=openai_runtime_config.reasoning_effort,
+        store=openai_runtime_config.store,
+        verbosity=openai_runtime_config.verbosity,
+    )
 
     return AppServices(
         settings=settings,

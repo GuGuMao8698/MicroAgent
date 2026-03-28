@@ -11,15 +11,18 @@ import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from ragflow_lite.domain.errors import IndexWriteError
+from ragflow_lite.domain.errors import IndexWriteError, ProcessingError
 from ragflow_lite.domain.models import DocumentAsset, EmbeddedChunk, RetrievedChunk
+
+EmbeddingSignature = dict[str, str | int | None]
 
 
 class LocalJsonVectorIndex:
     """使用 JSON 文件保存文档级向量索引。"""
 
-    def __init__(self, index_dir: Path) -> None:
+    def __init__(self, index_dir: Path, embedding_signature: EmbeddingSignature) -> None:
         self.index_dir = index_dir
+        self.embedding_signature = dict(embedding_signature)
 
     def index_document(
         self,
@@ -36,6 +39,7 @@ class LocalJsonVectorIndex:
                 "size_bytes": asset.size_bytes,
                 "created_at": asset.created_at.isoformat(),
             },
+            "embedding_signature": dict(self.embedding_signature),
             "chunks": [
                 {
                     "chunk_id": chunk.chunk_id,
@@ -75,12 +79,10 @@ class LocalJsonVectorIndex:
 
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         """扫描本地索引并返回分数最高的若干 chunk。"""
-        if not any(query_vector):
-            return []
-
         scored_chunks: list[RetrievedChunk] = []
         for path in sorted(self.index_dir.glob("*.json")):
             data = json.loads(path.read_text(encoding="utf-8"))
+            self._validate_embedding_signature(path, data.get("embedding_signature"))
             document = data.get("document", {})
             for chunk_data in data.get("chunks", []):
                 score = self._cosine_similarity(query_vector, chunk_data["vector"])
@@ -97,8 +99,11 @@ class LocalJsonVectorIndex:
                             "filename": document.get("filename"),
                             "file_type": document.get("file_type"),
                         },
-                        )
+                    )
                 )
+
+        if not any(query_vector):
+            return []
 
         # 先聚合所有文档的候选片段，再按全局分数截断 top_k。
         scored_chunks.sort(key=lambda chunk: chunk.score, reverse=True)
@@ -107,6 +112,36 @@ class LocalJsonVectorIndex:
     def _path_for(self, document_id: str) -> Path:
         """返回某个文档对应的索引文件路径。"""
         return self.index_dir / f"{document_id}.json"
+
+    def _validate_embedding_signature(
+        self,
+        path: Path,
+        actual_signature: object,
+    ) -> None:
+        if not isinstance(actual_signature, dict):
+            raise ProcessingError(
+                f"Index '{path.name}' is missing embedding signature metadata. "
+                "Re-upload the document or rebuild the local index."
+            )
+
+        expected_keys = tuple(self.embedding_signature.keys())
+        missing_keys = [key for key in expected_keys if key not in actual_signature]
+        if missing_keys:
+            missing_list = ", ".join(missing_keys)
+            raise ProcessingError(
+                f"Index '{path.name}' is missing embedding signature fields: {missing_list}. "
+                "Re-upload the document or rebuild the local index."
+            )
+
+        normalized_actual_signature = {
+            key: actual_signature[key] for key in expected_keys
+        }
+        if normalized_actual_signature != self.embedding_signature:
+            raise ProcessingError(
+                f"Index '{path.name}' was built with embedding signature "
+                f"{normalized_actual_signature}, but the current configuration is "
+                f"{self.embedding_signature}. Re-upload the document or rebuild the local index."
+            )
 
     @staticmethod
     def _cosine_similarity(left: list[float], right: list[float]) -> float:

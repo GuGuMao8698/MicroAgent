@@ -11,7 +11,7 @@ This file provides guidance to codex when working with code in this repository.
 - Database: `PostgreSQL`
 - Cache / state: `Redis`
 - Retrieval engine: `Infinity`
-- Embeddings: existing embedding API or local embedding service
+- Embeddings: Ark text embedding
 - Deployment: `docker-compose`
 
 
@@ -29,7 +29,25 @@ This file provides guidance to codex when working with code in this repository.
 
 ## Current Working Focus
 - 当前只聚焦 `txt` / `md` 的最小同步 RAG 闭环：`upload -> parse -> normalize -> chunk -> embed -> index -> retrieve -> answer`
+- 当前 `embed` 阶段默认通过 Ark 文本 embedding 完成，应用启动依赖 `ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`，不再保留本地 hash fallback
+- 当前 `answer` 阶段默认通过 OpenAI Responses API 完成 grounded answer，应用启动依赖 `OPENAI_API_KEY`
 - 优先做最小正确改动，保持 `api`、`application`、`domain`、`infrastructure` 分层清晰
 - 默认优先本地可跑通方案和本地文件持久化，先把主链路做实
 - 暂不提前引入 `pdf`、`Infinity` 集成、hybrid retrieval、citation、异步任务或数据库状态管理
 - 不修改 `/计划` 下的内容，除非用户明确要求
+
+## Local Python Workflow
+- 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
+- 优先使用 `.venv/bin/pytest`、`.venv/bin/ruff`、`.venv/bin/basedpyright`，或在仓库根执行 `uv run ...`。
+- 避免直接使用 shell 里的 `python` 或 `pytest`，它们可能解析到仓库外解释器并报出误导性的缺依赖错误，例如 `ModuleNotFoundError: fastapi`。
+
+## Local Secret Workflow
+- 当前这台机器上的本地开发环境是 `WSL2 Debian`，运行所需的 `OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL` 不存放在仓库目录下的 `.env` 或其它项目文件中。
+- 当前默认启动方式是直接执行 `ragflow-lite-run`。该命令对应本机的 `~/bin/ragflow-lite-run` 脚本，会通过 `pass show ragflow-lite/openai` 读取 key，并以 `OPENAI_API_KEY` 环境变量启动 `uvicorn ragflow_lite.app:app --reload`。
+- 如果 OpenAI key 变更，使用下面的命令覆盖 `pass` 中的 `ragflow-lite/openai`，然后重新执行 `ragflow-lite-run` 重启服务：
+
+```bash
+read -rsp "NEW OPENAI_API_KEY: " OPENAI_API_KEY; echo
+printf '%s\n' "$OPENAI_API_KEY" | pass insert -m -f ragflow-lite/openai
+unset OPENAI_API_KEY
+```

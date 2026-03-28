@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from ragflow_lite.domain.errors import ProcessingError
+from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import AnswerResult
 from ragflow_lite.domain.ports import Answerer, Embedder, VectorIndex
 
@@ -30,5 +30,7 @@ class QueryService:
             query_vector = self.embedder.embed_query(query)
             contexts = self.vector_index.search(query_vector, top_k)
             return self.answerer.answer(query, contexts)
+        except RagflowLiteError:
+            raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
             raise ProcessingError("Failed to answer query.") from exc

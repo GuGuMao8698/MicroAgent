@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,10 @@ SRC_PATH = PROJECT_ROOT / "src"
 
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
+
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
+os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
+os.environ.setdefault("ARK_EMBEDDING_MODEL", "ep-test-model")
 
 from ragflow_lite.app import create_app
 from ragflow_lite.config import Settings

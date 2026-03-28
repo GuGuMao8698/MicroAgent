@@ -1,6 +1,5 @@
-from ragflow_lite.infrastructure.embedders.hash_embedder import (
-    DeterministicHashEmbedder,
-    tokenize,
+from ragflow_lite.infrastructure.embedders.ark_embedder import (
+    ArkMultimodalTextEmbedder,
 )
 
-__all__ = ["DeterministicHashEmbedder", "tokenize"]
+__all__ = ["ArkMultimodalTextEmbedder"]
