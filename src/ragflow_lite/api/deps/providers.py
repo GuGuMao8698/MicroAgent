@@ -58,6 +58,7 @@ def build_services(settings: Settings) -> AppServices:
     )
     answerer = OpenAIResponsesAnswerer(
         api_key=openai_runtime_config.api_key,
+        base_url=openai_runtime_config.base_url,
         model=openai_runtime_config.model,
         reasoning_effort=openai_runtime_config.reasoning_effort,
         store=openai_runtime_config.store,

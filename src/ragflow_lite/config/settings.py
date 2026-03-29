@@ -34,6 +34,7 @@ class OpenAIAnsweringRuntimeConfig:
     """OpenAI answering runtime configuration validated at startup."""
 
     api_key: str
+    base_url: str
     model: str
     reasoning_effort: str
     store: bool
@@ -56,6 +57,7 @@ class Settings:
     openai_api_key: str | None = field(
         default_factory=lambda: _read_optional_env("OPENAI_API_KEY")
     )
+    openai_base_url: str = "https://code.rayinai.com/v1"
     openai_answer_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "medium"
     openai_store: bool = False
@@ -118,6 +120,7 @@ class Settings:
             ),
             OpenAIAnsweringRuntimeConfig(
                 api_key=openai_api_key,
+                base_url=self.openai_base_url,
                 model=self.openai_answer_model,
                 reasoning_effort=self.openai_reasoning_effort,
                 store=self.openai_store,

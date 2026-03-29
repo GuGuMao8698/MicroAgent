@@ -7,6 +7,7 @@ from ragflow_lite.infrastructure.parsers import (
     MarkdownParser,
     PlainTextParser,
     decode_text,
+    flatten_markdown,
 )
 
 
@@ -53,3 +54,24 @@ def test_markdown_parser_flattens_heading_list_link_and_code_fence() -> None:
     assert "print('hi')" in parsed.raw_text
     assert "#" not in parsed.raw_text
     assert "```" not in parsed.raw_text
+
+
+def test_flatten_markdown_preserves_underscored_identifiers_and_code() -> None:
+    flattened = flatten_markdown(
+        (
+            "Use _italic_, **bold**, and ~~strike~~.\n"
+            "Inline `ragflow_lite.app:app` and foo_bar_baz stay literal.\n"
+            "```bash\nuvicorn ragflow_lite.app:app --reload\n```\n"
+        )
+    )
+
+    assert "italic" in flattened
+    assert "bold" in flattened
+    assert "strike" in flattened
+    assert "_italic_" not in flattened
+    assert "**bold**" not in flattened
+    assert "~~strike~~" not in flattened
+    assert "ragflow_lite.app:app" in flattened
+    assert "foo_bar_baz" in flattened
+    assert "uvicorn ragflow_lite.app:app --reload" in flattened
+    assert "ragflowlite.app" not in flattened

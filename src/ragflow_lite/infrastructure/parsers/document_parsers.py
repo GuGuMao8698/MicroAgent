@@ -6,14 +6,21 @@
 
 from __future__ import annotations
 
-import re
+from collections.abc import Sequence
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
 
-LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-FENCE_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-ALT_FENCE_PATTERN = re.compile(r"~~~[^\n]*\n(.*?)~~~", re.DOTALL)
+MARKDOWN_PARSER = MarkdownIt("commonmark").enable("strikethrough")
+INLINE_MARK_OPEN_TO_CLOSE = {
+    "em_open": "em_close",
+    "strong_open": "strong_close",
+    "s_open": "s_close",
+}
+INLINE_MARK_CLOSE_TYPES = set(INLINE_MARK_OPEN_TO_CLOSE.values())
 
 
 def decode_text(raw_bytes: bytes) -> str:
@@ -31,23 +38,112 @@ def decode_text(raw_bytes: bytes) -> str:
 def flatten_markdown(text: str) -> str:
     """把 markdown 扁平化为更适合索引的纯文本。
 
-    当前只做轻量处理：保留标题、列表、链接文本和代码块内容，去掉 markdown
-    控制符本身，不尝试恢复更复杂的结构语义。
+    当前使用 CommonMark 解析并抽取可索引文本，保留标题、列表、链接文本和
+    代码内容，不把 markdown 控制符误写进索引文本。
     """
-    # 先处理 fenced code，保留代码内容，再继续清理其它 markdown 标记。
-    flattened = FENCE_PATTERN.sub(lambda match: match.group(1).strip(), text)
-    flattened = ALT_FENCE_PATTERN.sub(lambda match: match.group(1).strip(), flattened)
-    # 链接保留“可读文本 + URL”，这样查询既能命中文本也能命中链接地址。
-    flattened = LINK_PATTERN.sub(
-        lambda match: f"{match.group(1)} {match.group(2)}", flattened
-    )
-    flattened = re.sub(r"`([^`]+)`", r"\1", flattened)
-    flattened = re.sub(r"^\s{0,3}#{1,6}\s*", "", flattened, flags=re.MULTILINE)
-    flattened = re.sub(r"^\s*>\s?", "", flattened, flags=re.MULTILINE)
-    flattened = re.sub(r"^\s*[-*+]\s+", "", flattened, flags=re.MULTILINE)
-    flattened = re.sub(r"^\s*\d+\.\s+", "", flattened, flags=re.MULTILINE)
-    flattened = re.sub(r"(\*\*|__|\*|_|~~)", "", flattened)
-    return flattened
+    blocks: list[str] = []
+
+    for token in MARKDOWN_PARSER.parse(text):
+        rendered = _render_block_token(token)
+        if rendered:
+            blocks.append(rendered)
+
+    return "\n".join(blocks)
+
+
+def _render_block_token(token: Token) -> str:
+    if token.type == "inline":
+        return _render_inline_tokens(token.children or [])
+
+    if token.type in {"fence", "code_block"}:
+        return token.content.rstrip("\n")
+
+    if token.children:
+        return _render_inline_tokens(token.children)
+
+    if token.content:
+        return token.content
+
+    return ""
+
+
+def _render_inline_tokens(tokens: Sequence[Token]) -> str:
+    fragments: list[str] = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token.type in {"text", "code_inline"}:
+            fragments.append(token.content)
+        elif token.type in {"softbreak", "hardbreak"}:
+            fragments.append("\n")
+        elif token.type == "inline":
+            fragments.append(_render_inline_tokens(token.children or []))
+        elif token.type == "link_open":
+            close_index = _find_matching_close(tokens, index, "link_open", "link_close")
+            if close_index is None:
+                href = token.attrGet("href")
+                if href:
+                    fragments.append(href)
+            else:
+                fragments.append(_render_link(token, tokens[index + 1 : close_index]))
+                index = close_index
+        elif token.type in INLINE_MARK_OPEN_TO_CLOSE:
+            close_index = _find_matching_close(
+                tokens,
+                index,
+                token.type,
+                INLINE_MARK_OPEN_TO_CLOSE[token.type],
+            )
+            if close_index is None:
+                if token.content:
+                    fragments.append(token.content)
+            else:
+                fragments.append(_render_inline_tokens(tokens[index + 1 : close_index]))
+                index = close_index
+        elif token.type in INLINE_MARK_CLOSE_TYPES | {"link_close"}:
+            pass
+        elif token.children:
+            fragments.append(_render_inline_tokens(token.children))
+        elif token.content:
+            fragments.append(token.content)
+
+        index += 1
+
+    return "".join(fragments)
+
+
+def _find_matching_close(
+    tokens: Sequence[Token],
+    start_index: int,
+    open_type: str,
+    close_type: str,
+) -> int | None:
+    depth = 0
+
+    for index in range(start_index, len(tokens)):
+        token = tokens[index]
+
+        if token.type == open_type:
+            depth += 1
+        elif token.type == close_type:
+            depth -= 1
+            if depth == 0:
+                return index
+
+    return None
+
+
+def _render_link(open_token: Token, nested_tokens: Sequence[Token]) -> str:
+    text = _render_inline_tokens(nested_tokens).strip()
+    href = open_token.attrGet("href") or ""
+
+    if text and href:
+        return f"{text} {href}"
+    if text:
+        return text
+    return href
 
 
 class PlainTextParser:

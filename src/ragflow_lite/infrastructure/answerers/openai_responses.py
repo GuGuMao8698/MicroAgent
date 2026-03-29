@@ -21,17 +21,19 @@ class OpenAIResponsesAnswerer:
     def __init__(
         self,
         api_key: str,
+        base_url: str,
         model: str,
         reasoning_effort: str,
         store: bool,
         verbosity: str,
         client: Any | None = None,
     ) -> None:
+        self.base_url = base_url
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.store = store
         self.verbosity = verbosity
-        self.client = client or self._build_client(api_key)
+        self.client = client or self._build_client(api_key, base_url)
 
     def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult:
         if not contexts:
@@ -63,10 +65,10 @@ class OpenAIResponsesAnswerer:
         )
 
     @staticmethod
-    def _build_client(api_key: str) -> Any:
+    def _build_client(api_key: str, base_url: str) -> Any:
         from openai import OpenAI
 
-        return OpenAI(api_key=api_key)
+        return OpenAI(api_key=api_key, base_url=base_url)
 
     @staticmethod
     def _build_input(query: str, contexts: list[RetrievedChunk]) -> str:

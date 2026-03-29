@@ -9,6 +9,7 @@ description = "Minimal txt/md RAG pipeline for ragflow-lite V0."
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.135.1,<1.0.0",
+    "markdown-it-py>=4.0.0,<5.0.0",
     "openai>=2.0.0,<3.0.0",
     "python-multipart>=0.0.9,<1.0.0",
     "volcengine-python-sdk[ark]>=5.0.21,<6.0.0",

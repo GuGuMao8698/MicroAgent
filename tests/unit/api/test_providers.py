@@ -53,6 +53,7 @@ def test_settings_group_runtime_provider_configuration(
     )
     assert openai_config == OpenAIAnsweringRuntimeConfig(
         api_key="test-openai-api-key",
+        base_url="https://code.rayinai.com/v1",
         model="gpt-5.4-mini",
         reasoning_effort="medium",
         store=False,
@@ -78,3 +79,4 @@ def test_build_services_shares_the_same_ark_embedder_between_pipelines(
 
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
     assert services.ingestion_pipeline.embedder is services.query_service.embedder
+    assert services.query_service.answerer.base_url == "https://code.rayinai.com/v1"

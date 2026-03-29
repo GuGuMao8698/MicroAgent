@@ -199,7 +199,10 @@ def test_upload_markdown_then_query_uses_markdown_text(
         "Quick Start" in context["text"] or "uvicorn" in context["text"]
         for context in payload["contexts"]
     )
-    assert "Quick Start" in fake_openai_client.responses.calls[0]["input"]
+    openai_input = fake_openai_client.responses.calls[0]["input"]
+    assert "Quick Start" in openai_input
+    assert "uvicorn ragflow_lite.app:app --reload" in openai_input
+    assert "ragflowlite.app" not in openai_input
 
 
 def test_query_with_empty_index_returns_fallback_answer(client) -> None:

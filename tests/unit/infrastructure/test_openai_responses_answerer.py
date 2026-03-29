@@ -40,6 +40,7 @@ class FakeOpenAIClient:
 def _build_answerer(client: FakeOpenAIClient | None = None) -> OpenAIResponsesAnswerer:
     return OpenAIResponsesAnswerer(
         api_key="test-openai-api-key",
+        base_url="https://code.rayinai.com/v1",
         model="gpt-5.4-mini",
         reasoning_effort="medium",
         store=False,
