@@ -55,5 +55,9 @@ class VectorIndex(Protocol):
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]: ...
 
 
+class Retriever(Protocol):
+    def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]: ...
+
+
 class Answerer(Protocol):
     def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult: ...

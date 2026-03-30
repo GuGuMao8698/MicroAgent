@@ -19,6 +19,7 @@ from ragflow_lite.infrastructure import (
     LocalDocumentStore,
     LocalJsonVectorIndex,
     OpenAIResponsesAnswerer,
+    VectorRetriever,
 )
 
 
@@ -28,6 +29,7 @@ class AppServices:
 
     settings: Settings
     ingestion_pipeline: IngestionPipeline
+    retriever: VectorRetriever
     query_service: QueryService
 
 
@@ -64,6 +66,7 @@ def build_services(settings: Settings) -> AppServices:
         store=openai_runtime_config.store,
         verbosity=openai_runtime_config.verbosity,
     )
+    retriever = VectorRetriever(embedder=embedder, vector_index=vector_index)
 
     return AppServices(
         settings=settings,
@@ -75,9 +78,9 @@ def build_services(settings: Settings) -> AppServices:
             vector_index=vector_index,
             normalizer=normalize_text,
         ),
+        retriever=retriever,
         query_service=QueryService(
-            embedder=embedder,
-            vector_index=vector_index,
+            retriever=retriever,
             answerer=answerer,
         ),
     )

@@ -11,7 +11,10 @@ from ragflow_lite.config import (
     OpenAIAnsweringRuntimeConfig,
     Settings,
 )
-from ragflow_lite.infrastructure import ArkMultimodalTextEmbedder
+from ragflow_lite.infrastructure import ArkMultimodalTextEmbedder, VectorRetriever
+from ragflow_lite.infrastructure.answerers.openai_responses import (
+    OpenAIResponsesAnswerer,
+)
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -44,7 +47,9 @@ def test_settings_reject_missing_required_runtime_configuration(
 def test_settings_group_runtime_provider_configuration(
     tmp_path: Path,
 ) -> None:
-    ark_config, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
+    ark_config, openai_config = _build_settings(
+        tmp_path
+    ).require_runtime_provider_configs()
 
     assert ark_config == ArkEmbeddingRuntimeConfig(
         api_key="test-ark-api-key",
@@ -78,5 +83,9 @@ def test_build_services_shares_the_same_ark_embedder_between_pipelines(
     services = build_services(_build_settings(tmp_path))
 
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
-    assert services.ingestion_pipeline.embedder is services.query_service.embedder
-    assert services.query_service.answerer.base_url == "https://code.rayinai.com/v1"
+    assert isinstance(services.retriever, VectorRetriever)
+    assert services.ingestion_pipeline.embedder is services.retriever.embedder
+    assert services.query_service.retriever is services.retriever
+    answerer = services.query_service.answerer
+    assert isinstance(answerer, OpenAIResponsesAnswerer)
+    assert answerer.base_url == "https://code.rayinai.com/v1"

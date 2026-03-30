@@ -12,9 +12,9 @@
 
 
 ## Project Progress
-- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `进行中`
+- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
 
-- `V1` : Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理 : `未开始`
+- `V1` : Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理 : `进行中`
 
 - `V2` : rerank、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `未开始`
 
@@ -24,14 +24,14 @@
 
 
 ## Current Working Focus
-- 当前聚焦 `txt` / `md` / `pdf` 的最小同步 RAG 闭环：`upload -> parse -> normalize -> chunk -> embed -> index -> retrieve -> answer`
+- V0 已完成，当前进入 V1，仍以最小正确改动推进：Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理
 - V0 的 PDF 仅支持基础文本抽取（数字原生 PDF），不引入 OCR、layout、table 或 vision model
 - 参考 RAGFlow 时优先借鉴轻量文本抽取思路，不要把 DeepDoc 或整仓依赖并入本仓库
 - 当前 `embed` 阶段默认通过 Ark 文本 embedding 完成，应用启动依赖 `ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`，不再保留本地 hash fallback
 - 当前 `answer` 阶段默认通过 OpenAI Responses API 完成 grounded answer，应用启动依赖 `OPENAI_API_KEY`，默认服务地址使用 `https://code.rayinai.com/v1`
 - 优先做最小正确改动，保持 `api`、`application`、`domain`、`infrastructure` 分层清晰
 - 默认优先本地可跑通方案和本地文件持久化，先把主链路做实
-- 暂不提前引入 OCR/layout/table、`Infinity` 集成、hybrid retrieval、citation、异步任务或数据库状态管理
+- 允许按 V1 当前范围渐进接入 `Infinity`、hybrid retrieval、基础 citation 和文档元数据管理；仍不提前引入 OCR/layout/table、rerank、dataset 管理、异步任务或数据库状态管理
 - 不修改 `/计划` 下的内容，除非用户明确要求
 
 ## Local Python Workflow
