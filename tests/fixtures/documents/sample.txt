@@ -1,0 +1,3 @@
+ragflow-lite V0 当前支持 txt 和 md 文件类型的导入。
+最小主链路是 upload, parse, normalize, chunk, embed, index, retrieve, and answer。
+这个版本把索引保存在本地文件里，方便快速验证最小 RAG 闭环。

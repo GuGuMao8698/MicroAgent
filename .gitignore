@@ -1,0 +1,16 @@
+# Runtime data
+.venv/
+data/uploads/*
+data/tmp/*
+data/local_index/*
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+/.cache/
+
+# Keep directory placeholders
+!data/uploads/.gitkeep
+!data/tmp/.gitkeep
+!data/local_index/.gitkeep
+.codex
