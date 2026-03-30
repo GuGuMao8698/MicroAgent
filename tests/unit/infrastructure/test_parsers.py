@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ragflow_lite.domain.errors import DocumentParsingError
 from ragflow_lite.domain.models import DocumentAsset
 from ragflow_lite.infrastructure.parsers import (
+    BasicPdfParser,
     MarkdownParser,
     PlainTextParser,
     decode_text,
@@ -75,3 +77,66 @@ def test_flatten_markdown_preserves_underscored_identifiers_and_code() -> None:
     assert "foo_bar_baz" in flattened
     assert "uvicorn ragflow_lite.app:app --reload" in flattened
     assert "ragflowlite.app" not in flattened
+
+
+FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "documents"
+
+
+def test_basic_pdf_parser_extracts_text_from_native_pdf() -> None:
+    parser = BasicPdfParser()
+    asset = make_asset("sample.pdf", "pdf")
+    raw_bytes = (FIXTURES_DIR / "sample.pdf").read_bytes()
+
+    parsed = parser.parse(asset, raw_bytes)
+
+    assert "Hello from PDF test page" in parsed.raw_text
+    assert parsed.file_type == "pdf"
+    assert parsed.metadata["format"] == "pdf"
+    assert parsed.metadata["page_count"] == 1
+    assert parsed.metadata["filename"] == "sample.pdf"
+
+
+def test_basic_pdf_parser_raises_on_corrupted_input() -> None:
+    parser = BasicPdfParser()
+    asset = make_asset("corrupted.pdf", "pdf")
+
+    try:
+        parser.parse(asset, b"This is not a valid PDF file content at all")
+    except DocumentParsingError:
+        pass
+    else:
+        raise AssertionError("Expected DocumentParsingError for corrupted PDF")
+
+
+def test_basic_pdf_parser_returns_empty_text_for_blank_pdf() -> None:
+    parser = BasicPdfParser()
+    asset = make_asset("empty.pdf", "pdf")
+    raw_bytes = (FIXTURES_DIR / "empty.pdf").read_bytes()
+
+    parsed = parser.parse(asset, raw_bytes)
+
+    assert parsed.raw_text == ""
+    assert parsed.metadata["page_count"] == 1
+
+
+def test_basic_pdf_parser_raises_on_encrypted_pdf() -> None:
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password="secret")
+    buf = BytesIO()
+    writer.write(buf)
+    encrypted_bytes = buf.getvalue()
+
+    parser = BasicPdfParser()
+    asset = make_asset("encrypted.pdf", "pdf")
+
+    try:
+        parser.parse(asset, encrypted_bytes)
+    except DocumentParsingError:
+        pass
+    else:
+        raise AssertionError("Expected DocumentParsingError for encrypted PDF")

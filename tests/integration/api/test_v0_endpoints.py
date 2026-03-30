@@ -222,7 +222,7 @@ def test_query_with_empty_index_returns_fallback_answer(client) -> None:
 def test_uploading_unsupported_file_type_returns_415(client) -> None:
     response = client.post(
         "/api/v0/documents",
-        files={"file": ("sample.pdf", b"%PDF-1.4", "application/pdf")},
+        files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
     )
 
     assert response.status_code == 415
@@ -357,3 +357,82 @@ def test_query_returns_reindex_error_when_index_signature_is_missing(
 
     assert query_response.status_code == 500
     assert "missing embedding signature metadata" in query_response.json()["detail"]
+
+
+def test_upload_pdf_then_query_returns_answer_and_contexts(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    fake_openai_client = _install_fake_openai_client(
+        client,
+        FakeOpenAIClient(output_text="PDF content found."),
+    )
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.pdf",
+                (fixture_documents_dir / "sample.pdf").read_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+    upload_payload = upload_response.json()
+    assert upload_payload["status"] == "indexed"
+    assert upload_payload["file_type"] == "pdf"
+    assert upload_payload["chunk_count"] >= 1
+
+    query_response = client.post(
+        "/api/v0/queries",
+        json={"query": "PDF test", "top_k": 4},
+    )
+
+    assert query_response.status_code == 200
+    payload = query_response.json()
+    assert payload["answer"] == "PDF content found."
+    assert payload["contexts"]
+    assert any(
+        "Hello from PDF test page" in context["text"] for context in payload["contexts"]
+    )
+
+
+def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "empty.pdf",
+                (fixture_documents_dir / "empty.pdf").read_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert "empty" in response.json()["detail"].lower()
+
+
+def test_upload_encrypted_pdf_returns_422(client) -> None:
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password="secret")
+    buf = BytesIO()
+    writer.write(buf)
+    encrypted_bytes = buf.getvalue()
+
+    _install_fake_ark_client(client, FakeArkClient())
+    response = client.post(
+        "/api/v0/documents",
+        files={"file": ("encrypted.pdf", encrypted_bytes, "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert "parse" in response.json()["detail"].lower()

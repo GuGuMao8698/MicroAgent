@@ -7,8 +7,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+/.cache/
 
 # Keep directory placeholders
 !data/uploads/.gitkeep
 !data/tmp/.gitkeep
 !data/local_index/.gitkeep
+.codex

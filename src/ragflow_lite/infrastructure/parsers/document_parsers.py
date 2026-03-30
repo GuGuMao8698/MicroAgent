@@ -1,15 +1,17 @@
 """文档解析实现。
 
-当前只支持 `txt` 和 `md`，目标是把不同文件来源统一收敛为 `ParsedDocument`，
+当前支持 `txt`、`md` 和 `pdf`（数字原生），目标是把不同文件来源统一收敛为 `ParsedDocument`，
 为后续 chunking 和 retrieval 提供稳定输入。
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from io import BytesIO
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+from pypdf import PdfReader
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
@@ -182,6 +184,34 @@ class MarkdownParser:
         )
 
 
+class BasicPdfParser:
+    """解析数字原生 PDF，逐页抽取文本。"""
+
+    def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
+        """逐页提取文本，页间以双换行拼接。"""
+        try:
+            reader = PdfReader(BytesIO(raw_bytes))
+            page_count = len(reader.pages)
+            texts: list[str] = []
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text and page_text.strip():
+                    texts.append(page_text)
+        except Exception as exc:
+            raise DocumentParsingError(asset.filename) from exc
+
+        return ParsedDocument(
+            document_id=asset.document_id,
+            file_type=asset.file_type,
+            raw_text="\n\n".join(texts),
+            metadata={
+                "filename": asset.filename,
+                "format": "pdf",
+                "page_count": page_count,
+            },
+        )
+
+
 class CompositeParser:
     """按文件类型分派到具体解析器。"""
 
@@ -189,6 +219,7 @@ class CompositeParser:
         self._parsers = {
             "txt": PlainTextParser(),
             "md": MarkdownParser(),
+            "pdf": BasicPdfParser(),
         }
 
     def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:

@@ -25,7 +25,7 @@ from ragflow_lite.domain.ports import (
 
 Normalizer = Callable[[str, str], str]
 
-SUPPORTED_FILE_TYPES = {".txt": "txt", ".md": "md"}
+SUPPORTED_FILE_TYPES = {".txt": "txt", ".md": "md", ".pdf": "pdf"}
 
 
 class IngestionPipeline:

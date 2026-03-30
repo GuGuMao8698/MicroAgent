@@ -1,4 +1,5 @@
 from ragflow_lite.infrastructure.parsers.document_parsers import (
+    BasicPdfParser,
     CompositeParser,
     MarkdownParser,
     PlainTextParser,
@@ -7,6 +8,7 @@ from ragflow_lite.infrastructure.parsers.document_parsers import (
 )
 
 __all__ = [
+    "BasicPdfParser",
     "CompositeParser",
     "MarkdownParser",
     "PlainTextParser",
