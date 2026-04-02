@@ -6,7 +6,9 @@
 ## Do Here
 - 保持 `api`、`application`、`domain`、`infrastructure` 的清晰分层。
 - 让实现围绕主链路演进：上传、解析、切块、索引、查询、回答。
-- 优先拆清 retrieval 边界，再按 V1 当前范围接入 Infinity 全文检索、hybrid retrieval、基础 citation 和文档元数据。
+- 当前默认检索后端是 Infinity dense path（`InfinityDenseVectorIndex`），已支持 full-text 检索基线（`RAGFLOW_LITE_RETRIEVAL_MODE=fulltext`），hybrid 为下一步。
+- 保持现有分层不变，优先做默认检索后端替换和最小元数据落盘。
+- 本阶段不引入 Postgres 状态管理。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
 
 ## Avoid Here

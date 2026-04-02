@@ -11,7 +11,12 @@ from ragflow_lite.config import (
     OpenAIAnsweringRuntimeConfig,
     Settings,
 )
-from ragflow_lite.infrastructure import ArkMultimodalTextEmbedder, VectorRetriever
+from ragflow_lite.infrastructure import (
+    ArkMultimodalTextEmbedder,
+    InfinityDenseVectorIndex,
+    InfinityFullTextRetriever,
+    VectorRetriever,
+)
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
@@ -54,7 +59,7 @@ def test_settings_group_runtime_provider_configuration(
     assert ark_config == ArkEmbeddingRuntimeConfig(
         api_key="test-ark-api-key",
         model="ep-test-model",
-        dimensions=None,
+        dimensions=2048,
     )
     assert openai_config == OpenAIAnsweringRuntimeConfig(
         api_key="test-openai-api-key",
@@ -77,7 +82,7 @@ def test_create_app_rejects_missing_ark_embedding_model(
         create_app(settings)
 
 
-def test_build_services_shares_the_same_ark_embedder_between_pipelines(
+def test_build_services_uses_infinity_dense_vector_index(
     tmp_path: Path,
 ) -> None:
     services = build_services(_build_settings(tmp_path))
@@ -86,6 +91,47 @@ def test_build_services_shares_the_same_ark_embedder_between_pipelines(
     assert isinstance(services.retriever, VectorRetriever)
     assert services.ingestion_pipeline.embedder is services.retriever.embedder
     assert services.query_service.retriever is services.retriever
+    assert isinstance(
+        services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
+    )
     answerer = services.query_service.answerer
     assert isinstance(answerer, OpenAIResponsesAnswerer)
     assert answerer.base_url == "https://code.rayinai.com/v1"
+
+
+def test_build_services_embedder_dimensions_match_settings(
+    tmp_path: Path,
+) -> None:
+    services = build_services(_build_settings(tmp_path))
+    assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
+    assert services.ingestion_pipeline.embedder.signature["dimensions"] == 2048
+
+
+def test_settings_rejects_invalid_retrieval_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_RETRIEVAL_MODE", "hybrid")
+    with pytest.raises(RuntimeError, match="Invalid RAGFLOW_LITE_RETRIEVAL_MODE"):
+        _build_settings(tmp_path)
+
+
+def test_build_services_fulltext_mode_uses_fulltext_retriever(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_RETRIEVAL_MODE", "fulltext")
+    services = build_services(_build_settings(tmp_path))
+
+    assert isinstance(services.retriever, InfinityFullTextRetriever)
+    assert isinstance(
+        services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
+    )
+    assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
+
+
+def test_build_services_dense_mode_is_default(
+    tmp_path: Path,
+) -> None:
+    services = build_services(_build_settings(tmp_path))
+    assert isinstance(services.retriever, VectorRetriever)

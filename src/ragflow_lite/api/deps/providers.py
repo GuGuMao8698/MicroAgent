@@ -12,12 +12,14 @@ from fastapi import Depends, Request
 
 from ragflow_lite.application import IngestionPipeline, QueryService, normalize_text
 from ragflow_lite.config import Settings
+from ragflow_lite.domain.ports.interfaces import Retriever
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     CompositeParser,
     FixedWindowChunker,
+    InfinityDenseVectorIndex,
+    InfinityFullTextRetriever,
     LocalDocumentStore,
-    LocalJsonVectorIndex,
     OpenAIResponsesAnswerer,
     VectorRetriever,
 )
@@ -29,14 +31,39 @@ class AppServices:
 
     settings: Settings
     ingestion_pipeline: IngestionPipeline
-    retriever: VectorRetriever
+    retriever: Retriever
     query_service: QueryService
 
 
-def build_services(settings: Settings) -> AppServices:
-    """按照当前 V0 架构组装依赖。
+def _build_vector_index(
+    settings: Settings,
+    embedder: ArkMultimodalTextEmbedder,
+) -> InfinityDenseVectorIndex:
+    return InfinityDenseVectorIndex(
+        host=settings.infinity_host,
+        port=settings.infinity_port,
+        database=settings.infinity_database,
+        document_table=settings.infinity_document_table,
+        chunk_table=settings.infinity_chunk_table,
+        embedding_dimensions=settings.ark_embedding_dimensions,
+        embedding_signature=embedder.signature,
+    )
 
-    这里显式完成“配置 -> 具体实现 -> 业务流程”的连接，便于后续替换
+
+def _build_retriever(
+    settings: Settings,
+    embedder: ArkMultimodalTextEmbedder,
+    vector_index: InfinityDenseVectorIndex,
+) -> Retriever:
+    if settings.retrieval_mode == "fulltext":
+        return InfinityFullTextRetriever(vector_index=vector_index)
+    return VectorRetriever(embedder=embedder, vector_index=vector_index)
+
+
+def build_services(settings: Settings) -> AppServices:
+    """按照当前架构组装依赖。
+
+    这里显式完成"配置 -> 具体实现 -> 业务流程"的连接，便于后续替换
     parser、embedder 或 index，而不需要改动路由层。
     """
     ark_runtime_config, openai_runtime_config = (
@@ -54,10 +81,7 @@ def build_services(settings: Settings) -> AppServices:
         model=ark_runtime_config.model,
         dimensions=ark_runtime_config.dimensions,
     )
-    vector_index = LocalJsonVectorIndex(
-        settings.local_index_dir,
-        embedding_signature=embedder.signature,
-    )
+    vector_index = _build_vector_index(settings, embedder)
     answerer = OpenAIResponsesAnswerer(
         api_key=openai_runtime_config.api_key,
         base_url=openai_runtime_config.base_url,
@@ -66,7 +90,7 @@ def build_services(settings: Settings) -> AppServices:
         store=openai_runtime_config.store,
         verbosity=openai_runtime_config.verbosity,
     )
-    retriever = VectorRetriever(embedder=embedder, vector_index=vector_index)
+    retriever = _build_retriever(settings, embedder, vector_index)
 
     return AppServices(
         settings=settings,

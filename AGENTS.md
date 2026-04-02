@@ -14,25 +14,22 @@
 ## Project Progress
 - `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
 
-- `V1` : Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理 : `进行中`
+- `V1` : `Infinity` 全文检索、并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数、基础 citation、基础文档元数据管理 : `进行中`
+  说明：近期默认不把外部 `rerank` 模型当作主路径，第一版混合排序优先依赖 `Infinity` 引擎内融合分数。
 
-- `V2` : rerank、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `未开始`
+- `V2` : 检索质量增强（多字段权重、回退扩召、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `未开始`
 
-- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标 : `未开始`
+- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
+  说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
 
 - `V4` : OCR/layout/table、query rewrite/multi-query/eval、或平台增强方向做深 : `未开始`
 
 
 ## Current Working Focus
-- V0 已完成，当前进入 V1，仍以最小正确改动推进：Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理
-- V0 的 PDF 仅支持基础文本抽取（数字原生 PDF），不引入 OCR、layout、table 或 vision model
-- 参考 RAGFlow 时优先借鉴轻量文本抽取思路，不要把 DeepDoc 或整仓依赖并入本仓库
-- 当前 `embed` 阶段默认通过 Ark 文本 embedding 完成，应用启动依赖 `ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`，不再保留本地 hash fallback
-- 当前 `answer` 阶段默认通过 OpenAI Responses API 完成 grounded answer，应用启动依赖 `OPENAI_API_KEY`，默认服务地址使用 `https://code.rayinai.com/v1`
-- 优先做最小正确改动，保持 `api`、`application`、`domain`、`infrastructure` 分层清晰
-- 默认优先本地可跑通方案和本地文件持久化，先把主链路做实
-- 允许按 V1 当前范围渐进接入 `Infinity`、hybrid retrieval、基础 citation 和文档元数据管理；仍不提前引入 OCR/layout/table、rerank、dataset 管理、异步任务或数据库状态管理
-- 不修改 `/计划` 下的内容，除非用户明确要求
+- `V1` 基线已完成默认检索后端切换：主链路使用 `InfinityDenseVectorIndex`，由 `Infinity` 承接 dense vector search 和最小文档元数据读写；`LocalJsonVectorIndex` 仅保留为非默认实现
+- 当前已落地 `Infinity` chunk 级全文检索基线：`InfinityDenseVectorIndex` 在初始化时幂等创建 chunk text 全文索引，新增 `search_text()` 方法；新增 `InfinityFullTextRetriever` 直接调用全文匹配，不做 query embedding
+- 检索模式通过 `RAGFLOW_LITE_RETRIEVAL_MODE=dense|fulltext` 启动配置切换，默认 `dense`；`AppServices.retriever` 类型已放宽为 `Retriever` 协议；ingestion 路径不受检索模式影响
+- 当前继续推进 `V1` 未完成部分：并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数，以及更完整的 citation；文档中的 hybrid / fusion / `RAPTOR` 仍属于目标阶段表述，尚未落地
 
 ## Local Python Workflow
 - 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
@@ -53,37 +50,48 @@ unset OPENAI_API_KEY
 
 When `cx` is available in the project, prefer it over reading files directly.
 
-In this Codex sandbox, `cx` cannot use its default cache path under `~/.cache` because that location is read-only. Use the repo wrapper [tools/cx](/home/xia/ragflow-lite/tools/cx) via `bash tools/cx ...`; it redirects `XDG_CACHE_HOME` to the repo-local `/.cache` directory and pins `--root` to this repository.
+In this Codex sandbox, `cx` cannot use its default cache path under `~/.cache` because that location is read-only. Use the repo wrapper [tools/cx](/home/xia/ragflow-lite/tools/cx) via `bash tools/cx ...`; it redirects `XDG_CACHE_HOME` to the repo-local `/.cache` directory and auto-selects the current repo or the nested repo that owns the target file. An explicit `--root` still takes precedence.
 
-## Escalation hierarchy: overview → symbols → definition / references → read
+## Escalation hierarchy: directory overview → file overview → symbols → definition / references → read
 
+- **Explore a directory** → `bash tools/cx overview <dir>` (~20 tokens per entry)
 - **Understand a file's structure** → `bash tools/cx overview <file>` (~200 tokens)
 - **Find symbols across the project** → `bash tools/cx symbols [--kind K] [--name GLOB] [--file PATH]`
 - **Read a specific function/type** → `bash tools/cx definition --name <name>` (~500 tokens)
-- **Find all usages of a symbol** → `bash tools/cx references --name <name>` before refactoring or tracing impact
+- **Find all usages of a symbol** → `bash tools/cx references --name <name>` shows every usage with enclosing function and context
+- **Check blast radius before refactoring** → `bash tools/cx references --name <name> --unique` shows one row per dependent function
 - **Fall back to Read tool** only when you need the full file or surrounding context beyond the symbol body
 
 ## When to use cx instead of Read
 
+- **Exploring a new codebase** — start with `bash tools/cx overview .` to see top-level structure, then drill into subdirectories. Cheaper than `ls` + reading files.
 - **Before reading a file** — run `bash tools/cx overview` first. You often don't need the full file.
 - **Before editing a function** — `bash tools/cx definition --name X` gives you the exact text for Edit tool's `old_string` without reading the whole file.
-- **Before refactoring** — `bash tools/cx references --name X` finds all usages so you know the impact before changing anything. Replaces the pattern of grepping then reading file after file.
+- **Before refactoring** — `bash tools/cx references --name X --unique` shows which functions depend on X (one row per caller). Use without `--unique` to see every usage with context lines.
+- **Understanding how a symbol is used** — `bash tools/cx references --name X` shows each usage site with the enclosing function and the source line, so you can see if it's called, used as a type, imported, etc.
 - **Exploring a codebase** — use `bash tools/cx symbols` to find what you need across files, then `bash tools/cx definition` to read specific symbols. Avoid reading file after file.
 - **After context compression** — if you previously read a file but the content was compressed out, use `bash tools/cx overview` to re-orient and `bash tools/cx definition` for the specific symbols you need. Don't re-read the full file.
 
 ## Quick reference
 
 ```
-bash tools/cx overview PATH                                    file table of contents
+bash tools/cx overview PATH                                    file or directory table of contents
+bash tools/cx overview DIR --full                              directory overview with signatures
 bash tools/cx symbols [--kind K] [--name GLOB] [--file PATH]   search symbols project-wide
 bash tools/cx definition --name NAME [--from PATH] [--kind K]  get a function/type body
-bash tools/cx references --name NAME [--file PATH]             find all usages of a symbol
+bash tools/cx references --name NAME [--file PATH] [--unique]  find all usages (--unique: one per caller)
 bash tools/cx lang list                                        show supported languages
 bash tools/cx lang add LANG [LANG...]                          install language grammars
 ```
+
+Nested repo example: `bash tools/cx overview ragflow/rag/nlp/search.py`
 
 Short aliases: `bash tools/cx o`, `bash tools/cx s`, `bash tools/cx d`, `bash tools/cx r`
 
 Symbol kinds: fn, method, struct, enum, trait, type, const, class, interface, module, event
 
 Check signatures for `pub`/`export` to identify public API without reading the file.
+
+## Missing grammars
+
+If `bash tools/cx` reports a missing grammar (e.g. `cx: rust grammar not installed`), install it with `bash tools/cx lang add rust`. Run `bash tools/cx lang list` to see what's installed.
