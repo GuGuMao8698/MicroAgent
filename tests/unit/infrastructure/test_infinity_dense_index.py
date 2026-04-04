@@ -64,11 +64,12 @@ def _make_chunk(
     index: int = 0,
     vector: list[float] | None = None,
     metadata: dict[str, Any] | None = None,
+    text: str | None = None,
 ) -> EmbeddedChunk:
     return EmbeddedChunk(
         chunk_id=f"chunk_{document_id}_{index}",
         document_id=document_id,
-        text=f"chunk text {index}",
+        text=text if text is not None else f"chunk text {index}",
         index=index,
         vector=vector or [1.0, 0.0, 0.0, 0.0],
         metadata=metadata or {"filename": "test.txt", "file_type": "txt"},
@@ -292,3 +293,86 @@ class TestInfinityDenseVectorIndex:
         results = idx.search_text("nonexistent text", top_k=5)
 
         assert len(results) == 0
+
+    # ------------------------------------------------------------------
+    # search_hybrid
+    # ------------------------------------------------------------------
+
+    def test_search_hybrid_returns_fused_results(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].document_id == "doc_1"
+        assert results[0].score > 0
+        assert results[0].metadata["filename"] == "test.txt"
+
+    def test_search_hybrid_overlap_chunk_returns_one(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].chunk_id == chunk.chunk_id
+
+    def test_search_hybrid_text_only_hit(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[0.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].document_id == "doc_1"
+
+    def test_search_hybrid_dense_only_hit(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="no match here", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("xyz", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].document_id == "doc_1"
+
+    def test_search_hybrid_returns_empty_for_no_match(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[0.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("xyz", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 0
+
+    def test_search_hybrid_rejects_wrong_query_dimension(self, make_index) -> None:
+        _, idx = make_index()
+
+        from ragflow_lite.domain.errors import ProcessingError
+
+        with pytest.raises(ProcessingError, match="does not match expected"):
+            idx.search_hybrid("query", [1.0, 0.0, 0.0], top_k=5)
+
+    def test_search_hybrid_raises_on_stale_embedding_signature(
+        self, make_index
+    ) -> None:
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        db = client.get_database("default_db")
+        chunk_table = db.get_table("chunks")
+        chunk_table.rows[0]["embedding_model"] = "old-ep-model"
+
+        with pytest.raises(ProcessingError, match="Embedding signature mismatch"):
+            idx.search_hybrid("chunk text", [1.0, 0.0, 0.0, 0.0], top_k=5)

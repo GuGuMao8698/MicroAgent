@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
 
 
 def _read_optional_env(name: str) -> str | None:
@@ -75,19 +74,14 @@ class Settings:
     infinity_database: str = "default_db"
     infinity_document_table: str = "documents"
     infinity_chunk_table: str = "chunks"
-    retrieval_mode: str = field(
-        default_factory=lambda: (
-            os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE", "dense").strip() or "dense"
-        )
-    )
-
-    _VALID_RETRIEVAL_MODES: ClassVar[tuple[str, ...]] = ("dense", "fulltext")
 
     def __post_init__(self) -> None:
-        if self.retrieval_mode not in self._VALID_RETRIEVAL_MODES:
+        legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")
+        if legacy_mode is not None and legacy_mode.strip():
             raise RuntimeError(
-                f"Invalid RAGFLOW_LITE_RETRIEVAL_MODE={self.retrieval_mode!r}. "
-                f"Allowed values: {', '.join(self._VALID_RETRIEVAL_MODES)}."
+                "RAGFLOW_LITE_RETRIEVAL_MODE is no longer supported. "
+                "Retrieval is now fixed to hybrid mode. "
+                "Please remove RAGFLOW_LITE_RETRIEVAL_MODE from your environment."
             )
 
     @classmethod

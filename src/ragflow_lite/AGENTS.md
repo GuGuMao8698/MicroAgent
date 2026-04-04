@@ -6,8 +6,8 @@
 ## Do Here
 - 保持 `api`、`application`、`domain`、`infrastructure` 的清晰分层。
 - 让实现围绕主链路演进：上传、解析、切块、索引、查询、回答。
-- 当前默认检索后端是 Infinity dense path（`InfinityDenseVectorIndex`），已支持 full-text 检索基线（`RAGFLOW_LITE_RETRIEVAL_MODE=fulltext`），hybrid 为下一步。
-- 保持现有分层不变，优先做默认检索后端替换和最小元数据落盘。
+- 当前默认检索后端是 Infinity hybrid path（`InfinityHybridRetriever`），通过 `InfinityDenseVectorIndex.search_hybrid()` 一次调用完成全文 + dense 并行检索，复用 Infinity 原生 `weighted_sum` fusion。pure dense / pure fulltext 仅保留为 index 层内部回归/诊断能力，不再作为公共运行时模式暴露。
+- 保持现有分层不变，优先做默认检索后端替换和基础 inline citation（模型输出 `<cite:n>`，answerer 转换为用户可见的 `[n]` 并清洗越界引用）和最小元数据落盘。
 - 本阶段不引入 Postgres 状态管理。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
 

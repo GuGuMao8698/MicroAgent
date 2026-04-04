@@ -7,8 +7,7 @@ from ragflow_lite.infrastructure.embedders.ark_embedder import (
 )
 from ragflow_lite.infrastructure.parsers.document_parsers import CompositeParser
 from ragflow_lite.infrastructure.retrievers import (
-    InfinityFullTextRetriever,
-    VectorRetriever,
+    InfinityHybridRetriever,
 )
 from ragflow_lite.infrastructure.storage.local_document_store import LocalDocumentStore
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
@@ -23,9 +22,8 @@ __all__ = [
     "CompositeParser",
     "FixedWindowChunker",
     "InfinityDenseVectorIndex",
-    "InfinityFullTextRetriever",
+    "InfinityHybridRetriever",
     "LocalDocumentStore",
     "LocalJsonVectorIndex",
     "OpenAIResponsesAnswerer",
-    "VectorRetriever",
 ]

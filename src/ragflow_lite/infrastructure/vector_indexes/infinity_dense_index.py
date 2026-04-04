@@ -49,7 +49,7 @@ class InfinityDenseVectorIndex:
             self._client = infinity.connect(
                 NetworkAddress(host, port),
             )
-        self._db = self._client.get_database(database)
+        self._db: Any = self._client.get_database(database)
         self._ensure_tables()
 
     def disconnect(self) -> None:
@@ -104,11 +104,7 @@ class InfinityDenseVectorIndex:
 
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         """使用内积在稠密向量上检索 chunk。"""
-        if len(query_vector) != self._dimensions:
-            raise ProcessingError(
-                f"Query vector dimension {len(query_vector)} does not match "
-                f"expected {self._dimensions}."
-            )
+        self._validate_query_dimensions(query_vector)
 
         chunk_table = self._db.get_table(self._chunk_table)
         result_tuple = (
@@ -119,26 +115,48 @@ class InfinityDenseVectorIndex:
                 distance_type="ip",
                 topn=top_k,
             )
-            .output(
-                [
-                    "chunk_id",
-                    "document_id",
-                    "text",
-                    "filename",
-                    "file_type",
-                    "chunk_metadata_json",
-                    "embedding_provider",
-                    "embedding_model",
-                    "embedding_dimensions",
-                    "_distance",
-                ]
-            )
+            .output(self._chunk_output_columns("_distance"))
             .to_pl()
         )
 
         return self._materialize_chunk_query_results(
             result_tuple,
             score_field="_distance",
+            validate_embedding_signature=True,
+        )
+
+    def search_hybrid(
+        self, query: str, query_vector: list[float], top_k: int
+    ) -> list[RetrievedChunk]:
+        """使用 Infinity 原生 fusion（weighted_sum）并行执行全文 + dense 检索。"""
+        self._validate_query_dimensions(query_vector)
+
+        chunk_table = self._db.get_table(self._chunk_table)
+        result_tuple = (
+            chunk_table.match_text(
+                fields="text",
+                matching_text=query,
+                topn=top_k,
+            )
+            .match_dense(
+                vector_column_name="vec",
+                embedding_data=query_vector,
+                embedding_data_type="float",
+                distance_type="ip",
+                topn=top_k,
+            )
+            .fusion(
+                "weighted_sum",
+                topn=top_k,
+                fusion_params={"weights": "0.05,0.95", "normalize": "atan"},
+            )
+            .output(self._chunk_output_columns("_score"))
+            .to_pl()
+        )
+
+        return self._materialize_chunk_query_results(
+            result_tuple,
+            score_field="_score",
             validate_embedding_signature=True,
         )
 
@@ -229,17 +247,7 @@ class InfinityDenseVectorIndex:
                 matching_text=query,
                 topn=top_k,
             )
-            .output(
-                [
-                    "chunk_id",
-                    "document_id",
-                    "text",
-                    "filename",
-                    "file_type",
-                    "chunk_metadata_json",
-                    "_score",
-                ]
-            )
+            .output(self._chunk_output_columns("_score", include_embedding=False))
             .to_pl()
         )
 
@@ -258,6 +266,40 @@ class InfinityDenseVectorIndex:
         if isinstance(columns_info, tuple):
             return columns_info[0]
         return columns_info
+
+    def _validate_query_dimensions(self, query_vector: list[float]) -> None:
+        """校验查询向量维度是否与当前 embedding 配置一致。"""
+        if len(query_vector) != self._dimensions:
+            raise ProcessingError(
+                f"Query vector dimension {len(query_vector)} does not match "
+                f"expected {self._dimensions}."
+            )
+
+    @staticmethod
+    def _chunk_output_columns(
+        score_field: str,
+        *,
+        include_embedding: bool = True,
+    ) -> list[str]:
+        """返回 chunk 查询的输出列名列表。"""
+        columns = [
+            "chunk_id",
+            "document_id",
+            "text",
+            "filename",
+            "file_type",
+            "chunk_metadata_json",
+        ]
+        if include_embedding:
+            columns.extend(
+                [
+                    "embedding_provider",
+                    "embedding_model",
+                    "embedding_dimensions",
+                ]
+            )
+        columns.append(score_field)
+        return columns
 
     def _materialize_chunk_query_results(
         self,

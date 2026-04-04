@@ -18,10 +18,9 @@ from ragflow_lite.infrastructure import (
     CompositeParser,
     FixedWindowChunker,
     InfinityDenseVectorIndex,
-    InfinityFullTextRetriever,
+    InfinityHybridRetriever,
     LocalDocumentStore,
     OpenAIResponsesAnswerer,
-    VectorRetriever,
 )
 
 
@@ -51,13 +50,10 @@ def _build_vector_index(
 
 
 def _build_retriever(
-    settings: Settings,
     embedder: ArkMultimodalTextEmbedder,
     vector_index: InfinityDenseVectorIndex,
 ) -> Retriever:
-    if settings.retrieval_mode == "fulltext":
-        return InfinityFullTextRetriever(vector_index=vector_index)
-    return VectorRetriever(embedder=embedder, vector_index=vector_index)
+    return InfinityHybridRetriever(embedder=embedder, vector_index=vector_index)
 
 
 def build_services(settings: Settings) -> AppServices:
@@ -90,7 +86,7 @@ def build_services(settings: Settings) -> AppServices:
         store=openai_runtime_config.store,
         verbosity=openai_runtime_config.verbosity,
     )
-    retriever = _build_retriever(settings, embedder, vector_index)
+    retriever = _build_retriever(embedder, vector_index)
 
     return AppServices(
         settings=settings,

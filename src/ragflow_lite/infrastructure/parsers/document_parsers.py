@@ -145,7 +145,7 @@ def _render_link(open_token: Token, nested_tokens: Sequence[Token]) -> str:
         return f"{text} {href}"
     if text:
         return text
-    return href
+    return str(href)
 
 
 class PlainTextParser:

@@ -49,3 +49,4 @@ include = ["src", "tests"]
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
+reportMissingTypeStubs = false

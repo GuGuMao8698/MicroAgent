@@ -14,8 +14,7 @@ from ragflow_lite.config import (
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     InfinityDenseVectorIndex,
-    InfinityFullTextRetriever,
-    VectorRetriever,
+    InfinityHybridRetriever,
 )
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
@@ -82,13 +81,13 @@ def test_create_app_rejects_missing_ark_embedding_model(
         create_app(settings)
 
 
-def test_build_services_uses_infinity_dense_vector_index(
+def test_build_services_uses_infinity_hybrid_retriever(
     tmp_path: Path,
 ) -> None:
     services = build_services(_build_settings(tmp_path))
 
+    assert isinstance(services.retriever, InfinityHybridRetriever)
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
-    assert isinstance(services.retriever, VectorRetriever)
     assert services.ingestion_pipeline.embedder is services.retriever.embedder
     assert services.query_service.retriever is services.retriever
     assert isinstance(
@@ -107,31 +106,12 @@ def test_build_services_embedder_dimensions_match_settings(
     assert services.ingestion_pipeline.embedder.signature["dimensions"] == 2048
 
 
-def test_settings_rejects_invalid_retrieval_mode(
+def test_settings_rejects_legacy_retrieval_mode_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RAGFLOW_LITE_RETRIEVAL_MODE", "hybrid")
-    with pytest.raises(RuntimeError, match="Invalid RAGFLOW_LITE_RETRIEVAL_MODE"):
+    monkeypatch.setenv("RAGFLOW_LITE_RETRIEVAL_MODE", "dense")
+    with pytest.raises(
+        RuntimeError, match="RAGFLOW_LITE_RETRIEVAL_MODE is no longer supported"
+    ):
         _build_settings(tmp_path)
-
-
-def test_build_services_fulltext_mode_uses_fulltext_retriever(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("RAGFLOW_LITE_RETRIEVAL_MODE", "fulltext")
-    services = build_services(_build_settings(tmp_path))
-
-    assert isinstance(services.retriever, InfinityFullTextRetriever)
-    assert isinstance(
-        services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
-    )
-    assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
-
-
-def test_build_services_dense_mode_is_default(
-    tmp_path: Path,
-) -> None:
-    services = build_services(_build_settings(tmp_path))
-    assert isinstance(services.retriever, VectorRetriever)

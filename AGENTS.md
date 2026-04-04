@@ -26,10 +26,12 @@
 
 
 ## Current Working Focus
-- `V1` 基线已完成默认检索后端切换：主链路使用 `InfinityDenseVectorIndex`，由 `Infinity` 承接 dense vector search 和最小文档元数据读写；`LocalJsonVectorIndex` 仅保留为非默认实现
-- 当前已落地 `Infinity` chunk 级全文检索基线：`InfinityDenseVectorIndex` 在初始化时幂等创建 chunk text 全文索引，新增 `search_text()` 方法；新增 `InfinityFullTextRetriever` 直接调用全文匹配，不做 query embedding
-- 检索模式通过 `RAGFLOW_LITE_RETRIEVAL_MODE=dense|fulltext` 启动配置切换，默认 `dense`；`AppServices.retriever` 类型已放宽为 `Retriever` 协议；ingestion 路径不受检索模式影响
-- 当前继续推进 `V1` 未完成部分：并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数，以及更完整的 citation；文档中的 hybrid / fusion / `RAPTOR` 仍属于目标阶段表述，尚未落地
+- 公共查询主路径已收敛到 **Infinity hybrid baseline**：`InfinityHybridRetriever` 通过 `embed_query` + `search_hybrid()` 一次调用完成全文 + dense 并行检索，复用 Infinity 原生 `weighted_sum` fusion（`weights="0.05,0.95"`，`normalize="atan"`）
+- `RAGFLOW_LITE_RETRIEVAL_MODE` 已移除作为公共配置项；若环境仍设置该变量，启动时直接报错提示移除
+- `VectorRetriever` 和 `InfinityFullTextRetriever` 已从生产装配中移除；`InfinityDenseVectorIndex.search()` 和 `search_text()` 保留为内部回归/诊断能力
+- `LocalJsonVectorIndex` 仅保留为非默认实现
+- 当前继续推进 `V1` 未完成部分：基础 inline citation 已落地（模型输出内部 `<cite:n>` token，answerer 转换为用户可见的 `[n]`，清洗越界引用，返回顺序与编号对齐）；后续继续推进基础文档元数据管理；更细的字段权重与 rank feature 留在 V2
+- `V1` 的 citation 指"基于 context 编号的基础 inline citation"；`V2` 的更准确 citation 才是句子级/后处理级归属
 
 ## Local Python Workflow
 - 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。

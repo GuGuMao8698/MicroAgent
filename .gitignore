@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 /.cache/
 /ragflow/
+/网页/
 
 # Keep directory placeholders
 !data/uploads/.gitkeep

@@ -121,7 +121,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     _install_fake_ark_client(client, FakeArkClient())
     fake_openai_client = _install_fake_openai_client(
         client,
-        FakeOpenAIClient(output_text="支持 txt 和 md。"),
+        FakeOpenAIClient(output_text="项目支持 txt 和 md 文件格式<cite:1>。"),
     )
     upload_response = client.post(
         "/api/v0/documents",
@@ -147,7 +147,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
 
     assert query_response.status_code == 200
     payload = query_response.json()
-    assert payload["answer"] == "支持 txt 和 md。"
+    assert payload["answer"] == "项目支持 txt 和 md 文件格式[1]。"
     assert payload["contexts"]
     assert payload["metadata"] == {
         "strategy": "openai_responses",
@@ -164,6 +164,11 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     )
     assert len(fake_openai_client.responses.calls) == 1
     assert fake_openai_client.responses.calls[0]["model"] == "gpt-5.4-mini"
+
+    # citation 编号契约：contexts[0] 对应 prompt 中 [1]
+    openai_input = fake_openai_client.responses.calls[0]["input"]
+    first_chunk_text = payload["contexts"][0]["text"]
+    assert first_chunk_text in openai_input
 
 
 def test_upload_markdown_then_query_uses_markdown_text(
