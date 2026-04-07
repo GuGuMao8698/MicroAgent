@@ -1,4 +1,5 @@
 from ragflow_lite.domain.errors.exceptions import (
+    DocumentNotFoundError,
     DocumentParsingError,
     EmptyDocumentError,
     IndexWriteError,
@@ -8,6 +9,7 @@ from ragflow_lite.domain.errors.exceptions import (
 )
 
 __all__ = [
+    "DocumentNotFoundError",
     "DocumentParsingError",
     "EmptyDocumentError",
     "IndexWriteError",

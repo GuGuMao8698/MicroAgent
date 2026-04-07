@@ -1,3 +1,5 @@
-from ragflow_lite.infrastructure.retrievers.vector_retriever import VectorRetriever
+from ragflow_lite.infrastructure.retrievers.infinity_hybrid_retriever import (
+    InfinityHybridRetriever,
+)
 
-__all__ = ["VectorRetriever"]
+__all__ = ["InfinityHybridRetriever"]

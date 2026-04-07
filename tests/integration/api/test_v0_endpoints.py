@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +121,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     _install_fake_ark_client(client, FakeArkClient())
     fake_openai_client = _install_fake_openai_client(
         client,
-        FakeOpenAIClient(output_text="支持 txt 和 md。"),
+        FakeOpenAIClient(output_text="项目支持 txt 和 md 文件格式<cite:1>。"),
     )
     upload_response = client.post(
         "/api/v0/documents",
@@ -148,7 +147,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
 
     assert query_response.status_code == 200
     payload = query_response.json()
-    assert payload["answer"] == "支持 txt 和 md。"
+    assert payload["answer"] == "项目支持 txt 和 md 文件格式[1]。"
     assert payload["contexts"]
     assert payload["metadata"] == {
         "strategy": "openai_responses",
@@ -160,8 +159,16 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
         "txt" in context["text"] or "md" in context["text"]
         for context in payload["contexts"]
     )
+    assert all(
+        context["metadata"]["file_type"] == "txt" for context in payload["contexts"]
+    )
     assert len(fake_openai_client.responses.calls) == 1
     assert fake_openai_client.responses.calls[0]["model"] == "gpt-5.4-mini"
+
+    # citation 编号契约：contexts[0] 对应 prompt 中 [1]
+    openai_input = fake_openai_client.responses.calls[0]["input"]
+    first_chunk_text = payload["contexts"][0]["text"]
+    assert first_chunk_text in openai_input
 
 
 def test_upload_markdown_then_query_uses_markdown_text(
@@ -258,13 +265,15 @@ def test_ingestion_failure_rolls_back_only_current_document(
     assert failed_response.status_code == 500
     assert failed_response.json()["detail"] == "Failed to index document."
 
+    # 第一份文档的原始文件仍应保留。
     uploads = list(services.settings.uploads_dir.glob("*"))
-    indexes = list(services.settings.local_index_dir.glob("*.json"))
-
     assert len(uploads) == 1
     assert uploads[0].name.startswith(first_document_id)
-    assert len(indexes) == 1
-    assert indexes[0].stem == first_document_id
+
+    # Infinity 的 chunk 表里应只保留第一份文档的分块数据。
+    vector_index = services.ingestion_pipeline.vector_index
+    chunk_table = vector_index._db.get_table(vector_index._chunk_table)
+    assert all(row["document_id"] == first_document_id for row in chunk_table.rows)
 
 
 def test_query_returns_500_when_openai_request_fails(
@@ -325,7 +334,7 @@ def test_query_returns_500_when_ark_query_embedding_fails(
     assert query_response.json()["detail"] == "Failed to answer query."
 
 
-def test_query_returns_reindex_error_when_index_signature_is_missing(
+def test_query_returns_error_when_infinity_unreachable(
     client,
     fixture_documents_dir: Path,
 ) -> None:
@@ -343,20 +352,20 @@ def test_query_returns_reindex_error_when_index_signature_is_missing(
     )
     assert upload_response.status_code == 200
 
-    document_id = upload_response.json()["document_id"]
+    # 通过清空内部表数据来模拟 Infinity 当前查不到任何记录。
     services = client.app.state.services
-    index_path = services.settings.local_index_dir / f"{document_id}.json"
-    payload = json.loads(index_path.read_text(encoding="utf-8"))
-    payload.pop("embedding_signature")
-    index_path.write_text(json.dumps(payload), encoding="utf-8")
+    vector_index = services.ingestion_pipeline.vector_index
+    chunk_table = vector_index._db.get_table(vector_index._chunk_table)
+    chunk_table.rows.clear()
 
     query_response = client.post(
         "/api/v0/queries",
         json={"query": "这个项目支持什么文件类型", "top_k": 4},
     )
 
-    assert query_response.status_code == 500
-    assert "missing embedding signature metadata" in query_response.json()["detail"]
+    # 当 Infinity 没有命中上下文时，查询应退化为兜底回答。
+    assert query_response.status_code == 200
+    assert query_response.json()["answer"] == FALLBACK_ANSWER
 
 
 def test_upload_pdf_then_query_returns_answer_and_contexts(
@@ -397,6 +406,46 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
     assert any(
         "Hello from PDF test page" in context["text"] for context in payload["contexts"]
     )
+    assert all(
+        context["metadata"]["file_type"] == "pdf" for context in payload["contexts"]
+    )
+
+
+def test_query_returns_500_when_embedding_signature_mismatch(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    _install_fake_openai_client(
+        client, FakeOpenAIClient(output_text="should not reach")
+    )
+
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.txt",
+                (fixture_documents_dir / "sample.txt").read_bytes(),
+                "text/plain",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+
+    # 篡改已存 chunk 的 embedding 签名，模拟陈旧数据。
+    services = client.app.state.services
+    vector_index = services.ingestion_pipeline.vector_index
+    chunk_table = vector_index._db.get_table(vector_index._chunk_table)
+    for row in chunk_table.rows:
+        row["embedding_model"] = "stale-model"
+
+    query_response = client.post(
+        "/api/v0/queries",
+        json={"query": "这个项目支持什么文件类型", "top_k": 4},
+    )
+
+    assert query_response.status_code == 500
+    assert "Embedding signature mismatch" in query_response.json()["detail"]
 
 
 def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> None:
@@ -436,3 +485,139 @@ def test_upload_encrypted_pdf_returns_422(client) -> None:
 
     assert response.status_code == 422
     assert "parse" in response.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 文档列表 / 详情读取接口
+# ---------------------------------------------------------------------------
+
+
+def test_list_documents_returns_empty_before_upload(client) -> None:
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    assert response.json() == {"documents": []}
+
+
+def test_list_documents_after_txt_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.txt",
+                (fixture_documents_dir / "sample.txt").read_bytes(),
+                "text/plain",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["documents"]) == 1
+    doc = payload["documents"][0]
+    assert doc["document_id"] == document_id
+    assert doc["filename"] == "sample.txt"
+    assert doc["file_type"] == "txt"
+    assert doc["size_bytes"] > 0
+    assert doc["created_at"]
+    # txt 上传不产生 parser extras，metadata 为空
+    assert doc["metadata"] == {}
+
+
+def test_get_document_after_txt_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.txt",
+                (fixture_documents_dir / "sample.txt").read_bytes(),
+                "text/plain",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get(f"/api/v0/documents/{document_id}")
+    assert response.status_code == 200
+    doc = response.json()
+    assert doc["document_id"] == document_id
+    assert doc["filename"] == "sample.txt"
+    assert doc["file_type"] == "txt"
+
+
+def test_get_document_after_pdf_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.pdf",
+                (fixture_documents_dir / "sample.pdf").read_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get(f"/api/v0/documents/{document_id}")
+    assert response.status_code == 200
+    doc = response.json()
+    assert doc["file_type"] == "pdf"
+    assert doc["metadata"]["format"] == "pdf"
+    assert doc["metadata"]["page_count"] == 1
+
+
+def test_get_nonexistent_document_returns_404(client) -> None:
+    response = client.get("/api/v0/documents/doc_nonexistent")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_document_with_single_quote_in_id_returns_404(client) -> None:
+    """URL 中带单引号的 document_id 应返回 404，不应 500。"""
+    response = client.get("/api/v0/documents/doc_%27bad")
+    assert response.status_code == 404
+
+
+def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    ids: list[str] = []
+    for fname in ("sample.txt", "sample.md"):
+        resp = client.post(
+            "/api/v0/documents",
+            files={
+                "file": (
+                    fname,
+                    (fixture_documents_dir / fname).read_bytes(),
+                    "text/plain",
+                )
+            },
+        )
+        assert resp.status_code == 200
+        ids.append(resp.json()["document_id"])
+
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    docs = response.json()["documents"]
+    assert len(docs) == 2
+    # 第二个上传的在前面（倒序）
+    assert docs[0]["document_id"] == ids[1]
+    assert docs[1]["document_id"] == ids[0]

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 
 from ragflow_lite.domain.errors import (
@@ -26,6 +26,24 @@ from ragflow_lite.domain.ports import (
 Normalizer = Callable[[str, str], str]
 
 SUPPORTED_FILE_TYPES = {".txt": "txt", ".md": "md", ".pdf": "pdf"}
+
+# 顶层已有字段和 chunk/派生字段，不应写入文档级 metadata。
+_EXCLUDED_DOC_METADATA_KEYS = frozenset(
+    {
+        "filename",
+        "file_type",
+        "normalized",
+        "start_offset",
+        "end_offset",
+    }
+)
+
+
+def _extract_doc_metadata(parser_metadata: dict[str, Any]) -> dict[str, Any]:
+    """从 parser metadata 中提取文档级 extras，去掉顶层已有和 chunk/派生字段。"""
+    return {
+        k: v for k, v in parser_metadata.items() if k not in _EXCLUDED_DOC_METADATA_KEYS
+    }
 
 
 class IngestionPipeline:
@@ -62,6 +80,7 @@ class IngestionPipeline:
             )
             raw_bytes = self.document_store.read_document(asset)
             parsed_document = self.parser.parse(asset, raw_bytes)
+            asset.metadata = _extract_doc_metadata(parsed_document.metadata)
             normalized_text = self.normalizer(parsed_document.raw_text, asset.filename)
             normalized_document = ParsedDocument(
                 document_id=parsed_document.document_id,

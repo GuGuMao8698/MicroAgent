@@ -25,3 +25,8 @@ class IndexWriteError(RagflowLiteError):
 class ProcessingError(RagflowLiteError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class DocumentNotFoundError(RagflowLiteError):
+    def __init__(self, document_id: str) -> None:
+        super().__init__(f"Document '{document_id}' not found.")

@@ -8,9 +8,16 @@ from ragflow_lite.domain.models import (
     Chunk,
     DocumentAsset,
     EmbeddedChunk,
+    IndexedDocument,
     ParsedDocument,
     RetrievedChunk,
 )
+
+
+class DocumentCatalog(Protocol):
+    def list_documents(self) -> list[IndexedDocument]: ...
+
+    def get_document(self, document_id: str) -> IndexedDocument: ...
 
 
 class DocumentStore(Protocol):

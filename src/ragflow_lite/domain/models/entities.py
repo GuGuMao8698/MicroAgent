@@ -21,6 +21,17 @@ class DocumentAsset:
     storage_path: Path
     size_bytes: int
     created_at: datetime = field(default_factory=utc_now)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class IndexedDocument:
+    document_id: str
+    filename: str
+    file_type: str
+    size_bytes: int
+    created_at: str
+    metadata: Metadata = field(default_factory=dict)
 
 
 @dataclass(slots=True)

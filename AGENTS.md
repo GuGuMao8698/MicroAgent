@@ -14,25 +14,23 @@
 ## Project Progress
 - `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
 
-- `V1` : Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理 : `进行中`
+- `V1` : `Infinity` 全文检索、并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数、基础 citation、基础文档元数据管理 : `已完成`
+  说明：近期默认不把外部 `rerank` 模型当作主路径，第一版混合排序优先依赖 `Infinity` 引擎内融合分数。
 
-- `V2` : rerank、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `未开始`
+- `V2` : 检索质量增强（多字段权重、回退扩召、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `进行中`
 
-- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标 : `未开始`
+- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
+  说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
 
 - `V4` : OCR/layout/table、query rewrite/multi-query/eval、或平台增强方向做深 : `未开始`
 
 
 ## Current Working Focus
-- V0 已完成，当前进入 V1，仍以最小正确改动推进：Infinity 全文检索、hybrid retrieval、基础 citation、基础文档元数据管理
-- V0 的 PDF 仅支持基础文本抽取（数字原生 PDF），不引入 OCR、layout、table 或 vision model
-- 参考 RAGFlow 时优先借鉴轻量文本抽取思路，不要把 DeepDoc 或整仓依赖并入本仓库
-- 当前 `embed` 阶段默认通过 Ark 文本 embedding 完成，应用启动依赖 `ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`，不再保留本地 hash fallback
-- 当前 `answer` 阶段默认通过 OpenAI Responses API 完成 grounded answer，应用启动依赖 `OPENAI_API_KEY`，默认服务地址使用 `https://code.rayinai.com/v1`
-- 优先做最小正确改动，保持 `api`、`application`、`domain`、`infrastructure` 分层清晰
-- 默认优先本地可跑通方案和本地文件持久化，先把主链路做实
-- 允许按 V1 当前范围渐进接入 `Infinity`、hybrid retrieval、基础 citation 和文档元数据管理；仍不提前引入 OCR/layout/table、rerank、dataset 管理、异步任务或数据库状态管理
-- 不修改 `/计划` 下的内容，除非用户明确要求
+- `V1` 已完成：`Infinity` hybrid retrieval（`InfinityHybridRetriever`，`search_hybrid()` + `weighted_sum` fusion）、基础 inline citation（`<cite:n>` → `[n]`）、只读文档 metadata 管理（`DocumentCatalog` + `GET /documents`）
+- `RAGFLOW_LITE_RETRIEVAL_MODE` 已移除作为公共配置项；若环境仍设置该变量，启动时直接报错提示移除
+- `VectorRetriever` 和 `InfinityFullTextRetriever` 已从生产装配中移除；`InfinityDenseVectorIndex.search()` 和 `search_text()` 保留为内部回归/诊断能力
+- `LocalJsonVectorIndex` 仅保留为非默认实现
+- 当前推进 `V2`：检索质量增强、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理
 
 ## Local Python Workflow
 - 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
@@ -51,39 +49,44 @@ unset OPENAI_API_KEY
 
 # cx — Semantic Code Navigation
 
-When `cx` is available in the project, prefer it over reading files directly.
-
-In this Codex sandbox, `cx` cannot use its default cache path under `~/.cache` because that location is read-only. Use the repo wrapper [tools/cx](/home/xia/ragflow-lite/tools/cx) via `bash tools/cx ...`; it redirects `XDG_CACHE_HOME` to the repo-local `/.cache` directory and pins `--root` to this repository.
-
-## Escalation hierarchy: overview → symbols → definition / references → read
-
-- **Understand a file's structure** → `bash tools/cx overview <file>` (~200 tokens)
-- **Find symbols across the project** → `bash tools/cx symbols [--kind K] [--name GLOB] [--file PATH]`
-- **Read a specific function/type** → `bash tools/cx definition --name <name>` (~500 tokens)
-- **Find all usages of a symbol** → `bash tools/cx references --name <name>` before refactoring or tracing impact
-- **Fall back to Read tool** only when you need the full file or surrounding context beyond the symbol body
-
-## When to use cx instead of Read
-
-- **Before reading a file** — run `bash tools/cx overview` first. You often don't need the full file.
-- **Before editing a function** — `bash tools/cx definition --name X` gives you the exact text for Edit tool's `old_string` without reading the whole file.
-- **Before refactoring** — `bash tools/cx references --name X` finds all usages so you know the impact before changing anything. Replaces the pattern of grepping then reading file after file.
-- **Exploring a codebase** — use `bash tools/cx symbols` to find what you need across files, then `bash tools/cx definition` to read specific symbols. Avoid reading file after file.
-- **After context compression** — if you previously read a file but the content was compressed out, use `bash tools/cx overview` to re-orient and `bash tools/cx definition` for the specific symbols you need. Don't re-read the full file.
+Prefer cx over reading files. Escalate: overview → symbols → definition/references → Read tool.
 
 ## Quick reference
 
 ```
-bash tools/cx overview PATH                                    file table of contents
-bash tools/cx symbols [--kind K] [--name GLOB] [--file PATH]   search symbols project-wide
-bash tools/cx definition --name NAME [--from PATH] [--kind K]  get a function/type body
-bash tools/cx references --name NAME [--file PATH]             find all usages of a symbol
-bash tools/cx lang list                                        show supported languages
-bash tools/cx lang add LANG [LANG...]                          install language grammars
+cx overview PATH                                    file or directory table of contents
+cx overview DIR --full                              directory overview with signatures
+cx symbols [--kind K] [--name GLOB] [--file PATH]   search symbols project-wide
+cx definition --name NAME [--from PATH] [--kind K]  get a function/type body
+cx references --name NAME [--file PATH] [--unique]   find all usages (--unique: one per caller)
+cx lang list                                         show supported languages
+cx lang add LANG [LANG...]                           install language grammars
 ```
 
-Short aliases: `bash tools/cx o`, `bash tools/cx s`, `bash tools/cx d`, `bash tools/cx r`
+Aliases: `cx o`, `cx s`, `cx d`, `cx r`
 
-Symbol kinds: fn, method, struct, enum, trait, type, const, class, interface, module, event
+Kinds: fn, method, struct, enum, trait, type, const, class, interface, module, event
 
-Check signatures for `pub`/`export` to identify public API without reading the file.
+## Key patterns
+
+- Start with `cx overview .`, drill into subdirectories — cheaper than ls + reading files
+- `cx definition --name X` gives exact text for Edit tool's `old_string` without reading the whole file
+- `cx references --name X --unique` shows one row per caller — use before refactoring to check blast radius
+- After context compression, use `cx overview` / `cx definition` to re-orient — don't re-read full files
+- Check signatures for `pub`/`export` to identify public API without reading the file
+
+## Pagination
+
+Default limits: definition 3, symbols 100, references 50. When truncated, stderr shows:
+
+```
+cx: 3/32 definitions for "X" | --from PATH to narrow | --offset 3 for more | --all
+```
+
+`--offset N` pages forward, `--all` bypasses, `--limit N` overrides. Narrowing with `--from`/`--file`/`--kind` is usually better than paging.
+
+JSON: paginated → `{total, offset, limit, results: [...]}`, non-paginated → bare array.
+
+## Missing grammars
+
+If cx reports a missing grammar, install with `cx lang add <lang>`. Run `cx lang list` to see what's installed.

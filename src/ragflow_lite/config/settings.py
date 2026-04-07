@@ -68,7 +68,21 @@ class Settings:
     ark_embedding_model: str | None = field(
         default_factory=lambda: _read_optional_env("ARK_EMBEDDING_MODEL")
     )
-    ark_embedding_dimensions: int | None = None
+    ark_embedding_dimensions: int = 2048
+    infinity_host: str = "127.0.0.1"
+    infinity_port: int = 23817
+    infinity_database: str = "default_db"
+    infinity_document_table: str = "documents"
+    infinity_chunk_table: str = "chunks"
+
+    def __post_init__(self) -> None:
+        legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")
+        if legacy_mode is not None and legacy_mode.strip():
+            raise RuntimeError(
+                "RAGFLOW_LITE_RETRIEVAL_MODE is no longer supported. "
+                "Retrieval is now fixed to hybrid mode. "
+                "Please remove RAGFLOW_LITE_RETRIEVAL_MODE from your environment."
+            )
 
     @classmethod
     def default(cls, project_root: Path | None = None) -> "Settings":
@@ -105,11 +119,7 @@ class Settings:
         openai_api_key = self.openai_api_key
         ark_api_key = self.ark_api_key
         ark_embedding_model = self.ark_embedding_model
-        if (
-            openai_api_key is None
-            or ark_api_key is None
-            or ark_embedding_model is None
-        ):
+        if openai_api_key is None or ark_api_key is None or ark_embedding_model is None:
             raise RuntimeError("Missing required runtime configuration.")
 
         return (
