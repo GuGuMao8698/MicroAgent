@@ -47,3 +47,16 @@ class QueryResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class DocumentResponse(BaseModel):
+    document_id: str
+    filename: str
+    file_type: str
+    size_bytes: int
+    created_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentResponse]

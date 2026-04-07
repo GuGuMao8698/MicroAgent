@@ -1,5 +1,7 @@
 from ragflow_lite.api.schemas.v0 import (
     DocumentIngestionResponse,
+    DocumentListResponse,
+    DocumentResponse,
     ErrorResponse,
     HealthResponse,
     QueryRequest,
@@ -9,6 +11,8 @@ from ragflow_lite.api.schemas.v0 import (
 
 __all__ = [
     "DocumentIngestionResponse",
+    "DocumentListResponse",
+    "DocumentResponse",
     "ErrorResponse",
     "HealthResponse",
     "QueryRequest",

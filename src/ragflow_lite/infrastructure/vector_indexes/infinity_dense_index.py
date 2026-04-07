@@ -11,10 +11,15 @@ import logging
 from typing import Any
 
 import infinity
-from infinity.common import ConflictType, NetworkAddress
+from infinity.common import ConflictType, NetworkAddress, SortType
 
-from ragflow_lite.domain.errors import ProcessingError
-from ragflow_lite.domain.models import DocumentAsset, EmbeddedChunk, RetrievedChunk
+from ragflow_lite.domain.errors import DocumentNotFoundError, ProcessingError
+from ragflow_lite.domain.models import (
+    DocumentAsset,
+    EmbeddedChunk,
+    IndexedDocument,
+    RetrievedChunk,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +84,13 @@ class InfinityDenseVectorIndex:
             "embedding_provider": self._embedding_signature["provider"],
             "embedding_model": self._embedding_signature["model"],
             "embedding_dimensions": self._embedding_signature["dimensions"],
-            "parser_metadata_json": "",
+            "parser_metadata_json": json.dumps(asset.metadata, ensure_ascii=False),
         }
         doc_table = self._db.get_table(self._document_table)
         self._delete_document_rows(doc_table, asset.document_id)
         doc_table.insert([doc_row])
 
-        # chunk 也按“先删旧再写新”处理，避免覆盖写入后混入旧 chunk。
+        # chunk 也按"先删旧再写新"处理，避免覆盖写入后混入旧 chunk。
         chunk_table = self._db.get_table(self._chunk_table)
         self._delete_chunk_rows(chunk_table, asset.document_id)
 
@@ -233,6 +238,54 @@ class InfinityDenseVectorIndex:
             )
         except Exception:
             logger.debug("Fulltext index %s may already exist, skipping.", index_name)
+
+    # ------------------------------------------------------------------
+    # DocumentCatalog 协议实现
+    # ------------------------------------------------------------------
+
+    def list_documents(self) -> list[IndexedDocument]:
+        """列出所有文档，按 created_at 倒序返回。"""
+        doc_table = self._db.get_table(self._document_table)
+        result_tuple = (
+            doc_table.output(
+                [
+                    "document_id",
+                    "filename",
+                    "file_type",
+                    "size_bytes",
+                    "created_at",
+                    "parser_metadata_json",
+                ]
+            )
+            .sort([["_row_id", SortType.Desc]])
+            .to_pl()
+        )
+        df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
+        if df.is_empty():
+            return []
+        return [self._row_to_indexed_doc(row) for row in df.iter_rows(named=True)]
+
+    def get_document(self, document_id: str) -> IndexedDocument:
+        """按 document_id 精确读取单个文档，未命中抛 DocumentNotFoundError。"""
+        doc_table = self._db.get_table(self._document_table)
+        result_tuple = (
+            doc_table.output(
+                [
+                    "document_id",
+                    "filename",
+                    "file_type",
+                    "size_bytes",
+                    "created_at",
+                    "parser_metadata_json",
+                ]
+            )
+            .filter(_doc_id_filter(document_id))
+            .to_pl()
+        )
+        df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
+        if df.is_empty():
+            raise DocumentNotFoundError(document_id)
+        return self._row_to_indexed_doc(df.row(0, named=True))
 
     # ------------------------------------------------------------------
     # 全文检索
@@ -386,11 +439,29 @@ class InfinityDenseVectorIndex:
 
     @staticmethod
     def _delete_document_rows(doc_table: Any, document_id: str) -> None:
-        doc_table.delete(f"document_id = '{document_id}'")
+        doc_table.delete(_doc_id_filter(document_id))
 
     @staticmethod
     def _delete_chunk_rows(chunk_table: Any, document_id: str) -> None:
-        chunk_table.delete(f"document_id = '{document_id}'")
+        chunk_table.delete(_doc_id_filter(document_id))
+
+    @staticmethod
+    def _row_to_indexed_doc(row: dict[str, Any]) -> IndexedDocument:
+        metadata_json = row.get("parser_metadata_json", "")
+        metadata: dict[str, Any] = {}
+        if metadata_json:
+            try:
+                metadata = json.loads(metadata_json)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        return IndexedDocument(
+            document_id=row["document_id"],
+            filename=row["filename"],
+            file_type=row["file_type"],
+            size_bytes=row["size_bytes"],
+            created_at=row["created_at"],
+            metadata=metadata,
+        )
 
     @staticmethod
     def _parse_json(raw: str) -> dict[str, Any]:
@@ -400,3 +471,9 @@ class InfinityDenseVectorIndex:
             return json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+def _doc_id_filter(document_id: str) -> str:
+    """构造 `document_id` 等值 filter 字符串，转义单引号。"""
+    escaped = document_id.replace("'", "''")
+    return f"document_id = '{escaped}'"

@@ -376,3 +376,159 @@ class TestInfinityDenseVectorIndex:
 
         with pytest.raises(ProcessingError, match="Embedding signature mismatch"):
             idx.search_hybrid("chunk text", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+
+class TestDocumentCatalog:
+    """验证 InfinityDenseVectorIndex 的 DocumentCatalog 实现。"""
+
+    def test_list_documents_returns_empty(self, make_index) -> None:
+        _, idx = make_index()
+        assert idx.list_documents() == []
+
+    def test_list_documents_returns_documents_in_reverse_order(
+        self, make_index
+    ) -> None:
+        _, idx = make_index()
+        for i in range(3):
+            asset = DocumentAsset(
+                document_id=f"doc_{i}",
+                filename=f"test_{i}.txt",
+                file_type="txt",
+                storage_path=Path(f"/tmp/test_{i}.txt"),
+                size_bytes=100,
+                created_at=datetime(2025, 1, i + 1, tzinfo=timezone.utc),
+                metadata={"format": "text"},
+            )
+            idx.index_document(asset, [])
+
+        docs = idx.list_documents()
+        assert len(docs) == 3
+        # 按 created_at 倒序：最新的在前
+        assert docs[0].document_id == "doc_2"
+        assert docs[1].document_id == "doc_1"
+        assert docs[2].document_id == "doc_0"
+
+    def test_list_documents_includes_metadata(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        asset.metadata = {"format": "pdf", "page_count": 3}
+        idx.index_document(asset, [])
+
+        docs = idx.list_documents()
+        assert len(docs) == 1
+        assert docs[0].metadata == {"format": "pdf", "page_count": 3}
+
+    def test_list_documents_empty_metadata(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        # asset.metadata 默认为空 dict
+        idx.index_document(asset, [])
+
+        docs = idx.list_documents()
+        assert len(docs) == 1
+        assert docs[0].metadata == {}
+
+    def test_get_document_returns_single_document(self, make_index) -> None:
+        _, idx = make_index()
+        asset = _make_asset()
+        asset.metadata = {"format": "pdf", "page_count": 1}
+        idx.index_document(asset, [])
+
+        doc = idx.get_document("doc_1")
+        assert doc.document_id == "doc_1"
+        assert doc.filename == "test.txt"
+        assert doc.file_type == "txt"
+        assert doc.size_bytes == 100
+        assert doc.metadata == {"format": "pdf", "page_count": 1}
+
+    def test_get_document_raises_not_found(self, make_index) -> None:
+        from ragflow_lite.domain.errors import DocumentNotFoundError
+
+        _, idx = make_index()
+        with pytest.raises(DocumentNotFoundError, match="nonexistent"):
+            idx.get_document("nonexistent")
+
+    def test_index_document_writes_metadata_to_parser_metadata_json(
+        self, make_index
+    ) -> None:
+        client, idx = make_index()
+        asset = _make_asset()
+        asset.metadata = {"format": "pdf", "page_count": 5}
+        idx.index_document(asset, [])
+
+        db = client.get_database("default_db")
+        doc_table = db.get_table("documents")
+        assert len(doc_table.rows) == 1
+        import json
+
+        parsed = json.loads(doc_table.rows[0]["parser_metadata_json"])
+        assert parsed == {"format": "pdf", "page_count": 5}
+
+    # ------------------------------------------------------------------
+    # sort / filter 回归
+    # ------------------------------------------------------------------
+
+    def test_list_documents_uses_sdk_sort_and_returns_reverse_order(
+        self, make_index
+    ) -> None:
+        """list_documents() 使用 [[col, SortType.Desc]] 形式的 sort 参数。"""
+        _, idx = make_index()
+        for i in range(3):
+            asset = DocumentAsset(
+                document_id=f"doc_{i}",
+                filename=f"test_{i}.txt",
+                file_type="txt",
+                storage_path=Path(f"/tmp/test_{i}.txt"),
+                size_bytes=100,
+                created_at=datetime(2025, 1, i + 1, tzinfo=timezone.utc),
+            )
+            idx.index_document(asset, [])
+
+        docs = idx.list_documents()
+        assert [d.document_id for d in docs] == ["doc_2", "doc_1", "doc_0"]
+
+    def test_get_document_with_single_quote_in_id(self, make_index) -> None:
+        """get_document() 对包含单引号的 document_id 能正确命中。"""
+        _, idx = make_index()
+        tricky_id = "doc_it's"
+        asset = DocumentAsset(
+            document_id=tricky_id,
+            filename="tricky.txt",
+            file_type="txt",
+            storage_path=Path("/tmp/tricky.txt"),
+            size_bytes=42,
+            created_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        idx.index_document(asset, [])
+
+        doc = idx.get_document(tricky_id)
+        assert doc.document_id == tricky_id
+        assert doc.filename == "tricky.txt"
+
+    def test_get_document_not_found_with_single_quote_in_id(self, make_index) -> None:
+        """get_document() 对不存在但包含单引号的 ID 抛 DocumentNotFoundError。"""
+        from ragflow_lite.domain.errors import DocumentNotFoundError
+
+        _, idx = make_index()
+        with pytest.raises(DocumentNotFoundError, match="no'exist"):
+            idx.get_document("no'exist")
+
+    def test_delete_document_with_single_quote_in_id(self, make_index) -> None:
+        """delete_document() 对包含单引号的 document_id 可正常删除。"""
+        client, idx = make_index()
+        tricky_id = "doc_o'clock"
+        asset = DocumentAsset(
+            document_id=tricky_id,
+            filename="clock.txt",
+            file_type="txt",
+            storage_path=Path("/tmp/clock.txt"),
+            size_bytes=10,
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+        idx.index_document(asset, [_make_chunk(document_id=tricky_id)])
+
+        idx.delete_document(tricky_id)
+
+        db = client.get_database("default_db")
+        assert len(db.get_table("documents").rows) == 0
+        assert len(db.get_table("chunks").rows) == 0

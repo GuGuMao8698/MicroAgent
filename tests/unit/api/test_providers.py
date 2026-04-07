@@ -115,3 +115,11 @@ def test_settings_rejects_legacy_retrieval_mode_env(
         RuntimeError, match="RAGFLOW_LITE_RETRIEVAL_MODE is no longer supported"
     ):
         _build_settings(tmp_path)
+
+
+def test_build_services_provides_document_service(tmp_path: Path) -> None:
+    from ragflow_lite.application import DocumentService
+
+    services = build_services(_build_settings(tmp_path))
+    assert isinstance(services.document_service, DocumentService)
+    assert services.document_service.catalog is services.ingestion_pipeline.vector_index

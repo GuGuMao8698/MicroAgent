@@ -4,9 +4,10 @@
 这个目录负责业务编排层，承接 ingestion/query 两条主流程和跨模块协调。
 
 ## Do Here
-- 在这里组织 `IngestionPipeline`、`QueryService`、`Retriever` 和文本归一化。
-- 通过抽象 port 协调 parser、chunker、embedder、index、retriever、answerer。
+- 在这里组织 `IngestionPipeline`、`QueryService`、`DocumentService`、`Retriever` 和文本归一化。
+- 通过抽象 port 协调 parser、chunker、embedder、index、retriever、answerer、document catalog。
 - 编排"查询 -> 检索 -> 回答"主流程，允许编排基础 citation 的来源传递。
+- `DocumentService` 透传 `DocumentCatalog` 的 list/get 语义，不引入额外策略分支。
 - `QueryService` 继续只依赖 `Retriever` 协议，不感知具体检索实现或 fusion 细节。
 - 保持输入输出清晰，便于路由层调用和测试。
 

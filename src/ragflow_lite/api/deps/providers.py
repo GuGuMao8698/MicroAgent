@@ -10,7 +10,12 @@ from dataclasses import dataclass
 
 from fastapi import Depends, Request
 
-from ragflow_lite.application import IngestionPipeline, QueryService, normalize_text
+from ragflow_lite.application import (
+    DocumentService,
+    IngestionPipeline,
+    QueryService,
+    normalize_text,
+)
 from ragflow_lite.config import Settings
 from ragflow_lite.domain.ports.interfaces import Retriever
 from ragflow_lite.infrastructure import (
@@ -32,6 +37,7 @@ class AppServices:
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
+    document_service: DocumentService
 
 
 def _build_vector_index(
@@ -103,6 +109,7 @@ def build_services(settings: Settings) -> AppServices:
             retriever=retriever,
             answerer=answerer,
         ),
+        document_service=DocumentService(catalog=vector_index),
     )
 
 
@@ -121,3 +128,10 @@ def get_ingestion_pipeline(
 def get_query_service(services: AppServices = Depends(get_services)) -> QueryService:
     """提供查询回答主流程给路由层使用。"""
     return services.query_service
+
+
+def get_document_service(
+    services: AppServices = Depends(get_services),
+) -> DocumentService:
+    """提供文档目录只读服务给路由层使用。"""
+    return services.document_service

@@ -1,13 +1,13 @@
 # AGENTS.md
 
 ## Purpose
-这个目录承接当前最小后端实现，并开始演进 V1 检索与元数据能力。
+这个目录承接当前最小后端实现。V1 已完成，当前演进 V2 检索质量增强能力。
 
 ## Do Here
 - 保持 `api`、`application`、`domain`、`infrastructure` 的清晰分层。
 - 让实现围绕主链路演进：上传、解析、切块、索引、查询、回答。
 - 当前默认检索后端是 Infinity hybrid path（`InfinityHybridRetriever`），通过 `InfinityDenseVectorIndex.search_hybrid()` 一次调用完成全文 + dense 并行检索，复用 Infinity 原生 `weighted_sum` fusion。pure dense / pure fulltext 仅保留为 index 层内部回归/诊断能力，不再作为公共运行时模式暴露。
-- 保持现有分层不变，优先做默认检索后端替换和基础 inline citation（模型输出 `<cite:n>`，answerer 转换为用户可见的 `[n]` 并清洗越界引用）和最小元数据落盘。
+- V1 已落地：基础 inline citation、文档 metadata 读写闭环（只读 API，`DocumentCatalog` + `GET /documents`）。
 - 本阶段不引入 Postgres 状态管理。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
 

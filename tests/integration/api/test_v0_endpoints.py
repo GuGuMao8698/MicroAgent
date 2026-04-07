@@ -485,3 +485,139 @@ def test_upload_encrypted_pdf_returns_422(client) -> None:
 
     assert response.status_code == 422
     assert "parse" in response.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 文档列表 / 详情读取接口
+# ---------------------------------------------------------------------------
+
+
+def test_list_documents_returns_empty_before_upload(client) -> None:
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    assert response.json() == {"documents": []}
+
+
+def test_list_documents_after_txt_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.txt",
+                (fixture_documents_dir / "sample.txt").read_bytes(),
+                "text/plain",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["documents"]) == 1
+    doc = payload["documents"][0]
+    assert doc["document_id"] == document_id
+    assert doc["filename"] == "sample.txt"
+    assert doc["file_type"] == "txt"
+    assert doc["size_bytes"] > 0
+    assert doc["created_at"]
+    # txt 上传不产生 parser extras，metadata 为空
+    assert doc["metadata"] == {}
+
+
+def test_get_document_after_txt_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.txt",
+                (fixture_documents_dir / "sample.txt").read_bytes(),
+                "text/plain",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get(f"/api/v0/documents/{document_id}")
+    assert response.status_code == 200
+    doc = response.json()
+    assert doc["document_id"] == document_id
+    assert doc["filename"] == "sample.txt"
+    assert doc["file_type"] == "txt"
+
+
+def test_get_document_after_pdf_upload(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "sample.pdf",
+                (fixture_documents_dir / "sample.pdf").read_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    response = client.get(f"/api/v0/documents/{document_id}")
+    assert response.status_code == 200
+    doc = response.json()
+    assert doc["file_type"] == "pdf"
+    assert doc["metadata"]["format"] == "pdf"
+    assert doc["metadata"]["page_count"] == 1
+
+
+def test_get_nonexistent_document_returns_404(client) -> None:
+    response = client.get("/api/v0/documents/doc_nonexistent")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_document_with_single_quote_in_id_returns_404(client) -> None:
+    """URL 中带单引号的 document_id 应返回 404，不应 500。"""
+    response = client.get("/api/v0/documents/doc_%27bad")
+    assert response.status_code == 404
+
+
+def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    ids: list[str] = []
+    for fname in ("sample.txt", "sample.md"):
+        resp = client.post(
+            "/api/v0/documents",
+            files={
+                "file": (
+                    fname,
+                    (fixture_documents_dir / fname).read_bytes(),
+                    "text/plain",
+                )
+            },
+        )
+        assert resp.status_code == 200
+        ids.append(resp.json()["document_id"])
+
+    response = client.get("/api/v0/documents")
+    assert response.status_code == 200
+    docs = response.json()["documents"]
+    assert len(docs) == 2
+    # 第二个上传的在前面（倒序）
+    assert docs[0]["document_id"] == ids[1]
+    assert docs[1]["document_id"] == ids[0]

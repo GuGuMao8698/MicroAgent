@@ -21,9 +21,22 @@ os.environ.setdefault("ARK_EMBEDDING_MODEL", "ep-test-model")
 # 测试用假的 Infinity client（不依赖真实网络）
 # ---------------------------------------------------------------------------
 
+import re
+
 import polars as pl
 
 ShowColumnsMode = Literal["dataframe", "tuple"]
+
+
+def _parse_doc_id_from_filter(cond: str) -> str | None:
+    """从 SQL 风格 filter 字符串中提取并反转义 document_id。
+
+    支持单引号转义：``''`` 还原为 ``'``。
+    """
+    m = re.search(r"document_id\s*=\s*'([^']*(?:''[^']*)*)'", cond)
+    if m is None:
+        return None
+    return m.group(1).replace("''", "'")
 
 
 class FakeInfinityTable:
@@ -49,8 +62,8 @@ class FakeInfinityTable:
         if cond is None:
             self.rows.clear()
             return
-        if "document_id" in cond:
-            doc_id = cond.split("=")[1].strip().strip("'\"")
+        doc_id = _parse_doc_id_from_filter(cond)
+        if doc_id is not None:
             self.rows = [r for r in self.rows if r.get("document_id") != doc_id]
 
     def show_columns(self) -> pl.DataFrame | tuple[pl.DataFrame, dict[str, Any]]:
@@ -70,6 +83,9 @@ class FakeInfinityTable:
 
     def match_text(self, **kwargs: Any) -> _FakeQueryBuilder:
         return _FakeQueryBuilder(self, "text", kwargs)
+
+    def output(self, columns: list[str]) -> _FakeQueryBuilder:
+        return _FakeQueryBuilder(self, "scan", {"output_columns": columns})
 
     def create_index(
         self,
@@ -91,14 +107,20 @@ class _FakeQueryBuilder:
         match_kwargs: dict[str, Any],
     ) -> None:
         self._table = table
+        self._match_type = match_type
+        self._match_kwargs = match_kwargs
         self._text_kwargs: dict[str, Any] | None = None
         self._dense_kwargs: dict[str, Any] | None = None
         self._fusion_kwargs: dict[str, Any] | None = None
         self._output_columns: list[str] = []
+        self._filter_cond: str | None = None
+        self._sort_spec: list[list[Any]] | None = None
         if match_type == "text":
             self._text_kwargs = match_kwargs
-        else:
+        elif match_type == "dense":
             self._dense_kwargs = match_kwargs
+        elif match_type == "scan":
+            self._output_columns = match_kwargs.get("output_columns", [])
 
     def match_text(self, **kwargs: Any) -> _FakeQueryBuilder:
         self._text_kwargs = kwargs
@@ -116,9 +138,19 @@ class _FakeQueryBuilder:
         self._output_columns = columns
         return self
 
+    def filter(self, cond: str) -> _FakeQueryBuilder:
+        self._filter_cond = cond
+        return self
+
+    def sort(self, spec: list[list[Any]]) -> _FakeQueryBuilder:
+        self._sort_spec = spec
+        return self
+
     def to_pl(self) -> tuple[pl.DataFrame, dict]:
         if self._fusion_kwargs is not None:
             return self._to_pl_fusion()
+        if self._match_type == "scan":
+            return self._to_pl_scan()
         if self._text_kwargs is not None:
             return self._to_pl_text(self._text_kwargs)
         if self._dense_kwargs is not None:
@@ -143,6 +175,32 @@ class _FakeQueryBuilder:
             return pl.DataFrame(), {}
 
         return pl.DataFrame(scored), {}
+
+    def _to_pl_scan(self) -> tuple[pl.DataFrame, dict]:
+        """表扫描模式：支持 filter、sort，按 output_columns 提取字段。"""
+        rows = list(self._table.rows)
+
+        if self._filter_cond is not None:
+            doc_id = _parse_doc_id_from_filter(self._filter_cond)
+            if doc_id is not None:
+                rows = [r for r in rows if r.get("document_id") == doc_id]
+
+        if self._sort_spec is not None:
+            for col, direction in self._sort_spec:
+                # 对 _row_id 用插入顺序反转为倒序
+                if col == "_row_id" and direction == SortType.Desc:
+                    rows = list(reversed(rows))
+
+        if not rows:
+            return pl.DataFrame(
+                schema={col: pl.Utf8 for col in self._output_columns}
+            ), {}
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            result.append({col: row.get(col, "") for col in self._output_columns})
+
+        return pl.DataFrame(result), {}
 
     def _to_pl_text(self, match_kwargs: dict[str, Any]) -> tuple[pl.DataFrame, dict]:
         query_text = match_kwargs.get("matching_text", "")
@@ -303,6 +361,7 @@ def _fake_connect(*args: Any, **kwargs: Any) -> FakeInfinityClient:
 # 因为 `ragflow_lite/__init__.py` 会在模块级触发 `create_app()`，
 # 并在导入阶段直接调用 `infinity.connect()`。
 import infinity
+from infinity.common import SortType  # noqa: E402
 
 infinity.connect = _fake_connect  # type: ignore[assignment]
 

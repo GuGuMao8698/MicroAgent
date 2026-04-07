@@ -2,17 +2,24 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from ragflow_lite.api.deps.providers import get_ingestion_pipeline, get_query_service
+from ragflow_lite.api.deps.providers import (
+    get_document_service,
+    get_ingestion_pipeline,
+    get_query_service,
+)
 from ragflow_lite.api.schemas.v0 import (
     DocumentIngestionResponse,
+    DocumentListResponse,
+    DocumentResponse,
     ErrorResponse,
     HealthResponse,
     QueryRequest,
     QueryResponse,
     RetrievedContextResponse,
 )
-from ragflow_lite.application import IngestionPipeline, QueryService
+from ragflow_lite.application import DocumentService, IngestionPipeline, QueryService
 from ragflow_lite.domain.errors import (
+    DocumentNotFoundError,
     DocumentParsingError,
     EmptyDocumentError,
     ProcessingError,
@@ -56,6 +63,59 @@ async def ingest_document(
         await file.close()
 
 
+@router.get(
+    "/documents",
+    response_model=DocumentListResponse,
+    responses={status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse}},
+)
+async def list_documents(
+    document_service: DocumentService = Depends(get_document_service),
+) -> DocumentListResponse:
+    try:
+        documents = document_service.list_documents()
+        return DocumentListResponse(
+            documents=[
+                DocumentResponse(
+                    document_id=doc.document_id,
+                    filename=doc.filename,
+                    file_type=doc.file_type,
+                    size_bytes=doc.size_bytes,
+                    created_at=doc.created_at,
+                    metadata=doc.metadata,
+                )
+                for doc in documents
+            ]
+        )
+    except RagflowLiteError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/documents/{document_id}",
+    response_model=DocumentResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+    },
+)
+async def get_document(
+    document_id: str,
+    document_service: DocumentService = Depends(get_document_service),
+) -> DocumentResponse:
+    try:
+        doc = document_service.get_document(document_id)
+        return DocumentResponse(
+            document_id=doc.document_id,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            size_bytes=doc.size_bytes,
+            created_at=doc.created_at,
+            metadata=doc.metadata,
+        )
+    except RagflowLiteError as exc:
+        raise _map_error(exc) from exc
+
+
 @router.post(
     "/queries",
     response_model=QueryResponse,
@@ -89,6 +149,12 @@ def _map_error(error: RagflowLiteError) -> HTTPException:
     if isinstance(error, UnsupportedFileTypeError):
         return HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(error),
+        )
+
+    if isinstance(error, DocumentNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(error),
         )
 
