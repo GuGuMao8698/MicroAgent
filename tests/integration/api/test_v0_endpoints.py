@@ -621,3 +621,42 @@ def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
     # 第二个上传的在前面（倒序）
     assert docs[0]["document_id"] == ids[1]
     assert docs[1]["document_id"] == ids[0]
+
+
+def test_filename_sparse_recalls_when_text_misses(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    """上传文件名含 "manual" 的 md 文件，查询 "manual" 时通过 filename sparse 字段召回。"""
+    _install_fake_ark_client(client, FakeArkClient())
+    fake_openai_client = _install_fake_openai_client(
+        client,
+        FakeOpenAIClient(output_text="Found via filename."),
+    )
+    upload_response = client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                "ragflow-manual.md",
+                (fixture_documents_dir / "sample.md").read_bytes(),
+                "text/markdown",
+            )
+        },
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document_id"]
+
+    # "manual" 不在 sample.md 的正文中，但 filename 包含 "manual"。
+    query_response = client.post(
+        "/api/v0/queries",
+        json={"query": "manual", "top_k": 4},
+    )
+
+    assert query_response.status_code == 200
+    payload = query_response.json()
+    assert payload["answer"] == "Found via filename."
+    assert payload["contexts"]
+    assert any(
+        ctx["metadata"]["filename"] == "ragflow-manual.md"
+        for ctx in payload["contexts"]
+    )

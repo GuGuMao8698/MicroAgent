@@ -7,7 +7,7 @@
 - 在 `models` 放 `DocumentAsset`、`ParsedDocument`、`Chunk`、`EmbeddedChunk`、`RetrievedChunk`、`AnswerResult`、`IngestionResult`、`IndexedDocument`。
 - 在 `ports` 放 `Parser`、`Chunker`、`Embedder`、`VectorIndex`、`Retriever`、`Answerer`、`DocumentStore`、`DocumentCatalog` 这类抽象接口。
 - 在 `errors` 放领域级异常和统一错误语义（含 `DocumentNotFoundError`）。
-- 允许为 V1 扩展稳定的最小检索/来源元数据边界。
+- 新增模型或 port 时，优先表达稳定业务边界和错误语义，不要为了容纳具体基础设施实现而扩张接口。
 
 ## Avoid Here
 - 不要依赖 FastAPI、数据库客户端、文件系统或外部 SDK 细节。

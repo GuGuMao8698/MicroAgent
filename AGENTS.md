@@ -15,9 +15,10 @@
 - `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
 
 - `V1` : `Infinity` 全文检索、并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数、基础 citation、基础文档元数据管理 : `已完成`
-  说明：近期默认不把外部 `rerank` 模型当作主路径，第一版混合排序优先依赖 `Infinity` 引擎内融合分数。
+  说明：默认不把外部 `rerank` 模型当作主路径，混合排序优先依赖 `Infinity` 引擎内融合分数。
 
-- `V2` : 检索质量增强（多字段权重、回退扩召、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `进行中`
+- `V2` : 检索质量增强（多字段权重、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `进行中`
+  说明：当前已落地的 V2 基线集中在 retrieval quality；基础 dataset 管理、parser strategy、更加准确的 citation、日志和错误处理仍在推进。
 
 - `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
   说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
@@ -26,11 +27,10 @@
 
 
 ## Current Working Focus
-- `V1` 已完成：`Infinity` hybrid retrieval（`InfinityHybridRetriever`，`search_hybrid()` + `weighted_sum` fusion）、基础 inline citation（`<cite:n>` → `[n]`）、只读文档 metadata 管理（`DocumentCatalog` + `GET /documents`）
-- `RAGFLOW_LITE_RETRIEVAL_MODE` 已移除作为公共配置项；若环境仍设置该变量，启动时直接报错提示移除
-- `VectorRetriever` 和 `InfinityFullTextRetriever` 已从生产装配中移除；`InfinityDenseVectorIndex.search()` 和 `search_text()` 保留为内部回归/诊断能力
-- `LocalJsonVectorIndex` 仅保留为非默认实现
-- 当前推进 `V2`：检索质量增强、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理
+- 当前检索质量主线继续围绕 Infinity hybrid path 打磨：`search_hybrid()` 先扩大候选，再裁回 `top_k`，避免单路候选过早截断。
+- `InfinityHybridRetriever` 仅对全文分支使用保守 sparse-query 分析；dense embedding 仍基于原始 query。
+- hybrid sparse 继续依赖 `filename` + `text` 多字段匹配，增强文件名可见信号的召回；`search_text()` 保持单字段诊断语义。
+- 当前约束保持收敛：不引入 rerank、新公共配置项或新的 API 形态；生产检索路径维持 Infinity hybrid，`RAGFLOW_LITE_RETRIEVAL_MODE` 不再支持。
 
 ## Local Python Workflow
 - 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。

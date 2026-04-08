@@ -133,37 +133,44 @@ class InfinityDenseVectorIndex:
     def search_hybrid(
         self, query: str, query_vector: list[float], top_k: int
     ) -> list[RetrievedChunk]:
-        """使用 Infinity 原生 fusion（weighted_sum）并行执行全文 + dense 检索。"""
+        """使用 Infinity 原生 fusion（weighted_sum）并行执行 sparse 全文 + dense 检索。
+
+        参数 ``query`` 视为传给全文分支的 sparse query；dense embedding
+        仍来自原始用户 query。
+        """
         self._validate_query_dimensions(query_vector)
+
+        candidate_k = max(30, top_k * 4)
 
         chunk_table = self._db.get_table(self._chunk_table)
         result_tuple = (
             chunk_table.match_text(
-                fields="text",
+                fields="filename^3,text",
                 matching_text=query,
-                topn=top_k,
+                topn=candidate_k,
             )
             .match_dense(
                 vector_column_name="vec",
                 embedding_data=query_vector,
                 embedding_data_type="float",
                 distance_type="ip",
-                topn=top_k,
+                topn=candidate_k,
             )
             .fusion(
                 "weighted_sum",
-                topn=top_k,
+                topn=candidate_k,
                 fusion_params={"weights": "0.05,0.95", "normalize": "atan"},
             )
             .output(self._chunk_output_columns("_score"))
             .to_pl()
         )
 
-        return self._materialize_chunk_query_results(
+        results = self._materialize_chunk_query_results(
             result_tuple,
             score_field="_score",
             validate_embedding_signature=True,
         )
+        return results[:top_k]
 
     # ------------------------------------------------------------------
     # 表管理
@@ -225,19 +232,22 @@ class InfinityDenseVectorIndex:
         )
 
     def _ensure_fulltext_index(self) -> None:
-        """对 chunk 表的 text 列幂等创建全文索引。"""
+        """对 chunk 表的 text、filename 列幂等创建全文索引。"""
         from infinity.index import IndexType
 
-        index_name = f"{self._chunk_table}_text_fulltext_idx"
         chunk_table = self._db.get_table(self._chunk_table)
-        try:
-            chunk_table.create_index(
-                index_name,
-                IndexType.FullText,
-                {"text"},
-            )
-        except Exception:
-            logger.debug("Fulltext index %s may already exist, skipping.", index_name)
+        for col in ("text", "filename"):
+            index_name = f"{self._chunk_table}_{col}_fulltext_idx"
+            try:
+                chunk_table.create_index(
+                    index_name,
+                    IndexType.FullText,
+                    {col},
+                )
+            except Exception:
+                logger.debug(
+                    "Fulltext index %s may already exist, skipping.", index_name
+                )
 
     # ------------------------------------------------------------------
     # DocumentCatalog 协议实现
