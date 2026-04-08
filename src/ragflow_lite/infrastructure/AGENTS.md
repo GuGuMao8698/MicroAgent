@@ -15,11 +15,9 @@
 - hybrid sparse 匹配使用 `filename` 与 `text` 两个字段；诊断型 `search_text()` 保持单字段 `text` 语义。
 - hybrid 检索内部会先扩大候选，再裁回 `top_k`；这是内部策略，不提升为公共配置。
 - OpenAI answerer 负责基于 context 编号的基础 inline citation：prompt 按 score 降序编号 contexts 为 `[1]`..`[n]`，instructions 要求模型使用 `<cite:n>` token 引用，输出后 answerer 将合法 `<cite:n>` 转换为用户可见的 `[n]`，移除越界和非法 token，裸方括号数字不做处理，返回的 `contexts` 顺序与编号对齐。不要提前引入句子级 citation 或 rerank。
-- `InfinityDenseVectorIndex.search()` 和 `search_text()` 保留为 index 层内部回归/诊断能力，不重新暴露成独立运行时模式。
-- `InfinityDenseVectorIndex` 初始化时对 chunk 表的 `text`、`filename` 列幂等创建全文索引；`search_text()` 调用 `match_text` 做全文匹配。
-- 当前的 embedding 运行时实现就是 Ark 文本 embedding，索引会记录 embedding 签名。
-- grounded answer 必须基于 retrieval contexts，不要把外部模型调用扩散到 `api` 或 `application`。
-- 允许实现最小 `BasicPdfParser`，使用轻量依赖（`pypdf`）完成数字原生 PDF 的基础文本抽取。
+- PDF 页感知 citation 元数据约定：`BasicPdfParser` 在 metadata 中携带 `page_texts`（逐页文本与实际页号）；pipeline 基于归一化后的页文本构造 `page_spans`（半开区间）传给 chunker；`FixedWindowChunker` 按 chunk offset 计算重叠页范围并写入 `page_start` / `page_end`；answerer 在 prompt 中输出 `page: N` 或 `pages: N-M`。`page_texts` / `page_spans` 为内部键，不进入 chunk metadata 或 document catalog。
+- 固定策略 ID 与默认映射约定：`txt -> plain_text`、`md -> markdown_flatten`、`pdf -> pdf_native_text`，由 `PARSER_STRATEGY_MAP` 承接；`CompositeParser` 直接按 `file_type` 分派，每个 parser 在 `ParsedDocument.metadata` 写入 `parser_strategy`。`pdf_native_text` 仍是数字原生 PDF 路径，不做 OCR fallback。
+- 低层实现只记录局部运行异常，不记录原始文档/查询内容；应用层负责主链路级日志与异常保真。
 
 ## Avoid Here
 - 不要在这里定义业务流程和用例编排。

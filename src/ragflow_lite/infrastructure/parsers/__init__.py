@@ -1,4 +1,5 @@
 from ragflow_lite.infrastructure.parsers.document_parsers import (
+    PARSER_STRATEGY_MAP,
     BasicPdfParser,
     CompositeParser,
     MarkdownParser,
@@ -8,6 +9,7 @@ from ragflow_lite.infrastructure.parsers.document_parsers import (
 )
 
 __all__ = [
+    "PARSER_STRATEGY_MAP",
     "BasicPdfParser",
     "CompositeParser",
     "MarkdownParser",

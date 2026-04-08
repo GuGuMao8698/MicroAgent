@@ -60,6 +60,23 @@ def _make_chunk(suffix: str, score: float) -> RetrievedChunk:
     )
 
 
+def _make_pdf_chunk(
+    suffix: str, score: float, page_start: int, page_end: int
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=f"chunk-{suffix}",
+        document_id=f"doc-{suffix}",
+        text=f"PDF 片段 {suffix}",
+        score=score,
+        metadata={
+            "filename": f"{suffix}.pdf",
+            "file_type": "pdf",
+            "page_start": page_start,
+            "page_end": page_end,
+        },
+    )
+
+
 # -- instructions 覆盖 --
 
 
@@ -228,3 +245,29 @@ def test_answer_bubbles_up_openai_errors() -> None:
             "这个请求会失败吗",
             [_make_chunk("1", 0.8)],
         )
+
+
+# -- page info in prompt --
+
+
+def test_build_input_includes_single_page_info() -> None:
+    contexts = [_make_pdf_chunk("a", 0.9, 3, 3)]
+    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+
+    assert "page: 3" in result
+    assert "pages:" not in result
+
+
+def test_build_input_includes_page_range_info() -> None:
+    contexts = [_make_pdf_chunk("a", 0.9, 2, 5)]
+    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+
+    assert "pages: 2-5" in result
+
+
+def test_build_input_omits_page_info_when_absent() -> None:
+    contexts = [_make_chunk("a", 0.9)]
+    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+
+    assert "page:" not in result
+    assert "pages:" not in result

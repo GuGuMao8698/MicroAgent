@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
+
+API_LOGGER = "ragflow_lite.api.routes.v0.endpoints"
+APP_LOGGER = "ragflow_lite.app"
+_CONTENT_TYPES = {
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".pdf": "application/pdf",
+}
 
 
 class FakeResponsesAPI:
@@ -107,6 +118,55 @@ def _install_fake_ark_client(client, fake_ark_client: FakeArkClient) -> FakeArkC
     return fake_ark_client
 
 
+def _upload_fixture_document(
+    client,
+    fixture_documents_dir: Path,
+    fixture_name: str,
+    *,
+    upload_name: str | None = None,
+    content_type: str | None = None,
+):
+    filename = upload_name or fixture_name
+    suffix = Path(filename).suffix
+    return client.post(
+        "/api/v0/documents",
+        files={
+            "file": (
+                filename,
+                (fixture_documents_dir / fixture_name).read_bytes(),
+                content_type or _CONTENT_TYPES[suffix],
+            )
+        },
+    )
+
+
+def _query_documents(client, query: str, top_k: int = 4):
+    return client.post("/api/v0/queries", json={"query": query, "top_k": top_k})
+
+
+def _openai_input(fake_openai_client: FakeOpenAIClient) -> str:
+    return fake_openai_client.responses.calls[0]["input"]
+
+
+def _event_records(
+    caplog: pytest.LogCaptureFixture,
+    event: str,
+) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if getattr(record, "event", None) == event]
+
+
+def _assert_pdf_context_page_metadata(contexts: list[dict[str, Any]]) -> None:
+    assert all(
+        "page_start" in context["metadata"] and "page_end" in context["metadata"]
+        for context in contexts
+    )
+    assert all(
+        "page_texts" not in context["metadata"]
+        and "page_spans" not in context["metadata"]
+        for context in contexts
+    )
+
+
 def test_health_endpoint(client) -> None:
     response = client.get("/api/v0/health")
 
@@ -123,16 +183,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
         client,
         FakeOpenAIClient(output_text="项目支持 txt 和 md 文件格式<cite:1>。"),
     )
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
 
     assert upload_response.status_code == 200
     upload_payload = upload_response.json()
@@ -140,10 +191,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert upload_payload["file_type"] == "txt"
     assert upload_payload["chunk_count"] >= 1
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "这个项目支持什么文件类型", "top_k": 4},
-    )
+    query_response = _query_documents(client, "这个项目支持什么文件类型")
 
     assert query_response.status_code == 200
     payload = query_response.json()
@@ -166,7 +214,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert fake_openai_client.responses.calls[0]["model"] == "gpt-5.4-mini"
 
     # citation 编号契约：contexts[0] 对应 prompt 中 [1]
-    openai_input = fake_openai_client.responses.calls[0]["input"]
+    openai_input = _openai_input(fake_openai_client)
     first_chunk_text = payload["contexts"][0]["text"]
     assert first_chunk_text in openai_input
 
@@ -180,23 +228,11 @@ def test_upload_markdown_then_query_uses_markdown_text(
         client,
         FakeOpenAIClient(output_text="使用 uvicorn 运行这个最小 RAG。"),
     )
-    response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.md",
-                (fixture_documents_dir / "sample.md").read_bytes(),
-                "text/markdown",
-            )
-        },
-    )
+    response = _upload_fixture_document(client, fixture_documents_dir, "sample.md")
 
     assert response.status_code == 200
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "如何运行这个最小 RAG", "top_k": 4},
-    )
+    query_response = _query_documents(client, "如何运行这个最小 RAG")
 
     assert query_response.status_code == 200
     payload = query_response.json()
@@ -206,7 +242,7 @@ def test_upload_markdown_then_query_uses_markdown_text(
         "Quick Start" in context["text"] or "uvicorn" in context["text"]
         for context in payload["contexts"]
     )
-    openai_input = fake_openai_client.responses.calls[0]["input"]
+    openai_input = _openai_input(fake_openai_client)
     assert "Quick Start" in openai_input
     assert "uvicorn ragflow_lite.app:app --reload" in openai_input
     assert "ragflowlite.app" not in openai_input
@@ -214,9 +250,7 @@ def test_upload_markdown_then_query_uses_markdown_text(
 
 def test_query_with_empty_index_returns_fallback_answer(client) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    response = client.post(
-        "/api/v0/queries", json={"query": "没有文档时怎么办", "top_k": 4}
-    )
+    response = _query_documents(client, "没有文档时怎么办")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -241,16 +275,7 @@ def test_ingestion_failure_rolls_back_only_current_document(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    first_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    first_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert first_response.status_code == 200
     first_document_id = first_response.json()["document_id"]
 
@@ -283,23 +308,11 @@ def test_query_returns_500_when_openai_request_fails(
     _install_fake_ark_client(client, FakeArkClient())
     _install_fake_openai_client(client, FakeOpenAIClient(error=RuntimeError("boom")))
 
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
 
     assert upload_response.status_code == 200
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "这个项目支持什么文件类型", "top_k": 4},
-    )
+    query_response = _query_documents(client, "这个项目支持什么文件类型")
 
     assert query_response.status_code == 500
     assert query_response.json()["detail"] == "Failed to answer query."
@@ -311,24 +324,12 @@ def test_query_returns_500_when_ark_query_embedding_fails(
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
 
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert upload_response.status_code == 200
 
     _install_fake_ark_client(client, FakeArkClient(error=RuntimeError("boom")))
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "这个项目支持什么文件类型", "top_k": 4},
-    )
+    query_response = _query_documents(client, "这个项目支持什么文件类型")
 
     assert query_response.status_code == 500
     assert query_response.json()["detail"] == "Failed to answer query."
@@ -340,16 +341,7 @@ def test_query_returns_error_when_infinity_unreachable(
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
 
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert upload_response.status_code == 200
 
     # 通过清空内部表数据来模拟 Infinity 当前查不到任何记录。
@@ -358,10 +350,7 @@ def test_query_returns_error_when_infinity_unreachable(
     chunk_table = vector_index._db.get_table(vector_index._chunk_table)
     chunk_table.rows.clear()
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "这个项目支持什么文件类型", "top_k": 4},
-    )
+    query_response = _query_documents(client, "这个项目支持什么文件类型")
 
     # 当 Infinity 没有命中上下文时，查询应退化为兜底回答。
     assert query_response.status_code == 200
@@ -377,16 +366,7 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
         client,
         FakeOpenAIClient(output_text="PDF content found."),
     )
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.pdf",
-                (fixture_documents_dir / "sample.pdf").read_bytes(),
-                "application/pdf",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.pdf")
 
     assert upload_response.status_code == 200
     upload_payload = upload_response.json()
@@ -394,10 +374,7 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
     assert upload_payload["file_type"] == "pdf"
     assert upload_payload["chunk_count"] >= 1
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "PDF test", "top_k": 4},
-    )
+    query_response = _query_documents(client, "PDF test")
 
     assert query_response.status_code == 200
     payload = query_response.json()
@@ -409,6 +386,9 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
     assert all(
         context["metadata"]["file_type"] == "pdf" for context in payload["contexts"]
     )
+    _assert_pdf_context_page_metadata(payload["contexts"])
+    openai_input = _openai_input(fake_openai_client)
+    assert "page:" in openai_input
 
 
 def test_query_returns_500_when_embedding_signature_mismatch(
@@ -420,16 +400,7 @@ def test_query_returns_500_when_embedding_signature_mismatch(
         client, FakeOpenAIClient(output_text="should not reach")
     )
 
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert upload_response.status_code == 200
 
     # 篡改已存 chunk 的 embedding 签名，模拟陈旧数据。
@@ -439,10 +410,7 @@ def test_query_returns_500_when_embedding_signature_mismatch(
     for row in chunk_table.rows:
         row["embedding_model"] = "stale-model"
 
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "这个项目支持什么文件类型", "top_k": 4},
-    )
+    query_response = _query_documents(client, "这个项目支持什么文件类型")
 
     assert query_response.status_code == 500
     assert "Embedding signature mismatch" in query_response.json()["detail"]
@@ -450,16 +418,7 @@ def test_query_returns_500_when_embedding_signature_mismatch(
 
 def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "empty.pdf",
-                (fixture_documents_dir / "empty.pdf").read_bytes(),
-                "application/pdf",
-            )
-        },
-    )
+    response = _upload_fixture_document(client, fixture_documents_dir, "empty.pdf")
 
     assert response.status_code == 422
     assert "empty" in response.json()["detail"].lower()
@@ -503,16 +462,7 @@ def test_list_documents_after_txt_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert upload_response.status_code == 200
     document_id = upload_response.json()["document_id"]
 
@@ -526,8 +476,8 @@ def test_list_documents_after_txt_upload(
     assert doc["file_type"] == "txt"
     assert doc["size_bytes"] > 0
     assert doc["created_at"]
-    # txt 上传不产生 parser extras，metadata 为空
-    assert doc["metadata"] == {}
+    # txt 上传 metadata 仅包含 parser_strategy
+    assert doc["metadata"] == {"parser_strategy": "plain_text"}
 
 
 def test_get_document_after_txt_upload(
@@ -535,16 +485,7 @@ def test_get_document_after_txt_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.txt",
-                (fixture_documents_dir / "sample.txt").read_bytes(),
-                "text/plain",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
     assert upload_response.status_code == 200
     document_id = upload_response.json()["document_id"]
 
@@ -561,16 +502,7 @@ def test_get_document_after_pdf_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "sample.pdf",
-                (fixture_documents_dir / "sample.pdf").read_bytes(),
-                "application/pdf",
-            )
-        },
-    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.pdf")
     assert upload_response.status_code == 200
     document_id = upload_response.json()["document_id"]
 
@@ -601,16 +533,7 @@ def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
     _install_fake_ark_client(client, FakeArkClient())
     ids: list[str] = []
     for fname in ("sample.txt", "sample.md"):
-        resp = client.post(
-            "/api/v0/documents",
-            files={
-                "file": (
-                    fname,
-                    (fixture_documents_dir / fname).read_bytes(),
-                    "text/plain",
-                )
-            },
-        )
+        resp = _upload_fixture_document(client, fixture_documents_dir, fname)
         assert resp.status_code == 200
         ids.append(resp.json()["document_id"])
 
@@ -629,28 +552,20 @@ def test_filename_sparse_recalls_when_text_misses(
 ) -> None:
     """上传文件名含 "manual" 的 md 文件，查询 "manual" 时通过 filename sparse 字段召回。"""
     _install_fake_ark_client(client, FakeArkClient())
-    fake_openai_client = _install_fake_openai_client(
+    _install_fake_openai_client(
         client,
         FakeOpenAIClient(output_text="Found via filename."),
     )
-    upload_response = client.post(
-        "/api/v0/documents",
-        files={
-            "file": (
-                "ragflow-manual.md",
-                (fixture_documents_dir / "sample.md").read_bytes(),
-                "text/markdown",
-            )
-        },
+    upload_response = _upload_fixture_document(
+        client,
+        fixture_documents_dir,
+        "sample.md",
+        upload_name="ragflow-manual.md",
     )
     assert upload_response.status_code == 200
-    document_id = upload_response.json()["document_id"]
 
     # "manual" 不在 sample.md 的正文中，但 filename 包含 "manual"。
-    query_response = client.post(
-        "/api/v0/queries",
-        json={"query": "manual", "top_k": 4},
-    )
+    query_response = _query_documents(client, "manual")
 
     assert query_response.status_code == 200
     payload = query_response.json()
@@ -660,3 +575,133 @@ def test_filename_sparse_recalls_when_text_misses(
         ctx["metadata"]["filename"] == "ragflow-manual.md"
         for ctx in payload["contexts"]
     )
+
+
+def test_upload_two_page_pdf_then_query_returns_page_range(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    """上传 2-page PDF 后查询，返回的 context 应包含正确的 page_start / page_end。"""
+    _install_fake_ark_client(client, FakeArkClient())
+    fake_openai_client = _install_fake_openai_client(
+        client,
+        FakeOpenAIClient(output_text="Found alpha and beta."),
+    )
+    upload_response = _upload_fixture_document(client, fixture_documents_dir, "two_pages.pdf")
+
+    assert upload_response.status_code == 200
+    upload_payload = upload_response.json()
+    assert upload_payload["status"] == "indexed"
+    assert upload_payload["file_type"] == "pdf"
+
+    query_response = _query_documents(client, "alpha beta")
+
+    assert query_response.status_code == 200
+    payload = query_response.json()
+    assert payload["answer"] == "Found alpha and beta."
+    assert payload["contexts"]
+    _assert_pdf_context_page_metadata(payload["contexts"])
+    openai_input = _openai_input(fake_openai_client)
+    assert "pages: 1-2" in openai_input
+
+
+# ---------------------------------------------------------------------------
+# 结构化日志断言
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_success_produces_info_log(
+    client,
+    fixture_documents_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """POST /documents 成功时产生 document_ingested info 日志。"""
+    _install_fake_ark_client(client, FakeArkClient())
+    with caplog.at_level(logging.INFO, logger=API_LOGGER):
+        response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+
+    assert response.status_code == 200
+    events = _event_records(caplog, "document_ingested")
+    assert len(events) == 1
+    assert events[0].method == "POST"
+    assert events[0].path == "/api/v0/documents"
+    assert events[0].chunk_count >= 1
+
+
+def test_query_success_produces_info_log(
+    client,
+    fixture_documents_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """POST /queries 成功时产生 query_answered info 日志。"""
+    _install_fake_ark_client(client, FakeArkClient())
+    _install_fake_openai_client(client, FakeOpenAIClient(output_text="回答"))
+    _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+
+    with caplog.at_level(logging.INFO, logger=API_LOGGER):
+        response = _query_documents(client, "test query", top_k=3)
+
+    assert response.status_code == 200
+    events = _event_records(caplog, "query_answered")
+    assert len(events) == 1
+    assert events[0].top_k == 3
+    assert events[0].context_count >= 0
+
+
+def test_domain_error_produces_warning_log(
+    client, caplog: pytest.LogCaptureFixture
+) -> None:
+    """已知 domain error 映射 HTTP 时产生 request_error warning 日志。"""
+    with caplog.at_level(logging.WARNING, logger=API_LOGGER):
+        response = client.post(
+            "/api/v0/documents",
+            files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
+        )
+
+    assert response.status_code == 415
+    events = _event_records(caplog, "request_error")
+    assert len(events) == 1
+    assert events[0].status_code == 415
+    assert events[0].error_type == "UnsupportedFileTypeError"
+    assert events[0].path == "/api/v0/documents"
+
+
+def test_error_response_body_unchanged(client) -> None:
+    """现有 415/422/404/500 响应 body 格式不变。"""
+    # 415
+    resp = client.post(
+        "/api/v0/documents",
+        files={"file": ("bad.exe", b"x", "application/octet-stream")},
+    )
+    assert resp.status_code == 415
+    assert set(resp.json().keys()) == {"detail"}
+
+    # 404
+    resp = client.get("/api/v0/documents/doc_nonexistent")
+    assert resp.status_code == 404
+    assert set(resp.json().keys()) == {"detail"}
+
+
+def test_create_app_startup_failure_logs_and_reraises(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """create_app 因 provider 配置缺失时仍抛原异常，并留下启动失败日志。"""
+    import sys
+
+    from ragflow_lite.app import create_app
+    from ragflow_lite.config import Settings
+
+    app_module = sys.modules["ragflow_lite.app"]
+
+    def _broken_build_services(settings: Settings) -> None:
+        raise RuntimeError("provider config missing")
+
+    monkeypatch.setattr(app_module, "build_services", _broken_build_services)
+
+    with caplog.at_level(logging.ERROR, logger=APP_LOGGER):
+        with pytest.raises(RuntimeError, match="provider config missing"):
+            create_app(Settings.default())
+
+    events = _event_records(caplog, "app_startup_failed")
+    assert len(events) == 1

@@ -10,6 +10,18 @@ from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 
 _CITATION_TOKEN_RE = re.compile(r"<cite:(\d+)>")
 
+
+def _format_page(metadata: dict[str, Any]) -> str:
+    """根据 ``page_start`` / ``page_end`` 生成页信息行，无页信息时返回空串。"""
+    page_start = metadata.get("page_start")
+    page_end = metadata.get("page_end")
+    if page_start is None or page_end is None:
+        return ""
+    if page_start == page_end:
+        return f"page: {page_start}"
+    return f"pages: {page_start}-{page_end}"
+
+
 ANSWERER_INSTRUCTIONS = """You answer questions only with the provided contexts.
 
 Citation rules:
@@ -106,6 +118,8 @@ class OpenAIResponsesAnswerer:
 
         for index, context in enumerate(contexts, start=1):
             metadata = context.metadata or {}
+            page_line = _format_page(metadata)
+
             lines.extend(
                 [
                     f"[{index}]",
@@ -114,6 +128,12 @@ class OpenAIResponsesAnswerer:
                     f"score: {context.score:.6f}",
                     f"filename: {metadata.get('filename', '')}",
                     f"file_type: {metadata.get('file_type', '')}",
+                ]
+            )
+            if page_line:
+                lines.append(page_line)
+            lines.extend(
+                [
                     "text:",
                     context.text.strip(),
                     "",

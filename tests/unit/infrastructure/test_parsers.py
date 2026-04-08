@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ragflow_lite.domain.errors import DocumentParsingError
+from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset
 from ragflow_lite.infrastructure.parsers import (
     BasicPdfParser,
+    CompositeParser,
     MarkdownParser,
     PlainTextParser,
     decode_text,
@@ -31,6 +32,7 @@ def test_plain_text_parser_supports_utf8_bom() -> None:
 
     assert parsed.raw_text == "ragflow-lite"
     assert parsed.metadata["filename"] == "sample.txt"
+    assert parsed.metadata["parser_strategy"] == "plain_text"
 
 
 def test_decode_text_falls_back_with_replacement() -> None:
@@ -56,6 +58,7 @@ def test_markdown_parser_flattens_heading_list_link_and_code_fence() -> None:
     assert "print('hi')" in parsed.raw_text
     assert "#" not in parsed.raw_text
     assert "```" not in parsed.raw_text
+    assert parsed.metadata["parser_strategy"] == "markdown_flatten"
 
 
 def test_flatten_markdown_preserves_underscored_identifiers_and_code() -> None:
@@ -94,6 +97,27 @@ def test_basic_pdf_parser_extracts_text_from_native_pdf() -> None:
     assert parsed.metadata["format"] == "pdf"
     assert parsed.metadata["page_count"] == 1
     assert parsed.metadata["filename"] == "sample.pdf"
+    assert parsed.metadata["parser_strategy"] == "pdf_native_text"
+    page_texts = parsed.metadata["page_texts"]
+    assert len(page_texts) == 1
+    assert page_texts[0]["page_number"] == 1
+    assert "Hello from PDF test page" in page_texts[0]["text"]
+
+
+def test_basic_pdf_parser_returns_page_texts_for_two_page_pdf() -> None:
+    parser = BasicPdfParser()
+    asset = make_asset("two_pages.pdf", "pdf")
+    raw_bytes = (FIXTURES_DIR / "two_pages.pdf").read_bytes()
+
+    parsed = parser.parse(asset, raw_bytes)
+
+    assert parsed.metadata["page_count"] == 2
+    page_texts = parsed.metadata["page_texts"]
+    assert len(page_texts) == 2
+    assert page_texts[0]["page_number"] == 1
+    assert "alpha" in page_texts[0]["text"]
+    assert page_texts[1]["page_number"] == 2
+    assert "beta" in page_texts[1]["text"]
 
 
 def test_basic_pdf_parser_raises_on_corrupted_input() -> None:
@@ -140,3 +164,34 @@ def test_basic_pdf_parser_raises_on_encrypted_pdf() -> None:
         pass
     else:
         raise AssertionError("Expected DocumentParsingError for encrypted PDF")
+
+
+def test_composite_parser_dispatches_by_file_type() -> None:
+    parser = CompositeParser()
+
+    txt_asset = make_asset("test.txt", "txt")
+    parsed = parser.parse(txt_asset, b"hello")
+    assert parsed.metadata["parser_strategy"] == "plain_text"
+
+    md_asset = make_asset("test.md", "md")
+    parsed = parser.parse(md_asset, b"# Hello")
+    assert parsed.metadata["parser_strategy"] == "markdown_flatten"
+
+    pdf_asset = make_asset("sample.pdf", "pdf")
+    pdf_bytes = (FIXTURES_DIR / "sample.pdf").read_bytes()
+    parsed = parser.parse(pdf_asset, pdf_bytes)
+    assert parsed.metadata["parser_strategy"] == "pdf_native_text"
+
+
+def test_composite_parser_raises_on_unsupported_file_type() -> None:
+    parser = CompositeParser()
+    asset = make_asset("test.xyz", "xyz")
+
+    try:
+        parser.parse(asset, b"content")
+    except UnsupportedFileTypeError:
+        pass
+    else:
+        raise AssertionError(
+            "Expected UnsupportedFileTypeError for unsupported file type"
+        )

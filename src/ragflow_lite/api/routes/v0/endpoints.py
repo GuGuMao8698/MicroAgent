@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+import logging
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from ragflow_lite.api.deps.providers import (
     get_document_service,
@@ -26,8 +28,24 @@ from ragflow_lite.domain.errors import (
     RagflowLiteError,
     UnsupportedFileTypeError,
 )
+from ragflow_lite.shared.observability import log_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _request_fields(request: Request) -> dict[str, str]:
+    return {"method": request.method, "path": request.url.path}
+
+
+def _log_request_event(
+    request: Request,
+    level: int,
+    event: str,
+    **fields: object,
+) -> None:
+    log_event(logger, level, event, **_request_fields(request), **fields)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -45,12 +63,20 @@ async def health() -> HealthResponse:
     },
 )
 async def ingest_document(
+    request: Request,
     file: UploadFile = File(...),
     pipeline: IngestionPipeline = Depends(get_ingestion_pipeline),
 ) -> DocumentIngestionResponse:
     try:
         content = await file.read()
         result = pipeline.ingest(file.filename or "", content)
+        _log_request_event(
+            request,
+            logging.INFO,
+            "document_ingested",
+            document_id=result.document_id,
+            chunk_count=result.chunk_count,
+        )
         return DocumentIngestionResponse(
             document_id=result.document_id,
             file_type=result.file_type,
@@ -58,7 +84,7 @@ async def ingest_document(
             status=result.status,
         )
     except RagflowLiteError as exc:
-        raise _map_error(exc) from exc
+        raise _map_error(exc, request) from exc
     finally:
         await file.close()
 
@@ -69,6 +95,7 @@ async def ingest_document(
     responses={status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse}},
 )
 async def list_documents(
+    request: Request,
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentListResponse:
     try:
@@ -87,7 +114,7 @@ async def list_documents(
             ]
         )
     except RagflowLiteError as exc:
-        raise _map_error(exc) from exc
+        raise _map_error(exc, request) from exc
 
 
 @router.get(
@@ -99,6 +126,7 @@ async def list_documents(
     },
 )
 async def get_document(
+    request: Request,
     document_id: str,
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponse:
@@ -113,7 +141,7 @@ async def get_document(
             metadata=doc.metadata,
         )
     except RagflowLiteError as exc:
-        raise _map_error(exc) from exc
+        raise _map_error(exc, request) from exc
 
 
 @router.post(
@@ -122,11 +150,19 @@ async def get_document(
     responses={status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse}},
 )
 async def query_documents(
+    request: Request,
     payload: QueryRequest,
     query_service: QueryService = Depends(get_query_service),
 ) -> QueryResponse:
     try:
         result = query_service.query(payload.query, payload.top_k)
+        _log_request_event(
+            request,
+            logging.INFO,
+            "query_answered",
+            top_k=payload.top_k,
+            context_count=len(result.contexts),
+        )
         return QueryResponse(
             answer=result.answer,
             contexts=[
@@ -142,10 +178,22 @@ async def query_documents(
             metadata=result.metadata,
         )
     except RagflowLiteError as exc:
-        raise _map_error(exc) from exc
+        raise _map_error(exc, request) from exc
 
 
-def _map_error(error: RagflowLiteError) -> HTTPException:
+def _map_error(error: RagflowLiteError, request: Request) -> HTTPException:
+    http_exc = _error_to_http(error)
+    _log_request_event(
+        request,
+        logging.WARNING,
+        "request_error",
+        status_code=http_exc.status_code,
+        error_type=type(error).__name__,
+    )
+    return http_exc
+
+
+def _error_to_http(error: RagflowLiteError) -> HTTPException:
     if isinstance(error, UnsupportedFileTypeError):
         return HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
