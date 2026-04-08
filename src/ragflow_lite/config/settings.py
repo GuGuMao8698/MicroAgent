@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ragflow_lite.shared.observability import normalize_log_format
+
 
 def _read_optional_env(name: str) -> str | None:
     value = os.getenv(name)
@@ -18,6 +20,38 @@ def _read_optional_env(name: str) -> str | None:
 
     stripped = value.strip()
     return stripped or None
+
+
+def _read_string_env(name: str, default: str) -> str:
+    value = _read_optional_env(name)
+    if value is None:
+        return default
+    return value
+
+
+def _read_int_env(name: str, default: int) -> int:
+    value = _read_optional_env(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got '{value}'.") from exc
+
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    value = _read_optional_env(name)
+    if value is None:
+        return default
+
+    normalized = value.lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(
+        f"{name} must be a boolean string such as true/false, got '{value}'."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +88,15 @@ class Settings:
     max_top_k: int = 10
     app_name: str = "ragflow-lite"
     api_prefix: str = "/api/v0"
+    log_level: str = field(
+        default_factory=lambda: _read_string_env("RAGFLOW_LITE_LOG_LEVEL", "INFO")
+    )
+    log_format: str = field(
+        default_factory=lambda: _read_string_env("RAGFLOW_LITE_LOG_FORMAT", "text")
+    )
+    metrics_enabled: bool = field(
+        default_factory=lambda: _read_bool_env("RAGFLOW_LITE_METRICS_ENABLED", False)
+    )
     openai_api_key: str | None = field(
         default_factory=lambda: _read_optional_env("OPENAI_API_KEY")
     )
@@ -69,8 +112,15 @@ class Settings:
         default_factory=lambda: _read_optional_env("ARK_EMBEDDING_MODEL")
     )
     ark_embedding_dimensions: int = 2048
-    infinity_host: str = "127.0.0.1"
-    infinity_port: int = 23817
+    infinity_host: str = field(
+        default_factory=lambda: _read_string_env(
+            "RAGFLOW_LITE_INFINITY_HOST",
+            "127.0.0.1",
+        )
+    )
+    infinity_port: int = field(
+        default_factory=lambda: _read_int_env("RAGFLOW_LITE_INFINITY_PORT", 23817)
+    )
     infinity_database: str = "default_db"
     infinity_document_table: str = "documents"
     infinity_chunk_table: str = "chunks"
@@ -83,6 +133,7 @@ class Settings:
                 "Retrieval is now fixed to hybrid mode. "
                 "Please remove RAGFLOW_LITE_RETRIEVAL_MODE from your environment."
             )
+        normalize_log_format(self.log_format)
 
     @classmethod
     def default(cls, project_root: Path | None = None) -> "Settings":

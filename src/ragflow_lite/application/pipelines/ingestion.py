@@ -29,7 +29,7 @@ from ragflow_lite.domain.ports import (
     Parser,
     VectorIndex,
 )
-from ragflow_lite.shared.observability import log_event
+from ragflow_lite.shared.observability import log_event, record_ingest_outcome
 
 Normalizer = Callable[[str, str], str]
 
@@ -64,7 +64,7 @@ def _log_ingest_event(
         level,
         event,
         document_id=document_id,
-        filename=filename,
+        document_filename=filename,
         file_type=file_type,
         **fields,
     )
@@ -138,6 +138,7 @@ class IngestionPipeline:
             document_id=document_id,
             filename=filename,
             file_type=file_type,
+            outcome="started",
         )
 
         try:
@@ -170,11 +171,13 @@ class IngestionPipeline:
                 document_id=document_id,
                 filename=filename,
                 file_type=file_type,
+                outcome="succeeded",
                 parser_strategy=parser_strategy,
                 chunk_count=len(embedded_chunks),
             )
+            record_ingest_outcome("succeeded", file_type)
             return result
-        except RagflowLiteError:
+        except RagflowLiteError as exc:
             # 只有文件已经落到受控存储后，才需要做文档级回滚。
             if asset is not None:
                 self._rollback(document_id)
@@ -184,7 +187,10 @@ class IngestionPipeline:
                 document_id=document_id,
                 filename=filename,
                 file_type=file_type,
+                outcome="failed",
+                error_type=type(exc).__name__,
             )
+            record_ingest_outcome("failed", file_type)
             raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
             if asset is not None:
@@ -195,7 +201,10 @@ class IngestionPipeline:
                 document_id=document_id,
                 filename=filename,
                 file_type=file_type,
+                outcome="failed",
+                error_type=type(exc).__name__,
             )
+            record_ingest_outcome("failed", file_type)
             raise ProcessingError("Failed to index document.") from exc
 
     def _build_normalized_document(

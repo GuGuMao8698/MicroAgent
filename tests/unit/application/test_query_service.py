@@ -8,6 +8,10 @@ import pytest
 from ragflow_lite.application.services.query_service import QueryService
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
+from ragflow_lite.shared.observability import (
+    bind_request_context,
+    clear_request_context,
+)
 
 QUERY_LOGGER = "ragflow_lite.application.services.query_service"
 
@@ -109,3 +113,24 @@ def test_query_logs_failed_on_unexpected_exception(
 
     assert "query_started" in _event_names(caplog)
     assert "query_failed" in _event_names(caplog)
+
+
+def test_query_logs_trace_id_request_id_and_error_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service = _build_service(retriever_error=ProcessingError("boom"))
+    bind_request_context("trace-query-1")
+
+    try:
+        with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
+            with pytest.raises(ProcessingError):
+                service.query("secret query", top_k=5)
+    finally:
+        clear_request_context()
+
+    failed_record = next(record for record in caplog.records if record.event == "query_failed")
+    assert failed_record.trace_id == "trace-query-1"
+    assert failed_record.request_id
+    assert failed_record.outcome == "failed"
+    assert failed_record.error_type == "ProcessingError"
+    assert "secret query" not in str(failed_record.__dict__)

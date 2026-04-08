@@ -16,6 +16,14 @@ if str(SRC_PATH) not in sys.path:
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
 os.environ.setdefault("ARK_EMBEDDING_MODEL", "ep-test-model")
+for _name in (
+    "RAGFLOW_LITE_LOG_LEVEL",
+    "RAGFLOW_LITE_LOG_FORMAT",
+    "RAGFLOW_LITE_METRICS_ENABLED",
+    "RAGFLOW_LITE_INFINITY_HOST",
+    "RAGFLOW_LITE_INFINITY_PORT",
+):
+    os.environ.pop(_name, None)
 
 # ---------------------------------------------------------------------------
 # 测试用假的 Infinity client（不依赖真实网络）

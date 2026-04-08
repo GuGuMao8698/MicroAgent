@@ -12,7 +12,7 @@ from typing import Any
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import AnswerResult
 from ragflow_lite.domain.ports import Answerer, Retriever
-from ragflow_lite.shared.observability import log_event
+from ragflow_lite.shared.observability import log_event, record_query_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class QueryService:
 
     def query(self, query: str, top_k: int) -> AnswerResult:
         """针对已索引内容执行检索并生成回答。"""
-        _log_query_event(logging.INFO, "query_started", query, top_k)
+        _log_query_event(logging.INFO, "query_started", query, top_k, outcome="started")
         try:
             contexts = self.retriever.retrieve(query, top_k)
             result = self.answerer.answer(query, contexts)
@@ -56,12 +56,30 @@ class QueryService:
                 "query_succeeded",
                 query,
                 top_k,
+                outcome="succeeded",
                 context_count=len(result.contexts),
             )
+            record_query_outcome("succeeded")
             return result
-        except RagflowLiteError:
-            _log_query_event(logging.ERROR, "query_failed", query, top_k)
+        except RagflowLiteError as exc:
+            _log_query_event(
+                logging.ERROR,
+                "query_failed",
+                query,
+                top_k,
+                outcome="failed",
+                error_type=type(exc).__name__,
+            )
+            record_query_outcome("failed")
             raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
-            _log_query_event(logging.ERROR, "query_failed", query, top_k)
+            _log_query_event(
+                logging.ERROR,
+                "query_failed",
+                query,
+                top_k,
+                outcome="failed",
+                error_type=type(exc).__name__,
+            )
+            record_query_outcome("failed")
             raise ProcessingError("Failed to answer query.") from exc

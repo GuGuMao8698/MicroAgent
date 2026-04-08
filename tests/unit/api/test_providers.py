@@ -123,3 +123,42 @@ def test_build_services_provides_document_service(tmp_path: Path) -> None:
     services = build_services(_build_settings(tmp_path))
     assert isinstance(services.document_service, DocumentService)
     assert services.document_service.catalog is services.ingestion_pipeline.vector_index
+
+
+def test_settings_default_observability_and_infinity_values(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+
+    assert settings.log_level == "INFO"
+    assert settings.log_format == "text"
+    assert settings.metrics_enabled is False
+    assert settings.infinity_host == "127.0.0.1"
+    assert settings.infinity_port == 23817
+
+
+def test_settings_reads_observability_and_infinity_envs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("RAGFLOW_LITE_LOG_FORMAT", "json")
+    monkeypatch.setenv("RAGFLOW_LITE_METRICS_ENABLED", "true")
+    monkeypatch.setenv("RAGFLOW_LITE_INFINITY_HOST", "host.docker.internal")
+    monkeypatch.setenv("RAGFLOW_LITE_INFINITY_PORT", "31000")
+
+    settings = _build_settings(tmp_path)
+
+    assert settings.log_level == "DEBUG"
+    assert settings.log_format == "json"
+    assert settings.metrics_enabled is True
+    assert settings.infinity_host == "host.docker.internal"
+    assert settings.infinity_port == 31000
+
+
+def test_settings_rejects_invalid_metrics_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_METRICS_ENABLED", "maybe")
+
+    with pytest.raises(RuntimeError, match="RAGFLOW_LITE_METRICS_ENABLED"):
+        _build_settings(tmp_path)

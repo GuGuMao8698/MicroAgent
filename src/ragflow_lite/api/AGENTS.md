@@ -9,7 +9,9 @@
 - 在 `deps` 放依赖组装、服务获取和路由层适配。
 - 查询接口不暴露检索策略参数；HTTP 请求/响应结构保持稳定。
 - 文档读取接口通过 `DocumentService` -> `DocumentCatalog` 获取数据，未知 `document_id` 返回 `404`。
-- 路由层负责 request context 绑定、HTTP 错误映射日志（`request_error` warning）和最小成功日志（`document_ingested` / `query_answered` info）。保持响应结构稳定，不在路由层发散业务日志。
+- 路由层负责 request context / trace header 绑定与回写、HTTP 错误映射日志（`request_error` warning）、未处理异常边界日志（`request_unhandled_exception` error），以及可选 `/metrics` 路由注册。
+- HTTP metrics 只记录低基数 label；`route` 必须优先使用模板路径，不把 `document_id`、query、文件名等高基数值写进 label。
+- 保持响应结构稳定，不在路由层发散业务日志，也不在这里拼业务指标。
 
 ## Avoid Here
 - 不要在这里编排 parser、chunking、embedding、index、answer 主流程。

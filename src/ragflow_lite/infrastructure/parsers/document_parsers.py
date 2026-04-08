@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from io import BytesIO
 
@@ -15,6 +16,7 @@ from pypdf import PdfReader
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
+from ragflow_lite.shared.observability import log_event
 
 # 固定策略 ID：file_type -> parser_strategy 的默认映射。
 PARSER_STRATEGY_MAP: dict[str, str] = {
@@ -31,6 +33,8 @@ INLINE_MARK_OPEN_TO_CLOSE = {
 }
 INLINE_MARK_CLOSE_TYPES = set(INLINE_MARK_OPEN_TO_CLOSE.values())
 
+logger = logging.getLogger(__name__)
+
 
 def _metadata_for(
     asset: DocumentAsset,
@@ -42,6 +46,23 @@ def _metadata_for(
     }
     metadata.update(extra_fields)
     return metadata
+
+
+def _log_parser_failed(
+    asset: DocumentAsset,
+    *,
+    parser_strategy: str,
+    error_type: str,
+) -> None:
+    log_event(
+        logger,
+        logging.ERROR,
+        "parser_failed",
+        document_filename=asset.filename,
+        file_type=asset.file_type,
+        parser_strategy=parser_strategy,
+        error_type=error_type,
+    )
 
 
 def decode_text(raw_bytes: bytes) -> str:
@@ -175,6 +196,11 @@ class PlainTextParser:
         try:
             text = decode_text(raw_bytes)
         except Exception as exc:  # pragma: no cover - decode_text already guards
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(
@@ -193,6 +219,11 @@ class MarkdownParser:
         try:
             text = flatten_markdown(decode_text(raw_bytes))
         except Exception as exc:  # pragma: no cover - decode_text already guards
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(
@@ -224,6 +255,11 @@ class BasicPdfParser:
                     texts.append(page_text)
                     page_texts.append({"page_number": i, "text": page_text})
         except Exception as exc:
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(

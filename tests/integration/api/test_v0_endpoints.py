@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
+from ragflow_lite.app import create_app
+from ragflow_lite.config import Settings
 from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
 
 API_LOGGER = "ragflow_lite.api.routes.v0.endpoints"
 APP_LOGGER = "ragflow_lite.app"
+OBSERVABILITY_LOGGER = "ragflow_lite.api.observability"
 _CONTENT_TYPES = {
     ".txt": "text/plain",
     ".md": "text/markdown",
@@ -167,11 +172,30 @@ def _assert_pdf_context_page_metadata(contexts: list[dict[str, Any]]) -> None:
     )
 
 
+def _build_settings(tmp_path: Path, *, metrics_enabled: bool = False) -> Settings:
+    settings = Settings(
+        project_root=tmp_path,
+        uploads_dir=tmp_path / "uploads",
+        local_index_dir=tmp_path / "local_index",
+        temp_dir=tmp_path / "tmp",
+        metrics_enabled=metrics_enabled,
+    )
+    settings.ensure_directories()
+    return settings
+
+
 def test_health_endpoint(client) -> None:
     response = client.get("/api/v0/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_health_response_includes_generated_trace_id(client) -> None:
+    response = client.get("/api/v0/health")
+
+    assert response.status_code == 200
+    assert re.fullmatch(r"\d+", response.headers["X-Trace-Id"])
 
 
 def test_upload_txt_then_query_returns_answer_and_contexts(
@@ -628,6 +652,33 @@ def test_ingest_success_produces_info_log(
     assert events[0].chunk_count >= 1
 
 
+def test_ingest_trace_id_is_propagated_and_logged(
+    client,
+    fixture_documents_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+
+    with caplog.at_level(logging.INFO, logger=API_LOGGER):
+        response = client.post(
+            "/api/v0/documents",
+            headers={"X-Trace-Id": "trace-123"},
+            files={
+                "file": (
+                    "sample.txt",
+                    (fixture_documents_dir / "sample.txt").read_bytes(),
+                    "text/plain",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["X-Trace-Id"] == "trace-123"
+    event = _event_records(caplog, "document_ingested")[0]
+    assert event.trace_id == "trace-123"
+    assert event.request_id
+
+
 def test_query_success_produces_info_log(
     client,
     fixture_documents_dir: Path,
@@ -646,6 +697,8 @@ def test_query_success_produces_info_log(
     assert len(events) == 1
     assert events[0].top_k == 3
     assert events[0].context_count >= 0
+    assert events[0].trace_id == response.headers["X-Trace-Id"]
+    assert events[0].request_id
 
 
 def test_domain_error_produces_warning_log(
@@ -664,6 +717,8 @@ def test_domain_error_produces_warning_log(
     assert events[0].status_code == 415
     assert events[0].error_type == "UnsupportedFileTypeError"
     assert events[0].path == "/api/v0/documents"
+    assert events[0].trace_id == response.headers["X-Trace-Id"]
+    assert events[0].request_id
 
 
 def test_error_response_body_unchanged(client) -> None:
@@ -705,3 +760,178 @@ def test_create_app_startup_failure_logs_and_reraises(
 
     events = _event_records(caplog, "app_startup_failed")
     assert len(events) == 1
+
+
+def test_metrics_route_disabled_returns_404(tmp_path: Path) -> None:
+    app = create_app(_build_settings(tmp_path, metrics_enabled=False))
+
+    with TestClient(app) as client:
+        response = client.get("/metrics")
+
+    assert response.status_code == 404
+
+
+def test_metrics_route_enabled_exposes_prometheus_metrics(
+    tmp_path: Path,
+    fixture_documents_dir: Path,
+) -> None:
+    app = create_app(_build_settings(tmp_path, metrics_enabled=True))
+
+    with TestClient(app) as metrics_client:
+        _install_fake_ark_client(metrics_client, FakeArkClient())
+        _install_fake_openai_client(metrics_client, FakeOpenAIClient(output_text="回答"))
+        upload_response = _upload_fixture_document(
+            metrics_client,
+            fixture_documents_dir,
+            "sample.txt",
+        )
+        assert upload_response.status_code == 200
+
+        query_response = _query_documents(metrics_client, "test query")
+        assert query_response.status_code == 200
+
+        bad_response = metrics_client.post(
+            "/api/v0/documents",
+            files={"file": ("bad.exe", b"x", "application/octet-stream")},
+        )
+        assert bad_response.status_code == 415
+
+        metrics_response = metrics_client.get("/metrics")
+
+    assert metrics_response.status_code == 200
+    body = metrics_response.text
+    assert "ragflow_lite_http_requests_total" in body
+    assert (
+        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="200"}'
+        in body
+    )
+    assert (
+        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="415"}'
+        in body
+    )
+    assert 'ragflow_lite_ingest_total{file_type="txt",outcome="succeeded"}' in body
+    assert 'ragflow_lite_query_total{outcome="succeeded"}' in body
+    assert 'route="/metrics"' not in body
+
+
+def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
+    tmp_path: Path,
+    fixture_documents_dir: Path,
+) -> None:
+    first_app = create_app(_build_settings(tmp_path / "app_one", metrics_enabled=True))
+
+    with TestClient(first_app) as first_client:
+        _install_fake_ark_client(first_client, FakeArkClient())
+        upload_response = _upload_fixture_document(
+            first_client,
+            fixture_documents_dir,
+            "sample.txt",
+        )
+        assert upload_response.status_code == 200
+
+        second_app = create_app(_build_settings(tmp_path / "app_two", metrics_enabled=False))
+        with TestClient(second_app) as second_client:
+            disabled_metrics_response = second_client.get("/metrics")
+
+        first_metrics_response = first_client.get("/metrics")
+
+    assert disabled_metrics_response.status_code == 404
+    assert first_metrics_response.status_code == 200
+    assert (
+        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="200"}'
+        in first_metrics_response.text
+    )
+    assert 'ragflow_lite_ingest_total{file_type="txt",outcome="succeeded"}' in first_metrics_response.text
+
+
+def test_method_not_allowed_metrics_use_partial_route_label(tmp_path: Path) -> None:
+    app = create_app(_build_settings(tmp_path, metrics_enabled=True))
+
+    with TestClient(app) as test_client:
+        response = test_client.put("/api/v0/health")
+        metrics_response = test_client.get("/metrics")
+
+    assert response.status_code == 405
+    body = metrics_response.text
+    assert (
+        'ragflow_lite_http_requests_total{method="PUT",route="/api/v0/health",status_code="405"}'
+        in body
+    )
+    assert 'route="unmatched",status_code="405"' not in body
+
+
+def test_unhandled_exception_is_logged_and_counted(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(_build_settings(tmp_path, metrics_enabled=True))
+
+    @app.get("/boom")
+    async def boom() -> dict[str, str]:
+        raise RuntimeError("boom")
+
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        with caplog.at_level(logging.ERROR, logger=OBSERVABILITY_LOGGER):
+            response = test_client.get("/boom", headers={"X-Trace-Id": "trace-boom"})
+        metrics_response = test_client.get("/metrics")
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert response.headers["X-Trace-Id"] == "trace-boom"
+
+    events = _event_records(caplog, "request_unhandled_exception")
+    assert len(events) == 1
+    assert events[0].error_type == "RuntimeError"
+    assert events[0].trace_id == "trace-boom"
+    assert events[0].request_id
+
+    body = metrics_response.text
+    assert (
+        'ragflow_lite_http_request_exceptions_total{exception_type="RuntimeError",method="GET",route="/boom"}'
+        in body
+    )
+    assert (
+        'ragflow_lite_http_requests_total{method="GET",route="/boom",status_code="500"}'
+        in body
+    )
+
+
+def test_logs_do_not_include_raw_query_or_document_content(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(_build_settings(tmp_path, metrics_enabled=False))
+    secret_query = "SECRET_QUERY_123"
+    secret_document = "SECRET_DOC_CONTENT_123"
+
+    with TestClient(app) as test_client:
+        _install_fake_ark_client(test_client, FakeArkClient())
+        _install_fake_openai_client(test_client, FakeOpenAIClient(output_text="回答"))
+
+        with caplog.at_level(logging.INFO):
+            upload_response = test_client.post(
+                "/api/v0/documents",
+                files={"file": ("secret.txt", secret_document.encode("utf-8"), "text/plain")},
+            )
+            query_response = _query_documents(test_client, secret_query)
+
+    assert upload_response.status_code == 200
+    assert query_response.status_code == 200
+
+    relevant_events = {
+        "document_ingested",
+        "query_answered",
+        "ingest_started",
+        "ingest_succeeded",
+        "query_started",
+        "query_succeeded",
+    }
+    relevant_records = [
+        record for record in caplog.records if getattr(record, "event", None) in relevant_events
+    ]
+
+    assert relevant_records
+    for record in relevant_records:
+        rendered = str(record.__dict__)
+        assert secret_query not in rendered
+        assert secret_document not in rendered

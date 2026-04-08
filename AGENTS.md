@@ -27,15 +27,12 @@
 
 
 ## Current Working Focus
-- 当前检索质量主线继续围绕 Infinity hybrid path 打磨：`search_hybrid()` 先扩大候选，再裁回 `top_k`，避免单路候选过早截断。
-- `InfinityHybridRetriever` 仅对全文分支使用保守 sparse-query 分析；dense embedding 仍基于原始 query。
-- hybrid sparse 继续依赖 `filename` + `text` 多字段匹配，增强文件名可见信号的召回；`search_text()` 保持单字段诊断语义。
-- PDF 页感知 citation 已落地：`BasicPdfParser.page_texts` -> `IngestionPipeline.page_spans` -> `FixedWindowChunker.page_start/page_end` -> answerer prompt 的 `page:` / `pages:`，内部键不进入 chunk metadata 或 document catalog。
-- 基础 parser strategy 已落地：固定策略 ID（`plain_text` / `markdown_flatten` / `pdf_native_text`）由 `PARSER_STRATEGY_MAP` 承接，`CompositeParser` 直接按 `file_type` 分派，`parser_strategy` 通过 metadata 链路落入 document catalog 和 retrieval context。
-- 结构化日志与错误处理基线已落地：`shared/observability` 提供一次性 logging 初始化、request-scoped `request_id`、结构化日志 helper；`IngestionPipeline` / `QueryService` 记录阶段日志；rollback 改为 best-effort，失败不覆盖原始异常；API 层记录错误映射 warning 日志和成功 info 日志。使用标准库 `logging`，不引入外部依赖。
-- 这一步不改 HTTP 响应 schema、状态码或 `detail` 文案，不新增配置项、环境变量或公开 API；`request_id` 仅作为服务端内部日志字段。
-- 下一步最小增量是基础 dataset 管理；hybrid path 暂不继续扩 scope，不引入 rerank / 新配置 / 新 API。
-- 当前约束保持收敛：不引入 rerank、新公共配置项或新的 API 形态；生产检索路径维持 Infinity hybrid，`RAGFLOW_LITE_RETRIEVAL_MODE` 不再支持。
+根文档这里只保留仓库级现状与边界；具体实现、测试、运行和分层约束以下级 `AGENTS.md` 为准。
+
+- 当前默认生产主路径仍是 Infinity hybrid，相关改动继续以收敛默认路径和避免 scope 膨胀为前提。
+- 当前 V2 的下一步最小增量仍是基础 dataset 管理；已落地能力不在这里重复展开实现细节。
+- 未进入默认主链路的能力暂不扩 scope，包括 rerank、新公共配置、新 API 形态，以及额外的检索主路径。
+- OCR/layout/table、异步 ingestion pipeline、任务状态与失败重试、基础缓存和性能指标、`RAPTOR` 等后续阶段能力继续按路线图推进，不提前塞进当前默认实现。
 
 ## Local Python Workflow
 - 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
@@ -43,6 +40,7 @@
 ## Local Secret Workflow
 - 本机开发环境是 `WSL2 Debian`。`OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL` 统一通过 `pass` 管理，不写入仓库内的 `.env` 或其它项目文件。
 - 默认使用 `ragflow-lite-run` 启动服务；该脚本从 `ragflow-lite/openai`、`ragflow-lite/ark` 和 `ragflow-lite/ark-embedding-model` 读取配置，并以对应环境变量启动 `uvicorn ragflow_lite.app:app --reload`。
+- `docker compose -f docker/compose.local.yml --profile observability up --build` 的 `app` 容器同样依赖宿主当前 shell 已导出的 `OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`；compose 不读取仓库内 `.env`。
 - OpenAI key 变更时，覆盖 `pass` 中的 `ragflow-lite/openai`，然后重新执行 `ragflow-lite-run`：
 
 ```bash

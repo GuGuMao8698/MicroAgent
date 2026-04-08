@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import DocumentAsset, EmbeddedChunk
 from ragflow_lite.infrastructure.vector_indexes import LocalJsonVectorIndex
 
+LOCAL_INDEX_LOGGER = "ragflow_lite.infrastructure.vector_indexes.local_json_index"
 EMBEDDING_SIGNATURE = {
     "provider": "ark",
     "model": "ep-test-model",
@@ -87,3 +89,44 @@ def test_local_json_index_rejects_incompatible_embedding_signature(tmp_path: Pat
 
     with pytest.raises(ProcessingError, match="Re-upload the document or rebuild"):
         index.search([1.0, 0.0, 0.0, 0.0], top_k=3)
+
+
+def test_local_json_index_logs_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    index = LocalJsonVectorIndex(tmp_path, embedding_signature=EMBEDDING_SIGNATURE)
+    asset = DocumentAsset(
+        document_id="doc_alpha",
+        filename="alpha.txt",
+        file_type="txt",
+        storage_path=tmp_path / "alpha.txt",
+        size_bytes=12,
+    )
+    embedded_chunk = EmbeddedChunk(
+        chunk_id="chunk_doc_alpha_0",
+        document_id="doc_alpha",
+        text="alpha",
+        index=0,
+        vector=[1.0, 0.0, 0.0, 0.0],
+        metadata={},
+    )
+
+    def _explode(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.vector_indexes.local_json_index.NamedTemporaryFile",
+        _explode,
+    )
+
+    with caplog.at_level(logging.ERROR, logger=LOCAL_INDEX_LOGGER):
+        with pytest.raises(Exception, match="doc_alpha"):
+            index.index_document(asset, [embedded_chunk])
+
+    record = next(
+        record for record in caplog.records if record.event == "local_index_write_failed"
+    )
+    assert record.document_id == "doc_alpha"
+    assert record.error_type == "OSError"

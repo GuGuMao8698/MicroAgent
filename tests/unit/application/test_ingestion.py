@@ -17,6 +17,10 @@ from ragflow_lite.domain.models import (
     EmbeddedChunk,
     ParsedDocument,
 )
+from ragflow_lite.shared.observability import (
+    bind_request_context,
+    clear_request_context,
+)
 
 INGESTION_LOGGER = "ragflow_lite.application.pipelines.ingestion"
 
@@ -257,3 +261,25 @@ def test_ingest_logs_failed_on_domain_error(caplog: pytest.LogCaptureFixture) ->
 
     assert "ingest_started" in _event_names(caplog)
     assert "ingest_failed" in _event_names(caplog)
+
+
+def test_ingest_logs_trace_id_request_id_and_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pipeline = _build_pipeline(
+        normalizer=_raising_normalizer(ProcessingError("domain failure")),
+    )
+    bind_request_context("trace-ingest-1")
+
+    try:
+        with caplog.at_level(logging.INFO, logger=INGESTION_LOGGER):
+            with pytest.raises(ProcessingError):
+                pipeline.ingest("test.txt", b"hello")
+    finally:
+        clear_request_context()
+
+    failed_record = next(record for record in caplog.records if record.event == "ingest_failed")
+    assert failed_record.trace_id == "trace-ingest-1"
+    assert failed_record.request_id
+    assert failed_record.outcome == "failed"
+    assert failed_record.error_type == "ProcessingError"

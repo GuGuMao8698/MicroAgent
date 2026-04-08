@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset
@@ -83,6 +86,7 @@ def test_flatten_markdown_preserves_underscored_identifiers_and_code() -> None:
 
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "documents"
+PARSER_LOGGER = "ragflow_lite.infrastructure.parsers.document_parsers"
 
 
 def test_basic_pdf_parser_extracts_text_from_native_pdf() -> None:
@@ -130,6 +134,21 @@ def test_basic_pdf_parser_raises_on_corrupted_input() -> None:
         pass
     else:
         raise AssertionError("Expected DocumentParsingError for corrupted PDF")
+
+
+def test_parser_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    parser = BasicPdfParser()
+    asset = make_asset("corrupted.pdf", "pdf")
+
+    with caplog.at_level(logging.ERROR, logger=PARSER_LOGGER):
+        with pytest.raises(DocumentParsingError):
+            parser.parse(asset, b"this is not pdf")
+
+    record = next(record for record in caplog.records if record.event == "parser_failed")
+    assert record.document_filename == "corrupted.pdf"
+    assert record.file_type == "pdf"
+    assert record.parser_strategy == "pdf_native_text"
+    assert record.error_type
 
 
 def test_basic_pdf_parser_returns_empty_text_for_blank_pdf() -> None:
