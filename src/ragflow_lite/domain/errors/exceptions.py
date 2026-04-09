@@ -30,3 +30,20 @@ class ProcessingError(RagflowLiteError):
 class DocumentNotFoundError(RagflowLiteError):
     def __init__(self, document_id: str) -> None:
         super().__init__(f"Document '{document_id}' not found.")
+
+
+class DatasetNotFoundError(RagflowLiteError):
+    def __init__(self, dataset_id: str) -> None:
+        super().__init__(f"Dataset '{dataset_id}' not found.")
+
+
+class DatasetAlreadyExistsError(RagflowLiteError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Dataset with name '{name}' already exists.")
+
+
+class DatasetNotEmptyError(RagflowLiteError):
+    def __init__(self, dataset_id: str) -> None:
+        super().__init__(
+            f"Dataset '{dataset_id}' is not empty. Remove all documents first."
+        )

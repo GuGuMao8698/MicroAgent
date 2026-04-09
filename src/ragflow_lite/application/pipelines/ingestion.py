@@ -24,6 +24,7 @@ from ragflow_lite.domain.errors import (
 from ragflow_lite.domain.models import IngestionResult, ParsedDocument
 from ragflow_lite.domain.ports import (
     Chunker,
+    DatasetStore,
     DocumentStore,
     Embedder,
     Parser,
@@ -117,6 +118,7 @@ class IngestionPipeline:
         embedder: Embedder,
         vector_index: VectorIndex,
         normalizer: Normalizer,
+        dataset_store: DatasetStore | None = None,
     ) -> None:
         self.document_store = document_store
         self.parser = parser
@@ -124,8 +126,14 @@ class IngestionPipeline:
         self.embedder = embedder
         self.vector_index = vector_index
         self.normalizer = normalizer
+        self.dataset_store = dataset_store
 
-    def ingest(self, filename: str, content: bytes) -> IngestionResult:
+    def ingest(
+        self,
+        filename: str,
+        content: bytes,
+        dataset_id: str | None = None,
+    ) -> IngestionResult:
         """完成单个文档从上传内容到索引落盘的全流程。"""
         file_type = self._resolve_file_type(filename)
         document_id = f"doc_{uuid4().hex}"
@@ -159,11 +167,22 @@ class IngestionPipeline:
             chunks = self.chunker.chunk(normalized_document)
             embedded_chunks = self.embedder.embed_chunks(chunks)
             self.vector_index.index_document(asset, embedded_chunks)
+
+            # 在同一受控流程里完成 dataset 绑定
+            if dataset_id is not None and self.dataset_store is not None:
+                try:
+                    self.dataset_store.bind_document(document_id, dataset_id)
+                except Exception:
+                    # 绑定失败时清理 binding，但不覆盖原始异常
+                    self._rollback_binding(document_id)
+                    raise
+
             result = IngestionResult(
                 document_id=document_id,
                 file_type=file_type,
                 chunk_count=len(embedded_chunks),
                 status="indexed",
+                dataset_id=dataset_id,
             )
             _log_ingest_event(
                 logging.INFO,
@@ -263,6 +282,17 @@ class IngestionPipeline:
             document_id,
             "document_store",
             self.document_store.delete_document,
+        )
+        self._rollback_binding(document_id)
+
+    def _rollback_binding(self, document_id: str) -> None:
+        """Best-effort 清理 dataset binding。"""
+        if self.dataset_store is None:
+            return
+        self._rollback_step(
+            document_id,
+            "dataset_binding",
+            self.dataset_store.unbind_document,
         )
 
     def _rollback_step(

@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 import infinity
 from infinity.common import ConflictType, NetworkAddress, SortType
 
-from ragflow_lite.domain.errors import DocumentNotFoundError, ProcessingError
+from ragflow_lite.domain.errors import (
+    DatasetAlreadyExistsError,
+    DatasetNotEmptyError,
+    DatasetNotFoundError,
+    DocumentNotFoundError,
+    ProcessingError,
+)
 from ragflow_lite.domain.models import (
+    Dataset,
     DocumentAsset,
     EmbeddedChunk,
     IndexedDocument,
@@ -26,8 +35,12 @@ logger = logging.getLogger(__name__)
 EmbeddingSignature = dict[str, str | int | None]
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class InfinityDenseVectorIndex:
-    """基于 Infinity 的稠密向量索引，维护文档表和 chunk 表。"""
+    """基于 Infinity 的稠密向量索引，维护文档表、chunk 表、dataset 表和 binding 表。"""
 
     def __init__(
         self,
@@ -55,6 +68,8 @@ class InfinityDenseVectorIndex:
                 NetworkAddress(host, port),
             )
         self._db: Any = self._client.get_database(database)
+        self._datasets_table = f"{document_table}_datasets"
+        self._dataset_bindings_table = f"{document_table}_dataset_bindings"
         self._ensure_tables()
 
     def disconnect(self) -> None:
@@ -101,11 +116,13 @@ class InfinityDenseVectorIndex:
         chunk_table.insert(chunk_rows)
 
     def delete_document(self, document_id: str) -> None:
-        """删除文档及其对应的所有 chunk。"""
+        """删除文档及其对应的所有 chunk 和 dataset binding。"""
         doc_table = self._db.get_table(self._document_table)
         chunk_table = self._db.get_table(self._chunk_table)
         self._delete_chunk_rows(chunk_table, document_id)
         self._delete_document_rows(doc_table, document_id)
+        # 清理该文档的 dataset binding。
+        self._delete_binding_rows(document_id)
 
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         """使用内积在稠密向量上检索 chunk。"""
@@ -177,7 +194,7 @@ class InfinityDenseVectorIndex:
     # ------------------------------------------------------------------
 
     def _ensure_tables(self) -> None:
-        """确保文档表和 chunk 表存在，不存在时即时创建。"""
+        """确保文档表、chunk 表、dataset 表和 binding 表存在。"""
         doc_columns = {
             "document_id": {"type": "varchar", "constraints": ["primary key"]},
             "filename": {"type": "varchar"},
@@ -206,6 +223,25 @@ class InfinityDenseVectorIndex:
             "embedding_dimensions": {"type": "integer"},
         }
         self._db.create_table(self._chunk_table, chunk_columns, ConflictType.Ignore)
+
+        datasets_columns = {
+            "dataset_id": {"type": "varchar", "constraints": ["primary key"]},
+            "name": {"type": "varchar"},
+            "description": {"type": "varchar"},
+            "created_at": {"type": "varchar"},
+        }
+        self._db.create_table(
+            self._datasets_table, datasets_columns, ConflictType.Ignore
+        )
+
+        bindings_columns = {
+            "document_id": {"type": "varchar", "constraints": ["primary key"]},
+            "dataset_id": {"type": "varchar"},
+            "bound_at": {"type": "varchar"},
+        }
+        self._db.create_table(
+            self._dataset_bindings_table, bindings_columns, ConflictType.Ignore
+        )
 
         self._validate_chunk_table_dimensions()
         self._ensure_fulltext_index()
@@ -273,7 +309,8 @@ class InfinityDenseVectorIndex:
         df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
         if df.is_empty():
             return []
-        return [self._row_to_indexed_doc(row) for row in df.iter_rows(named=True)]
+        docs = [self._row_to_indexed_doc(row) for row in df.iter_rows(named=True)]
+        return self._enrich_docs_with_dataset_id(docs)
 
     def get_document(self, document_id: str) -> IndexedDocument:
         """按 document_id 精确读取单个文档，未命中抛 DocumentNotFoundError。"""
@@ -295,7 +332,118 @@ class InfinityDenseVectorIndex:
         df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
         if df.is_empty():
             raise DocumentNotFoundError(document_id)
-        return self._row_to_indexed_doc(df.row(0, named=True))
+        doc = self._row_to_indexed_doc(df.row(0, named=True))
+        doc.dataset_id = self.get_dataset_id_for_document(document_id)
+        return doc
+
+    # ------------------------------------------------------------------
+    # DatasetStore 协议实现
+    # ------------------------------------------------------------------
+
+    def create_dataset(self, name: str, description: str) -> Dataset:
+        """创建 dataset，名称做精确唯一约束。"""
+        table = self._db.get_table(self._datasets_table)
+        # 名称唯一性检查
+        for row in table.rows:
+            if row.get("name") == name:
+                raise DatasetAlreadyExistsError(name)
+        dataset_id = f"ds_{uuid4().hex}"
+        now = _utc_now_iso()
+        table.insert(
+            [
+                {
+                    "dataset_id": dataset_id,
+                    "name": name,
+                    "description": description,
+                    "created_at": now,
+                }
+            ]
+        )
+        return Dataset(
+            dataset_id=dataset_id,
+            name=name,
+            description=description,
+            created_at=now,
+        )
+
+    def list_datasets(self) -> list[Dataset]:
+        """列出所有 dataset。"""
+        table = self._db.get_table(self._datasets_table)
+        return [
+            Dataset(
+                dataset_id=row["dataset_id"],
+                name=row["name"],
+                description=row["description"],
+                created_at=row["created_at"],
+            )
+            for row in table.rows
+        ]
+
+    def get_dataset(self, dataset_id: str) -> Dataset:
+        """按 dataset_id 读取单个 dataset，未命中抛 DatasetNotFoundError。"""
+        table = self._db.get_table(self._datasets_table)
+        for row in table.rows:
+            if row.get("dataset_id") == dataset_id:
+                return Dataset(
+                    dataset_id=row["dataset_id"],
+                    name=row["name"],
+                    description=row["description"],
+                    created_at=row["created_at"],
+                )
+        raise DatasetNotFoundError(dataset_id)
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        """删除空 dataset；仍有文档归属时抛 DatasetNotEmptyError。"""
+        # 先确认 dataset 存在
+        self.get_dataset(dataset_id)
+        # 检查是否仍有文档绑定
+        count = self.get_dataset_document_count(dataset_id)
+        if count > 0:
+            raise DatasetNotEmptyError(dataset_id)
+        table = self._db.get_table(self._datasets_table)
+        table.delete(f"dataset_id = '{dataset_id}'")
+
+    def bind_document(self, document_id: str, dataset_id: str) -> None:
+        """将文档绑定到 dataset，单归属语义（upsert）。"""
+        # 确认 dataset 存在
+        self.get_dataset(dataset_id)
+        table = self._db.get_table(self._dataset_bindings_table)
+        # 先删除旧绑定（单归属：一个 document_id 只能绑定一个 dataset）
+        table.delete(_doc_id_filter(document_id))
+        table.insert(
+            [
+                {
+                    "document_id": document_id,
+                    "dataset_id": dataset_id,
+                    "bound_at": _utc_now_iso(),
+                }
+            ]
+        )
+
+    def unbind_document(self, document_id: str) -> None:
+        """解除文档与 dataset 的绑定。"""
+        self._delete_binding_rows(document_id)
+
+    def get_dataset_id_for_document(self, document_id: str) -> str | None:
+        """查询文档绑定的 dataset_id，未绑定返回 None。"""
+        table = self._db.get_table(self._dataset_bindings_table)
+        for row in table.rows:
+            if row.get("document_id") == document_id:
+                return row["dataset_id"]
+        return None
+
+    def get_document_ids_for_dataset(self, dataset_id: str) -> list[str]:
+        """查询 dataset 下所有文档 ID。"""
+        table = self._db.get_table(self._dataset_bindings_table)
+        return [
+            row["document_id"]
+            for row in table.rows
+            if row.get("dataset_id") == dataset_id
+        ]
+
+    def get_dataset_document_count(self, dataset_id: str) -> int:
+        """查询 dataset 下的文档数量。"""
+        return len(self.get_document_ids_for_dataset(dataset_id))
 
     # ------------------------------------------------------------------
     # 全文检索
@@ -322,6 +470,23 @@ class InfinityDenseVectorIndex:
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
+
+    def _enrich_docs_with_dataset_id(
+        self, docs: list[IndexedDocument]
+    ) -> list[IndexedDocument]:
+        """批量填充文档的 dataset_id 字段。"""
+        bindings_table = self._db.get_table(self._dataset_bindings_table)
+        doc_to_ds: dict[str, str] = {}
+        for row in bindings_table.rows:
+            doc_to_ds[row["document_id"]] = row["dataset_id"]
+        for doc in docs:
+            doc.dataset_id = doc_to_ds.get(doc.document_id)
+        return docs
+
+    def _delete_binding_rows(self, document_id: str) -> None:
+        """删除指定文档的 dataset binding 行。"""
+        table = self._db.get_table(self._dataset_bindings_table)
+        table.delete(_doc_id_filter(document_id))
 
     @staticmethod
     def _columns_dataframe(columns_info: Any) -> Any:

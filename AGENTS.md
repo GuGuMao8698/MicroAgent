@@ -18,7 +18,7 @@
   说明：默认不把外部 `rerank` 模型当作主路径，混合排序优先依赖 `Infinity` 引擎内融合分数。
 
 - `V2` : 检索质量增强（多字段权重、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、结构化日志与错误处理基线 : `进行中`
-  说明：当前已落地的 V2 基线集中在 retrieval quality、PDF 页感知 citation、基础 parser strategy、结构化日志与错误处理基线；基础 dataset 管理仍在推进。
+  说明：当前已落地的 V2 基线包括 retrieval quality、PDF 页感知 citation、基础 dataset 管理（显式 dataset 资源、单文档单归属、上传时可选绑定、重绑/解绑、管理面过滤）、基础 parser strategy、结构化日志与错误处理基线。按根文档原始 V2 条目，`tag` / `PageRank` 类轻量结构化 rank feature 仍未见实现痕迹，因此 V2 保持进行中。
 
 - `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
   说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
@@ -30,7 +30,7 @@
 根文档这里只保留仓库级现状与边界；具体实现、测试、运行和分层约束以下级 `AGENTS.md` 为准。
 
 - 当前默认生产主路径仍是 Infinity hybrid，相关改动继续以收敛默认路径和避免 scope 膨胀为前提。
-- 当前 V2 的下一步最小增量仍是基础 dataset 管理；已落地能力不在这里重复展开实现细节。
+- 基础 dataset 管理 baseline 已落地（显式 dataset CRUD、单文档单归属、上传可选绑定、重绑/解绑、管理面过滤）；下一步最小增量是 `tag` / `PageRank` 类轻量结构化 rank feature 或其他检索质量增强方向。已落地能力不在这里重复展开实现细节。
 - 未进入默认主链路的能力暂不扩 scope，包括 rerank、新公共配置、新 API 形态，以及额外的检索主路径。
 - OCR/layout/table、异步 ingestion pipeline、任务状态与失败重试、基础缓存和性能指标、`RAPTOR` 等后续阶段能力继续按路线图推进，不提前塞进当前默认实现。
 

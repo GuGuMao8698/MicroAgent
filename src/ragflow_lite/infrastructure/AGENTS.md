@@ -5,7 +5,7 @@
 
 ## Do Here
 - 在这里实现 `domain/ports` 定义的抽象接口。
-- 默认向量索引主路径是 `InfinityDenseVectorIndex`，承接 dense vector search、hybrid retrieval 和 `DocumentCatalog` 文档目录读路径。`index_document()` 写入 `asset.metadata` 到 `parser_metadata_json`；`list_documents()` / `get_document()` 提供只读目录语义。
+- 默认向量索引主路径是 `InfinityDenseVectorIndex`，承接 dense vector search、hybrid retrieval、`DocumentCatalog` 文档目录读路径和 `DatasetStore` dataset 管理与绑定。`index_document()` 写入 `asset.metadata` 到 `parser_metadata_json`；`list_documents()` / `get_document()` 提供只读目录语义并填充 `dataset_id`；dataset/binding 数据存储在从 `document_table` 派生的 `<document_table>_datasets` 和 `<document_table>_dataset_bindings` 内部表中。
 - `LocalJsonVectorIndex` 仍保留但不再作为默认主路径。
 - 当前 embedding 维度契约是 `2048`。
 - Infinity SDK 的 `to_pl()` 返回 `(polars.DataFrame, extra_dict)` 元组；`show_columns()` 返回 `polars.DataFrame`。

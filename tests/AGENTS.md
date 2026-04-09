@@ -15,6 +15,7 @@
 - 新增测试优先覆盖 provider 装配、文档 catalog 读路径、启动失败路径、维度守卫与元数据映射。
 - 涉及 sparse-query 分析时，覆盖 NFKC、空白压缩、Latin 小写化、中英/数字边界分隔、技术 token 保留（`c++`/`c#`/`node.js`/`api_v1`/`gpt-4o`）与符号输入 fallback；retriever 单测断言 `embed_query()` 收到原始 query、`search_hybrid()` 收到分析后 sparse query。
 - 涉及文档 catalog 时，覆盖 `list_documents` / `get_document`、`DocumentNotFoundError` 的 404 映射、`parser_strategy` 等 parser metadata 的持久化，以及 `DocumentService` / `AppServices` 的透传语义。
+- 涉及 dataset baseline 时，覆盖：dataset CRUD（create/list/get/delete-empty）、重复名称 409、非空 delete 409、上传时绑定 dataset、文档重绑/解绑、`GET /documents?dataset_id=` 过滤、document list/detail/upload response 中的 `dataset_id`、binding 失败后的 rollback 清理，以及 `DatasetService` 名称校验。
 - 涉及回答阶段时，覆盖 inline citation 编号契约、`<cite:n>` 到 `[n]` 的转换、空 contexts fallback 不变，以及 PDF prompt 中的 `page:` / `pages:` 行。
 - 涉及 page-aware citation 与 parser strategy 时，覆盖：逐页 metadata 与空白页过滤、`page_spans` 对齐、chunker 单页/跨页/无页信息场景、PDF contexts 的 `page_start` / `page_end`、内部键不泄露，以及各 parser 写入对应 `parser_strategy`。
 - 涉及结构化日志与错误处理时，覆盖：`caplog` 断言事件名和关键字段、rollback best-effort 不覆盖原始异常、`QueryService` unexpected exception 仍 wrap 为 `ProcessingError`、HTTP 错误响应 body 不变，以及 `create_app` 启动失败仍抛原异常并记日志。

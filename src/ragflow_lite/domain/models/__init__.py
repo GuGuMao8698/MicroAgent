@@ -1,6 +1,7 @@
 from ragflow_lite.domain.models.entities import (
     AnswerResult,
     Chunk,
+    Dataset,
     DocumentAsset,
     EmbeddedChunk,
     IndexedDocument,
@@ -12,6 +13,7 @@ from ragflow_lite.domain.models.entities import (
 __all__ = [
     "AnswerResult",
     "Chunk",
+    "Dataset",
     "DocumentAsset",
     "EmbeddedChunk",
     "IndexedDocument",

@@ -96,6 +96,12 @@ class FakeInfinityTable:
         doc_id = _parse_doc_id_from_filter(cond)
         if doc_id is not None:
             self.rows = [r for r in self.rows if r.get("document_id") != doc_id]
+            return
+        # 支持 dataset_id = '...' 过滤
+        ds_match = re.search(r"dataset_id\s*=\s*'([^']*(?:''[^']*)*)'", cond)
+        if ds_match is not None:
+            ds_id = ds_match.group(1).replace("''", "'")
+            self.rows = [r for r in self.rows if r.get("dataset_id") != ds_id]
 
     def show_columns(self) -> pl.DataFrame | tuple[pl.DataFrame, dict[str, Any]]:
         names = []

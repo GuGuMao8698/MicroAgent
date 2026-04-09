@@ -32,6 +32,7 @@ class IndexedDocument:
     size_bytes: int
     created_at: str
     metadata: Metadata = field(default_factory=dict)
+    dataset_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -78,8 +79,17 @@ class AnswerResult:
 
 
 @dataclass(slots=True)
+class Dataset:
+    dataset_id: str
+    name: str
+    description: str
+    created_at: str
+
+
+@dataclass(slots=True)
 class IngestionResult:
     document_id: str
     file_type: str
     chunk_count: int
     status: str
+    dataset_id: str | None = None

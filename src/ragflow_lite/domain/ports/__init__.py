@@ -1,6 +1,7 @@
 from ragflow_lite.domain.ports.interfaces import (
     Answerer,
     Chunker,
+    DatasetStore,
     DocumentCatalog,
     DocumentStore,
     Embedder,
@@ -12,6 +13,7 @@ from ragflow_lite.domain.ports.interfaces import (
 __all__ = [
     "Answerer",
     "Chunker",
+    "DatasetStore",
     "DocumentCatalog",
     "DocumentStore",
     "Embedder",
