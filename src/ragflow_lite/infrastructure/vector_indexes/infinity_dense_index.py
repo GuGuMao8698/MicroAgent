@@ -154,6 +154,9 @@ class InfinityDenseVectorIndex:
 
         参数 ``query`` 视为传给全文分支的 sparse query；dense embedding
         仍来自原始用户 query。
+
+        fusion 结果在 top_k 裁剪前应用基于 ``chunk_index`` 的 bounded
+        position prior，使文档前部 chunk 在近邻候选中稍获提升。
         """
         self._validate_query_dimensions(query_vector)
 
@@ -178,7 +181,7 @@ class InfinityDenseVectorIndex:
                 topn=candidate_k,
                 fusion_params={"weights": "0.05,0.95", "normalize": "atan"},
             )
-            .output(self._chunk_output_columns("_score"))
+            .output(self._chunk_output_columns("_score", include_chunk_index=True))
             .to_pl()
         )
 
@@ -187,6 +190,8 @@ class InfinityDenseVectorIndex:
             score_field="_score",
             validate_embedding_signature=True,
         )
+        _apply_position_prior(results)
+        results.sort(key=lambda c: c.score, reverse=True)
         return results[:top_k]
 
     # ------------------------------------------------------------------
@@ -508,6 +513,7 @@ class InfinityDenseVectorIndex:
         score_field: str,
         *,
         include_embedding: bool = True,
+        include_chunk_index: bool = False,
     ) -> list[str]:
         """返回 chunk 查询的输出列名列表。"""
         columns = [
@@ -518,6 +524,8 @@ class InfinityDenseVectorIndex:
             "file_type",
             "chunk_metadata_json",
         ]
+        if include_chunk_index:
+            columns.append("chunk_index")
         if include_embedding:
             columns.extend(
                 [
@@ -554,6 +562,8 @@ class InfinityDenseVectorIndex:
             metadata = self._parse_json(row.get("chunk_metadata_json", ""))
             metadata["filename"] = row.get("filename")
             metadata["file_type"] = row.get("file_type")
+            if "chunk_index" in row:
+                metadata["_chunk_index"] = row["chunk_index"]
             results.append(
                 RetrievedChunk(
                     chunk_id=row["chunk_id"],
@@ -646,6 +656,27 @@ class InfinityDenseVectorIndex:
             return json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+def _apply_position_prior(
+    chunks: list[RetrievedChunk],
+    *,
+    boost: float = 0.03,
+) -> None:
+    """对 fusion 结果原地应用 bounded position prior。
+
+    ``adjusted_score = score + boost / (1 + chunk_index)``；
+    ``chunk_index`` 缺失、非整数或小于 0 时 boost 按 0 处理。
+    """
+    for chunk in chunks:
+        raw = chunk.metadata.pop("_chunk_index", None)
+        try:
+            idx = int(raw)  # type: ignore[arg-type]
+            if idx < 0:
+                idx = 0
+        except (TypeError, ValueError):
+            idx = 0
+        chunk.score += boost / (1 + idx)
 
 
 def _doc_id_filter(document_id: str) -> str:

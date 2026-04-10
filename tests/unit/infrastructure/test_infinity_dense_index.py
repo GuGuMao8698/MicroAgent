@@ -514,6 +514,81 @@ class TestInfinityDenseVectorIndex:
         assert len(results) == 1
         assert results[0].document_id == "doc_fn"
 
+    def test_search_hybrid_position_prior_prefers_earlier_chunk(
+        self, make_index
+    ) -> None:
+        """fusion 基础分相同时，chunk_index 更小者因位置先验排在前面。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        # 两个 chunk 的 text 和 vector 完全相同，fusion 分相同；
+        # chunk_index=5 的先验 boost < chunk_index=0 的 boost。
+        chunks = [
+            _make_chunk(
+                document_id="doc_1",
+                index=5,
+                text="hello world",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+            _make_chunk(
+                document_id="doc_1",
+                index=0,
+                text="hello world",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=2)
+
+        assert len(results) == 2
+        assert results[0].chunk_id == "chunk_doc_1_0"  # index=0
+        assert results[1].chunk_id == "chunk_doc_1_5"  # index=5
+
+    def test_search_hybrid_position_prior_does_not_override_large_score_gap(
+        self, make_index
+    ) -> None:
+        """fusion 分差距大于最大 boost(0.03) 时，位置先验不能反转排名。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        # chunk 0：纯 text 匹配（无 dense），fusion 分较低
+        # chunk 1：高 dense 分（无 text 匹配），fusion 分较高
+        chunks = [
+            _make_chunk(
+                document_id="doc_1",
+                index=0,
+                text="hello world",
+                vector=[0.0, 0.0, 0.0, 0.0],
+            ),
+            _make_chunk(
+                document_id="doc_1",
+                index=100,
+                text="no match",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=2)
+
+        assert len(results) == 2
+        # dense-only chunk(index=100) 的 fusion 分应远超 text-only + 位置先验
+        assert results[0].chunk_id == "chunk_doc_1_100"
+
+    def test_search_hybrid_position_prior_not_leaked_to_metadata(
+        self, make_index
+    ) -> None:
+        """位置先验内部字段 _chunk_index 不泄漏到返回的 metadata 中。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert "_chunk_index" not in results[0].metadata
+        assert "chunk_index" not in results[0].metadata
+
 
 class TestDocumentCatalog:
     """验证 InfinityDenseVectorIndex 的 DocumentCatalog 实现。"""

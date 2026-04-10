@@ -1,54 +1,28 @@
 # Project Overview
-`ragflow-lite` is a personal project to build a RAG system closer to `RAGFlow`, with a focus on document import and parsing, chunking, retrieval, grounded answers, and an ingestion pipeline that can evolve over time. Work should respect the current implementation stage instead of assuming later-stage capabilities already exist.
+`ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
 
-
-## Technology Stack
+## Stack
 - Backend: `FastAPI`
-- Database: `PostgreSQL`
-- Cache / state: `Redis`
-- Retrieval engine: `Infinity`
+- Retrieval: `Infinity`
+- Database / cache: `PostgreSQL` + `Redis`
 - Embeddings: Ark text embedding
-- Deployment: `docker-compose`
+- Local deployment: `docker compose`
 
+## Current Stage
+- `V0`-`V2` 已完成。
+- `V3` 异步 ingestion pipeline、任务状态、重试、幂等、进度、基础缓存与性能指标、`RAPTOR` 层级摘要检索。: `未开始`
+- `V4` 保持探索位，包含 OCR/layout/table、query rewrite/multi-query/eval 或平台增强方向。: `未开始`
 
-## Project Progress
-- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
-
-- `V1` : `Infinity` 全文检索、并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数、基础 citation、基础文档元数据管理 : `已完成`
-  说明：默认不把外部 `rerank` 模型当作主路径，混合排序优先依赖 `Infinity` 引擎内融合分数。
-
-- `V2` : 检索质量增强（多字段权重、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、结构化日志与错误处理基线 : `进行中`
-  说明：当前已落地的 V2 基线包括 retrieval quality、PDF 页感知 citation、基础 dataset 管理（显式 dataset 资源、单文档单归属、上传时可选绑定、重绑/解绑、管理面过滤）、基础 parser strategy、结构化日志与错误处理基线。按根文档原始 V2 条目，`tag` / `PageRank` 类轻量结构化 rank feature 仍未见实现痕迹，因此 V2 保持进行中。
-
-- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
-  说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
-
-- `V4` : OCR/layout/table、query rewrite/multi-query/eval、或平台增强方向做深 : `未开始`
-
-
-## Current Working Focus
+## Active Boundaries
 根文档这里只保留仓库级现状与边界；具体实现、测试、运行和分层约束以下级 `AGENTS.md` 为准。
+- 当前默认生产检索主路径仍是 Infinity hybrid；不要顺手引入 rerank、新公共配置、新 API 形态或额外检索主路径。
 
-- 当前默认生产主路径仍是 Infinity hybrid，相关改动继续以收敛默认路径和避免 scope 膨胀为前提。
-- 基础 dataset 管理 baseline 已落地（显式 dataset CRUD、单文档单归属、上传可选绑定、重绑/解绑、管理面过滤）；下一步最小增量是 `tag` / `PageRank` 类轻量结构化 rank feature 或其他检索质量增强方向。已落地能力不在这里重复展开实现细节。
-- 未进入默认主链路的能力暂不扩 scope，包括 rerank、新公共配置、新 API 形态，以及额外的检索主路径。
-- OCR/layout/table、异步 ingestion pipeline、任务状态与失败重试、基础缓存和性能指标、`RAPTOR` 等后续阶段能力继续按路线图推进，不提前塞进当前默认实现。
+## Local Workflow
+- 仓库根 Python 命令默认使用本地 `.venv`。
+- 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
 
-## Local Python Workflow
-- 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
-
-## Local Secret Workflow
-- 本机开发环境是 `WSL2 Debian`。`OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL` 统一通过 `pass` 管理，不写入仓库内的 `.env` 或其它项目文件。
-- 默认使用 `ragflow-lite-run` 启动服务；该脚本从 `ragflow-lite/openai`、`ragflow-lite/ark` 和 `ragflow-lite/ark-embedding-model` 读取配置，并以对应环境变量启动 `uvicorn ragflow_lite.app:app --reload`。
-- `docker compose -f docker/compose.local.yml --profile observability up --build` 的 `app` 容器同样依赖宿主当前 shell 已导出的 `OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL`；compose 不读取仓库内 `.env`。
-- OpenAI key 变更时，覆盖 `pass` 中的 `ragflow-lite/openai`，然后重新执行 `ragflow-lite-run`：
-
-```bash
-read -rsp "NEW OPENAI_API_KEY: " OPENAI_API_KEY; echo
-printf '%s\n' "$OPENAI_API_KEY" | pass insert -m -f ragflow-lite/openai
-unset OPENAI_API_KEY
-```
-
+## Archive
+- 归档索引见 [归档入口](归档/agents/README.md)。其中保留阶段账本、V2 实现快照和本地运行 / 密钥流程三类低频信息。
 
 # cx — Semantic Code Navigation
 
