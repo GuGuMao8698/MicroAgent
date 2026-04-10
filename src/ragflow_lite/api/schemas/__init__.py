@@ -1,4 +1,8 @@
 from ragflow_lite.api.schemas.v0 import (
+    CreateDatasetRequest,
+    DatasetListResponse,
+    DatasetResponse,
+    DocumentDatasetBindingRequest,
     DocumentIngestionResponse,
     DocumentListResponse,
     DocumentResponse,
@@ -10,6 +14,10 @@ from ragflow_lite.api.schemas.v0 import (
 )
 
 __all__ = [
+    "CreateDatasetRequest",
+    "DatasetListResponse",
+    "DatasetResponse",
+    "DocumentDatasetBindingRequest",
     "DocumentIngestionResponse",
     "DocumentListResponse",
     "DocumentResponse",

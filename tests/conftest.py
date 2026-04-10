@@ -16,6 +16,14 @@ if str(SRC_PATH) not in sys.path:
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
 os.environ.setdefault("ARK_EMBEDDING_MODEL", "ep-test-model")
+for _name in (
+    "RAGFLOW_LITE_LOG_LEVEL",
+    "RAGFLOW_LITE_LOG_FORMAT",
+    "RAGFLOW_LITE_METRICS_ENABLED",
+    "RAGFLOW_LITE_INFINITY_HOST",
+    "RAGFLOW_LITE_INFINITY_PORT",
+):
+    os.environ.pop(_name, None)
 
 # ---------------------------------------------------------------------------
 # 测试用假的 Infinity client（不依赖真实网络）
@@ -39,6 +47,24 @@ def _parse_doc_id_from_filter(cond: str) -> str | None:
     return m.group(1).replace("''", "'")
 
 
+def _parse_fields_boost(fields_str: str) -> list[tuple[str, float]]:
+    """解析 Infinity match_text 的 fields 字符串，返回 (field, boost) 列表。
+
+    格式示例：``"filename^3,text"`` → ``[("filename", 3.0), ("text", 1.0)]``。
+    """
+    result: list[tuple[str, float]] = []
+    for part in fields_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "^" in part:
+            name, boost = part.split("^", 1)
+            result.append((name.strip(), float(boost)))
+        else:
+            result.append((part, 1.0))
+    return result
+
+
 class FakeInfinityTable:
     """用于测试的内存表，模拟 Infinity 的 `RemoteTable`。"""
 
@@ -54,6 +80,11 @@ class FakeInfinityTable:
         self.rows: list[dict[str, Any]] = []
         self._indexes: dict[str, dict[str, Any]] = {}
         self._show_columns_mode = show_columns_mode
+        # 最近一次 hybrid 查询各分支的 topn，供单测断言。
+        self.last_hybrid_text_topn: int | None = None
+        self.last_hybrid_dense_topn: int | None = None
+        self.last_hybrid_fusion_topn: int | None = None
+        self.last_hybrid_text_fields: str | None = None
 
     def insert(self, data: list[dict[str, Any]]) -> None:
         self.rows.extend(data)
@@ -65,6 +96,12 @@ class FakeInfinityTable:
         doc_id = _parse_doc_id_from_filter(cond)
         if doc_id is not None:
             self.rows = [r for r in self.rows if r.get("document_id") != doc_id]
+            return
+        # 支持 dataset_id = '...' 过滤
+        ds_match = re.search(r"dataset_id\s*=\s*'([^']*(?:''[^']*)*)'", cond)
+        if ds_match is not None:
+            ds_id = ds_match.group(1).replace("''", "'")
+            self.rows = [r for r in self.rows if r.get("dataset_id") != ds_id]
 
     def show_columns(self) -> pl.DataFrame | tuple[pl.DataFrame, dict[str, Any]]:
         names = []
@@ -157,19 +194,56 @@ class _FakeQueryBuilder:
             return self._to_pl_dense(self._dense_kwargs)
         return pl.DataFrame(), {}
 
+    def _rank_text_hits(
+        self,
+        *,
+        matching_text: str,
+        fields: str = "text",
+        topn: int | None = None,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """按字段 boost 对全文命中做确定性排序。"""
+        field_boosts = _parse_fields_boost(fields)
+        ranked: list[tuple[dict[str, Any], float]] = []
+        for row in self._table.rows:
+            score = 0.0
+            for field, boost in field_boosts:
+                if matching_text.lower() in row.get(field, "").lower():
+                    score += boost
+            if score > 0:
+                ranked.append((row, score))
+
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        if topn is not None:
+            ranked = ranked[:topn]
+        return ranked
+
+    def _rank_dense_hits(
+        self,
+        *,
+        query_vec: list[float],
+        topn: int | None = None,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """按内积得分对 dense 命中做确定性排序。"""
+        ranked: list[tuple[dict[str, Any], float]] = []
+        for row in self._table.rows:
+            score = sum(
+                a * b for a, b in zip(query_vec, row.get("vec", []), strict=False)
+            )
+            if score > 0:
+                ranked.append((row, score))
+
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        if topn is not None:
+            ranked = ranked[:topn]
+        return ranked
+
     def _to_pl_dense(self, match_kwargs: dict[str, Any]) -> tuple[pl.DataFrame, dict]:
         query_vec = match_kwargs.get("embedding_data", [])
         topn = match_kwargs.get("topn", 10)
-
-        scored: list[dict[str, Any]] = []
-        for row in self._table.rows:
-            vec = row.get("vec", [])
-            score = sum(a * b for a, b in zip(query_vec, vec, strict=False))
-            if score > 0:
-                scored.append(self._row_with_score(row, "_distance", score))
-
-        scored.sort(key=lambda r: r["_distance"], reverse=True)
-        scored = scored[:topn]
+        scored = [
+            self._row_with_score(row, "_distance", score)
+            for row, score in self._rank_dense_hits(query_vec=query_vec, topn=topn)
+        ]
 
         if not scored:
             return pl.DataFrame(), {}
@@ -205,15 +279,15 @@ class _FakeQueryBuilder:
     def _to_pl_text(self, match_kwargs: dict[str, Any]) -> tuple[pl.DataFrame, dict]:
         query_text = match_kwargs.get("matching_text", "")
         topn = match_kwargs.get("topn", 10)
-
-        scored: list[dict[str, Any]] = []
-        for row in self._table.rows:
-            text = row.get("text", "")
-            # 简单子串匹配模拟全文检索
-            if query_text.lower() in text.lower():
-                scored.append(self._row_with_score(row, "_score", 1.0))
-
-        scored = scored[:topn]
+        fields = match_kwargs.get("fields", "text")
+        scored = [
+            self._row_with_score(row, "_score", score)
+            for row, score in self._rank_text_hits(
+                matching_text=query_text,
+                fields=fields,
+                topn=topn,
+            )
+        ]
 
         if not scored:
             return pl.DataFrame(), {}
@@ -221,7 +295,7 @@ class _FakeQueryBuilder:
         return pl.DataFrame(scored), {}
 
     def _to_pl_fusion(self) -> tuple[pl.DataFrame, dict]:
-        """确定性内存融合：按 chunk_id union，text 固定分 1.0，dense 分按单调归一化后加权。"""
+        """确定性内存融合：按 chunk_id union，text/dense 分经排序后融合。"""
         topn = self._fusion_kwargs.get("topn", 10) if self._fusion_kwargs else 10
         weights_str = (
             self._fusion_kwargs.get("fusion_params", {}).get("weights", "0.5,0.5")
@@ -229,6 +303,18 @@ class _FakeQueryBuilder:
             else "0.5,0.5"
         )
         text_weight, dense_weight = (float(w) for w in weights_str.split(",", 1))
+
+        # 记录各分支 topn 供单测断言。
+        self._table.last_hybrid_text_topn = (
+            self._text_kwargs.get("topn") if self._text_kwargs else None
+        )
+        self._table.last_hybrid_dense_topn = (
+            self._dense_kwargs.get("topn") if self._dense_kwargs else None
+        )
+        self._table.last_hybrid_fusion_topn = topn
+        self._table.last_hybrid_text_fields = (
+            self._text_kwargs.get("fields") if self._text_kwargs else None
+        )
 
         text_results = self._collect_text_hits()
         dense_results = self._collect_dense_scores()
@@ -267,29 +353,30 @@ class _FakeQueryBuilder:
         return pl.DataFrame(scored), {}
 
     def _collect_text_hits(self) -> dict[str, float]:
-        """收集全文命中，返回 chunk_id -> 固定分 1.0 的映射。"""
+        """收集全文命中，支持多字段 boost 加权，返回 chunk_id -> 加权分映射，按 topn 截断。"""
         if not self._text_kwargs:
             return {}
         query_text = self._text_kwargs.get("matching_text", "")
+        topn = self._text_kwargs.get("topn")
+        fields = self._text_kwargs.get("fields", "text")
         return {
-            row["chunk_id"]: 1.0
-            for row in self._table.rows
-            if query_text.lower() in row.get("text", "").lower()
+            row["chunk_id"]: score
+            for row, score in self._rank_text_hits(
+                matching_text=query_text,
+                fields=fields,
+                topn=topn,
+            )
         }
 
     def _collect_dense_scores(self) -> dict[str, tuple[float, dict[str, Any]]]:
-        """收集 dense 打分，返回 chunk_id -> (score, row) 的映射。"""
+        """收集 dense 打分，返回 chunk_id -> (score, row) 的映射，按 score 降序截断到 topn。"""
         if not self._dense_kwargs:
             return {}
         query_vec = self._dense_kwargs.get("embedding_data", [])
+        topn = self._dense_kwargs.get("topn")
         return {
-            row["chunk_id"]: (
-                sum(a * b for a, b in zip(query_vec, row.get("vec", []), strict=False)),
-                row,
-            )
-            for row in self._table.rows
-            if sum(a * b for a, b in zip(query_vec, row.get("vec", []), strict=False))
-            > 0
+            row["chunk_id"]: (score, row)
+            for row, score in self._rank_dense_hits(query_vec=query_vec, topn=topn)
         }
 
     def _row_with_score(

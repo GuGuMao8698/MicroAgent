@@ -1,4 +1,7 @@
 from ragflow_lite.domain.errors.exceptions import (
+    DatasetAlreadyExistsError,
+    DatasetNotEmptyError,
+    DatasetNotFoundError,
     DocumentNotFoundError,
     DocumentParsingError,
     EmptyDocumentError,
@@ -9,6 +12,9 @@ from ragflow_lite.domain.errors.exceptions import (
 )
 
 __all__ = [
+    "DatasetAlreadyExistsError",
+    "DatasetNotFoundError",
+    "DatasetNotEmptyError",
     "DocumentNotFoundError",
     "DocumentParsingError",
     "EmptyDocumentError",

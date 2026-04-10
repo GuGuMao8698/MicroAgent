@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from io import BytesIO
 
@@ -15,6 +16,14 @@ from pypdf import PdfReader
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
+from ragflow_lite.shared.observability import log_event
+
+# 固定策略 ID：file_type -> parser_strategy 的默认映射。
+PARSER_STRATEGY_MAP: dict[str, str] = {
+    "txt": "plain_text",
+    "md": "markdown_flatten",
+    "pdf": "pdf_native_text",
+}
 
 MARKDOWN_PARSER = MarkdownIt("commonmark").enable("strikethrough")
 INLINE_MARK_OPEN_TO_CLOSE = {
@@ -23,6 +32,37 @@ INLINE_MARK_OPEN_TO_CLOSE = {
     "s_open": "s_close",
 }
 INLINE_MARK_CLOSE_TYPES = set(INLINE_MARK_OPEN_TO_CLOSE.values())
+
+logger = logging.getLogger(__name__)
+
+
+def _metadata_for(
+    asset: DocumentAsset,
+    **extra_fields: int | str | list[dict[str, int | str]],
+) -> dict[str, int | str | list[dict[str, int | str]]]:
+    metadata: dict[str, int | str | list[dict[str, int | str]]] = {
+        "filename": asset.filename,
+        "parser_strategy": PARSER_STRATEGY_MAP[asset.file_type],
+    }
+    metadata.update(extra_fields)
+    return metadata
+
+
+def _log_parser_failed(
+    asset: DocumentAsset,
+    *,
+    parser_strategy: str,
+    error_type: str,
+) -> None:
+    log_event(
+        logger,
+        logging.ERROR,
+        "parser_failed",
+        document_filename=asset.filename,
+        file_type=asset.file_type,
+        parser_strategy=parser_strategy,
+        error_type=error_type,
+    )
 
 
 def decode_text(raw_bytes: bytes) -> str:
@@ -156,13 +196,18 @@ class PlainTextParser:
         try:
             text = decode_text(raw_bytes)
         except Exception as exc:  # pragma: no cover - decode_text already guards
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(
             document_id=asset.document_id,
             file_type=asset.file_type,
             raw_text=text,
-            metadata={"filename": asset.filename},
+            metadata=_metadata_for(asset),
         )
 
 
@@ -174,13 +219,18 @@ class MarkdownParser:
         try:
             text = flatten_markdown(decode_text(raw_bytes))
         except Exception as exc:  # pragma: no cover - decode_text already guards
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(
             document_id=asset.document_id,
             file_type=asset.file_type,
             raw_text=text,
-            metadata={"filename": asset.filename, "format": "markdown"},
+            metadata=_metadata_for(asset, format="markdown"),
         )
 
 
@@ -188,27 +238,40 @@ class BasicPdfParser:
     """解析数字原生 PDF，逐页抽取文本。"""
 
     def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
-        """逐页提取文本，页间以双换行拼接。"""
+        """逐页提取文本，页间以双换行拼接。
+
+        非空页的抽取结果会以 ``page_texts`` 形式携带在 metadata 中，
+        供下游按页构造位置信息；空白页不进入该列表，但 ``page_count``
+        仍保留原始总页数。
+        """
         try:
             reader = PdfReader(BytesIO(raw_bytes))
             page_count = len(reader.pages)
             texts: list[str] = []
-            for page in reader.pages:
+            page_texts: list[dict[str, int | str]] = []
+            for i, page in enumerate(reader.pages, start=1):
                 page_text = page.extract_text()
                 if page_text and page_text.strip():
                     texts.append(page_text)
+                    page_texts.append({"page_number": i, "text": page_text})
         except Exception as exc:
+            _log_parser_failed(
+                asset,
+                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
+                error_type=type(exc).__name__,
+            )
             raise DocumentParsingError(asset.filename) from exc
 
         return ParsedDocument(
             document_id=asset.document_id,
             file_type=asset.file_type,
             raw_text="\n\n".join(texts),
-            metadata={
-                "filename": asset.filename,
-                "format": "pdf",
-                "page_count": page_count,
-            },
+            metadata=_metadata_for(
+                asset,
+                format="pdf",
+                page_count=page_count,
+                page_texts=page_texts,
+            ),
         )
 
 
@@ -216,10 +279,13 @@ class CompositeParser:
     """按文件类型分派到具体解析器。"""
 
     def __init__(self) -> None:
-        self._parsers = {
-            "txt": PlainTextParser(),
-            "md": MarkdownParser(),
-            "pdf": BasicPdfParser(),
+        self._parsers: dict[str, PlainTextParser | MarkdownParser | BasicPdfParser] = {
+            file_type: parser_cls()
+            for file_type, parser_cls in {
+                "txt": PlainTextParser,
+                "md": MarkdownParser,
+                "pdf": BasicPdfParser,
+            }.items()
         }
 
     def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:

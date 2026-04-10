@@ -7,14 +7,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from ragflow_lite.domain.errors import IndexWriteError, ProcessingError
 from ragflow_lite.domain.models import DocumentAsset, EmbeddedChunk, RetrievedChunk
+from ragflow_lite.shared.observability import log_event
 
 EmbeddingSignature = dict[str, str | int | None]
+
+logger = logging.getLogger(__name__)
 
 
 class LocalJsonVectorIndex:
@@ -67,6 +71,13 @@ class LocalJsonVectorIndex:
             # 先写临时文件再原子替换，避免索引文件只写入一半时被读取到。
             os.replace(temp_path, target_path)
         except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "local_index_write_failed",
+                document_id=asset.document_id,
+                error_type=type(exc).__name__,
+            )
             raise IndexWriteError(asset.document_id) from exc
         finally:
             # 正常替换后临时文件已不存在；异常时这里负责兜底清理。

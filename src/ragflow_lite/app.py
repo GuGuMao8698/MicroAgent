@@ -6,14 +6,22 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 
 from ragflow_lite.api.deps.providers import AppServices, build_services
+from ragflow_lite.api.observability import install_observability
 from ragflow_lite.api.routes.v0 import router as v0_router
 from ragflow_lite.config.settings import Settings
+from ragflow_lite.shared.observability import (
+    log_event,
+    setup_logging,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _disconnect_vector_index(app: FastAPI) -> None:
@@ -30,6 +38,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _disconnect_vector_index(app)
 
 
+def _log_startup_failure() -> None:
+    log_event(
+        logger,
+        logging.ERROR,
+        "app_startup_failed",
+        exc_info=True,
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """创建并初始化应用实例。
 
@@ -37,12 +54,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     注入临时目录配置，避免和真实运行数据互相污染。
     """
     resolved_settings = settings or Settings.default()
+    setup_logging(
+        log_level=resolved_settings.log_level,
+        log_format=resolved_settings.log_format,
+    )
     resolved_settings.ensure_directories()
 
-    app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
-    app.state.services = build_services(resolved_settings)
-    app.include_router(v0_router, prefix=resolved_settings.api_prefix)
-    return app
+    try:
+        app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
+        install_observability(app, enable_metrics=resolved_settings.metrics_enabled)
+        app.state.services = build_services(resolved_settings)
+        app.include_router(v0_router, prefix=resolved_settings.api_prefix)
+        return app
+    except Exception:
+        _log_startup_failure()
+        raise
 
 
 app = create_app()

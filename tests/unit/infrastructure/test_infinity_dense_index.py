@@ -76,6 +76,18 @@ def _make_chunk(
     )
 
 
+def _search_hybrid_and_get_chunk_table(
+    client: Any,
+    idx: InfinityDenseVectorIndex,
+    *,
+    query: str,
+    query_vector: list[float],
+    top_k: int,
+) -> Any:
+    idx.search_hybrid(query, query_vector, top_k=top_k)
+    return client.get_database("default_db").get_table("chunks")
+
+
 class TestInfinityDenseVectorIndex:
     def test_creates_tables_on_init(self, make_index) -> None:
         client, _ = make_index()
@@ -270,6 +282,7 @@ class TestInfinityDenseVectorIndex:
         db = client.get_database("default_db")
         chunk_table = db.get_table("chunks")
         assert "chunks_text_fulltext_idx" in chunk_table._indexes
+        assert "chunks_filename_fulltext_idx" in chunk_table._indexes
 
     def test_search_text_returns_matching_chunks(self, make_index) -> None:
         _, idx = make_index()
@@ -376,6 +389,205 @@ class TestInfinityDenseVectorIndex:
 
         with pytest.raises(ProcessingError, match="Embedding signature mismatch"):
             idx.search_hybrid("chunk text", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+    def test_search_hybrid_uses_candidate_k_window(self, make_index) -> None:
+        """search_hybrid 内部对 text/dense/fusion 传入 candidate_k 而非 top_k。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        top_k = 5
+        expected_candidate_k = max(30, top_k * 4)  # 30
+        chunk_table = _search_hybrid_and_get_chunk_table(
+            client,
+            idx,
+            query="hello",
+            query_vector=[1.0, 0.0, 0.0, 0.0],
+            top_k=top_k,
+        )
+        assert chunk_table.last_hybrid_text_topn == expected_candidate_k
+        assert chunk_table.last_hybrid_dense_topn == expected_candidate_k
+        assert chunk_table.last_hybrid_fusion_topn == expected_candidate_k
+
+    def test_search_hybrid_trims_results_to_top_k(self, make_index) -> None:
+        """search_hybrid 返回结果数量不超过请求的 top_k。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        chunks = [
+            _make_chunk(index=i, text=f"chunk text {i}", vector=[1.0, 0.0, 0.0, 0.0])
+            for i in range(10)
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("chunk text", [1.0, 0.0, 0.0, 0.0], top_k=3)
+        assert len(results) == 3
+
+    def test_search_hybrid_candidate_window_recalls_dual_signal_chunk(
+        self, make_index
+    ) -> None:
+        """candidate_k 扩召窗口使单路截断之外的双信号 chunk 进入最终结果。
+
+        构造：5 个纯 text 匹配 chunk + 2 个纯 dense 匹配 chunk + 1 个双信号
+        chunk（同时匹配 text 和 dense）。使用 top_k=1 时，若各分支只用
+        topn=1 截断，双信号 chunk 会同时被两个分支截掉；但 candidate_k=30
+        使其进入 fusion，最终因双信号加权得分最高而被召回。
+        """
+        _, idx = make_index()
+        asset = _make_asset()
+
+        chunks: list[EmbeddedChunk] = []
+        # 5 个 text-only chunk：匹配 "alpha" 但 dense 得分为零
+        for i in range(5):
+            chunks.append(
+                _make_chunk(
+                    document_id="doc_1",
+                    index=i,
+                    text="alpha content",
+                    vector=[0.0, 0.0, 0.0, 0.0],
+                )
+            )
+        # 2 个 dense-only chunk：高 dense 分但不包含 "alpha"
+        for i in range(5, 7):
+            chunks.append(
+                _make_chunk(
+                    document_id="doc_1",
+                    index=i,
+                    text="xyz unrelated",
+                    vector=[0.9, 0.0, 0.0, 0.0],
+                )
+            )
+        # 1 个双信号 chunk：同时匹配 text 和 dense
+        dual = _make_chunk(
+            document_id="doc_1",
+            index=7,
+            text="alpha keyword",
+            vector=[0.9, 0.0, 0.0, 0.0],
+        )
+        chunks.append(dual)
+
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("alpha", [1.0, 0.0, 0.0, 0.0], top_k=1)
+
+        assert len(results) == 1
+        assert results[0].chunk_id == dual.chunk_id
+
+    def test_search_hybrid_text_fields_is_filename_boost_text(self, make_index) -> None:
+        """search_hybrid 的 text 分支使用 filename^3,text 多字段。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        chunk_table = _search_hybrid_and_get_chunk_table(
+            client,
+            idx,
+            query="hello",
+            query_vector=[1.0, 0.0, 0.0, 0.0],
+            top_k=5,
+        )
+        assert chunk_table.last_hybrid_text_fields == "filename^3,text"
+
+    def test_search_hybrid_recalls_via_filename_match(self, make_index) -> None:
+        """正文不命中、dense 不命中时，仅靠 filename sparse 字段召回。"""
+        _, idx = make_index()
+        asset = DocumentAsset(
+            document_id="doc_fn",
+            filename="ragflow-manual.md",
+            file_type="md",
+            storage_path=Path("/tmp/ragflow-manual.md"),
+            size_bytes=100,
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+        chunk = _make_chunk(
+            document_id="doc_fn",
+            text="unrelated content here",
+            vector=[0.0, 0.0, 0.0, 0.0],
+            metadata={"filename": "ragflow-manual.md", "file_type": "md"},
+        )
+        idx.index_document(asset, [chunk])
+
+        # "manual" 不在 text 中，但 filename 中包含，sparse 应命中。
+        results = idx.search_hybrid("manual", [0.0, 0.0, 0.0, 1.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].document_id == "doc_fn"
+
+    def test_search_hybrid_position_prior_prefers_earlier_chunk(
+        self, make_index
+    ) -> None:
+        """fusion 基础分相同时，chunk_index 更小者因位置先验排在前面。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        # 两个 chunk 的 text 和 vector 完全相同，fusion 分相同；
+        # chunk_index=5 的先验 boost < chunk_index=0 的 boost。
+        chunks = [
+            _make_chunk(
+                document_id="doc_1",
+                index=5,
+                text="hello world",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+            _make_chunk(
+                document_id="doc_1",
+                index=0,
+                text="hello world",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=2)
+
+        assert len(results) == 2
+        assert results[0].chunk_id == "chunk_doc_1_0"  # index=0
+        assert results[1].chunk_id == "chunk_doc_1_5"  # index=5
+
+    def test_search_hybrid_position_prior_does_not_override_large_score_gap(
+        self, make_index
+    ) -> None:
+        """fusion 分差距大于最大 boost(0.03) 时，位置先验不能反转排名。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        # chunk 0：纯 text 匹配（无 dense），fusion 分较低
+        # chunk 1：高 dense 分（无 text 匹配），fusion 分较高
+        chunks = [
+            _make_chunk(
+                document_id="doc_1",
+                index=0,
+                text="hello world",
+                vector=[0.0, 0.0, 0.0, 0.0],
+            ),
+            _make_chunk(
+                document_id="doc_1",
+                index=100,
+                text="no match",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=2)
+
+        assert len(results) == 2
+        # dense-only chunk(index=100) 的 fusion 分应远超 text-only + 位置先验
+        assert results[0].chunk_id == "chunk_doc_1_100"
+
+    def test_search_hybrid_position_prior_not_leaked_to_metadata(
+        self, make_index
+    ) -> None:
+        """位置先验内部字段 _chunk_index 不泄漏到返回的 metadata 中。"""
+        _, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert "_chunk_index" not in results[0].metadata
+        assert "chunk_index" not in results[0].metadata
 
 
 class TestDocumentCatalog:

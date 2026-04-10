@@ -14,6 +14,7 @@ class DocumentIngestionResponse(BaseModel):
     file_type: str
     chunk_count: int
     status: str
+    dataset_id: str | None = None
 
 
 class QueryRequest(BaseModel):
@@ -56,7 +57,43 @@ class DocumentResponse(BaseModel):
     size_bytes: int
     created_at: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    dataset_id: str | None = None
 
 
 class DocumentListResponse(BaseModel):
     documents: list[DocumentResponse]
+
+
+# Dataset schemas
+
+
+class CreateDatasetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    description: str = Field(default="")
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be blank")
+        return stripped
+
+
+class DatasetResponse(BaseModel):
+    dataset_id: str
+    name: str
+    description: str
+    created_at: str
+
+
+class DatasetListResponse(BaseModel):
+    datasets: list[DatasetResponse]
+
+
+class DocumentDatasetBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: str | None

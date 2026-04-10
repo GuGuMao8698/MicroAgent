@@ -1,51 +1,28 @@
 # Project Overview
-`ragflow-lite` is a personal project to build a RAG system closer to `RAGFlow`, with a focus on document import and parsing, chunking, retrieval, grounded answers, and an ingestion pipeline that can evolve over time. Work should respect the current implementation stage instead of assuming later-stage capabilities already exist.
+`ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
 
-
-## Technology Stack
+## Stack
 - Backend: `FastAPI`
-- Database: `PostgreSQL`
-- Cache / state: `Redis`
-- Retrieval engine: `Infinity`
+- Retrieval: `Infinity`
+- Database / cache: `PostgreSQL` + `Redis`
 - Embeddings: Ark text embedding
-- Deployment: `docker-compose`
+- Local deployment: `docker compose`
 
+## Current Stage
+- `V0`-`V2` 已完成。
+- `V3` 异步 ingestion pipeline、任务状态、重试、幂等、进度、基础缓存与性能指标、`RAPTOR` 层级摘要检索。: `未开始`
+- `V4` 保持探索位，包含 OCR/layout/table、query rewrite/multi-query/eval 或平台增强方向。: `未开始`
 
-## Project Progress
-- `V0` : txt/md/pdf 上传、文本抽取、chunking、embedding、向量检索、回答生成 : `已完成`
+## Active Boundaries
+根文档这里只保留仓库级现状与边界；具体实现、测试、运行和分层约束以下级 `AGENTS.md` 为准。
+- 当前默认生产检索主路径仍是 Infinity hybrid；不要顺手引入 rerank、新公共配置、新 API 形态或额外检索主路径。
 
-- `V1` : `Infinity` 全文检索、并行 sparse+dense hybrid retrieval、优先复用 `Infinity` 原生 fusion / 归一化分数、基础 citation、基础文档元数据管理 : `已完成`
-  说明：近期默认不把外部 `rerank` 模型当作主路径，第一版混合排序优先依赖 `Infinity` 引擎内融合分数。
+## Local Workflow
+- 仓库根 Python 命令默认使用本地 `.venv`。
+- 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
 
-- `V2` : 检索质量增强（多字段权重、回退扩召、轻量 rank feature，如 tag / PageRank 类结构化信号）、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理 : `进行中`
-
-- `V3` : 异步 ingestion pipeline、任务状态、失败重试、幂等、进度、基础缓存和性能指标、`RAPTOR` 层级摘要检索 : `未开始`
-  说明：`RAPTOR` 是树状摘要增强能力，不替代基础 chunk 检索，也不等同于 `GraphRAG`。
-
-- `V4` : OCR/layout/table、query rewrite/multi-query/eval、或平台增强方向做深 : `未开始`
-
-
-## Current Working Focus
-- `V1` 已完成：`Infinity` hybrid retrieval（`InfinityHybridRetriever`，`search_hybrid()` + `weighted_sum` fusion）、基础 inline citation（`<cite:n>` → `[n]`）、只读文档 metadata 管理（`DocumentCatalog` + `GET /documents`）
-- `RAGFLOW_LITE_RETRIEVAL_MODE` 已移除作为公共配置项；若环境仍设置该变量，启动时直接报错提示移除
-- `VectorRetriever` 和 `InfinityFullTextRetriever` 已从生产装配中移除；`InfinityDenseVectorIndex.search()` 和 `search_text()` 保留为内部回归/诊断能力
-- `LocalJsonVectorIndex` 仅保留为非默认实现
-- 当前推进 `V2`：检索质量增强、更准确的 citation、基础 dataset 管理、基础 parser strategy、日志和错误处理
-
-## Local Python Workflow
-- 仓库包含本地 `.venv`；在仓库根运行 Python 相关命令时，默认使用这个环境。
-
-## Local Secret Workflow
-- 本机开发环境是 `WSL2 Debian`。`OPENAI_API_KEY`、`ARK_API_KEY` 和 `ARK_EMBEDDING_MODEL` 统一通过 `pass` 管理，不写入仓库内的 `.env` 或其它项目文件。
-- 默认使用 `ragflow-lite-run` 启动服务；该脚本从 `ragflow-lite/openai`、`ragflow-lite/ark` 和 `ragflow-lite/ark-embedding-model` 读取配置，并以对应环境变量启动 `uvicorn ragflow_lite.app:app --reload`。
-- OpenAI key 变更时，覆盖 `pass` 中的 `ragflow-lite/openai`，然后重新执行 `ragflow-lite-run`：
-
-```bash
-read -rsp "NEW OPENAI_API_KEY: " OPENAI_API_KEY; echo
-printf '%s\n' "$OPENAI_API_KEY" | pass insert -m -f ragflow-lite/openai
-unset OPENAI_API_KEY
-```
-
+## Archive
+- 归档索引见 [归档入口](归档/agents/README.md)。其中保留阶段账本、V2 实现快照和本地运行 / 密钥流程三类低频信息。
 
 # cx — Semantic Code Navigation
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from fastapi import Depends, Request
 
 from ragflow_lite.application import (
+    DatasetService,
     DocumentService,
     IngestionPipeline,
     QueryService,
@@ -38,6 +39,7 @@ class AppServices:
     retriever: Retriever
     query_service: QueryService
     document_service: DocumentService
+    dataset_service: DatasetService
 
 
 def _build_vector_index(
@@ -103,13 +105,18 @@ def build_services(settings: Settings) -> AppServices:
             embedder=embedder,
             vector_index=vector_index,
             normalizer=normalize_text,
+            dataset_store=vector_index,
         ),
         retriever=retriever,
         query_service=QueryService(
             retriever=retriever,
             answerer=answerer,
         ),
-        document_service=DocumentService(catalog=vector_index),
+        document_service=DocumentService(
+            catalog=vector_index,
+            dataset_store=vector_index,
+        ),
+        dataset_service=DatasetService(store=vector_index),
     )
 
 
@@ -135,3 +142,10 @@ def get_document_service(
 ) -> DocumentService:
     """提供文档目录只读服务给路由层使用。"""
     return services.document_service
+
+
+def get_dataset_service(
+    services: AppServices = Depends(get_services),
+) -> DatasetService:
+    """提供 dataset 管理服务给路由层使用。"""
+    return services.dataset_service

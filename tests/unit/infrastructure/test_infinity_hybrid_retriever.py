@@ -34,31 +34,6 @@ def _chunk(text: str = "hello") -> RetrievedChunk:
 
 
 class TestInfinityHybridRetriever:
-    def test_retrieve_calls_embed_query_once(self) -> None:
-        embedder = MagicMock()
-        embedder.embed_query.return_value = [1.0, 0.0]
-        vector_index = MagicMock()
-        vector_index.search_hybrid.return_value = []
-
-        retriever = InfinityHybridRetriever(
-            embedder=embedder, vector_index=vector_index
-        )
-        retriever.retrieve("test query", top_k=5)
-
-        embedder.embed_query.assert_called_once_with("test query")
-
-    def test_retrieve_passes_query_vector_and_top_k_to_search_hybrid(self) -> None:
-        embedder = FakeEmbedder(vector=[0.5, 0.8])
-        vector_index = MagicMock()
-        vector_index.search_hybrid.return_value = []
-
-        retriever = InfinityHybridRetriever(
-            embedder=embedder, vector_index=vector_index
-        )
-        retriever.retrieve("test query", top_k=3)
-
-        vector_index.search_hybrid.assert_called_once_with("test query", [0.5, 0.8], 3)
-
     def test_retrieve_returns_search_hybrid_results(self) -> None:
         chunks = [_chunk("a"), _chunk("b")]
         embedder = MagicMock()
@@ -114,3 +89,30 @@ class TestInfinityHybridRetriever:
 
         with pytest.raises(RuntimeError, match="db error"):
             retriever.retrieve("query", top_k=5)
+
+    def test_retrieve_passes_raw_query_to_embedder(self) -> None:
+        embedder = MagicMock()
+        embedder.embed_query.return_value = [1.0, 0.0]
+        vector_index = MagicMock()
+        vector_index.search_hybrid.return_value = []
+
+        retriever = InfinityHybridRetriever(
+            embedder=embedder, vector_index=vector_index
+        )
+        retriever.retrieve("RAG系统API", top_k=5)
+
+        embedder.embed_query.assert_called_once_with("RAG系统API")
+
+    def test_retrieve_passes_analyzed_sparse_query_to_search_hybrid(self) -> None:
+        embedder = FakeEmbedder(vector=[0.5, 0.8])
+        vector_index = MagicMock()
+        vector_index.search_hybrid.return_value = []
+
+        retriever = InfinityHybridRetriever(
+            embedder=embedder, vector_index=vector_index
+        )
+        retriever.retrieve("RAG系统API", top_k=3)
+
+        vector_index.search_hybrid.assert_called_once_with(
+            "rag 系统 api", [0.5, 0.8], 3
+        )

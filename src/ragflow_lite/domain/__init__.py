@@ -1,4 +1,7 @@
 from ragflow_lite.domain.errors import (
+    DatasetAlreadyExistsError,
+    DatasetNotEmptyError,
+    DatasetNotFoundError,
     DocumentNotFoundError,
     DocumentParsingError,
     EmptyDocumentError,
@@ -10,6 +13,7 @@ from ragflow_lite.domain.errors import (
 from ragflow_lite.domain.models import (
     AnswerResult,
     Chunk,
+    Dataset,
     DocumentAsset,
     EmbeddedChunk,
     IndexedDocument,
@@ -21,6 +25,10 @@ from ragflow_lite.domain.models import (
 __all__ = [
     "AnswerResult",
     "Chunk",
+    "Dataset",
+    "DatasetAlreadyExistsError",
+    "DatasetNotFoundError",
+    "DatasetNotEmptyError",
     "DocumentAsset",
     "DocumentNotFoundError",
     "DocumentParsingError",

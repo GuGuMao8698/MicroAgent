@@ -6,20 +6,25 @@
 ## Do Here
 - 在 `unit` 放模块级和边界级测试。
 - 在 `integration` 放 API 和主链路集成测试。
-- 在 `fixtures/documents` 放当前阶段需要的 `txt`、`md`、`pdf` 样例文件。
+- 在 `fixtures/documents` 放当前主链路需要的 `txt`、`md`、`pdf` 样例文件。
 - embedding 侧测试默认使用 fake Ark client，不访问真实 Ark 网络。
 - 涉及回答阶段的测试默认使用 fake / stub client，不访问真实 OpenAI 网络。
 - Infinity 相关测试默认使用 fake client（在 `conftest.py` 中 patch `infinity.connect`），不访问真实 Infinity 网络。
-- Infinity fake client 需要覆盖 `match_dense`、`match_text`、`fusion("weighted_sum")`、`create_index`、`output/filter/sort`（纯表扫描）与 `_score` / `_distance` 这类最小查询语义。
 - 测试环境只使用假的 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL` 或测试注入值，不引入真实密钥。
-- 为已实现的基础 PDF 文本抽取写真实测试，覆盖解析成功、损坏输入和空文本场景。
-- 新增测试优先覆盖 Infinity index 适配层、provider 装配、启动失败路径、维度守卫、元数据映射、文档列表/详情读取。
-- 涉及 hybrid 检索时，优先覆盖 hybrid retriever 装配、fusion fake 语义、overlap 去重与排序，以及 index 层 pure dense/fulltext 回归。
-- 涉及文档 catalog 时，覆盖 `list_documents` 倒序、`get_document` 精确命中、`DocumentNotFoundError` 404 映射、parser metadata 写入 `parser_metadata_json`、`DocumentService` 透传语义、`AppServices` 装配。
-- 涉及回答阶段时，覆盖 inline citation 指令、按 score 降序的 contexts 返回顺序与编号对齐、`<cite:n>` token 到用户可见 `[n]` 的转换、越界 token 移除、裸方括号数字原样保留，以及空 contexts fallback 不变。
+- Infinity fake client 需要保留 hybrid 断言所需的最小查询语义：`match_dense`、多字段 `match_text(fields)`、`fusion("weighted_sum")`、`create_index` 与基本 output/filter/sort。
+- hybrid retrieval 位置先验相关测试需覆盖：fusion 基础分相同时 `chunk_index` 更小者排前、fusion 分差距大于最大 boost(0.03) 时位置先验不反转排名、内部字段 `_chunk_index` 不泄漏到返回的 `RetrievedChunk.metadata`。
+- 新增测试优先覆盖 provider 装配、文档 catalog 读路径、启动失败路径、维度守卫与元数据映射。
+- 涉及 sparse-query 分析时，覆盖 NFKC、空白压缩、Latin 小写化、中英/数字边界分隔、技术 token 保留（`c++`/`c#`/`node.js`/`api_v1`/`gpt-4o`）与符号输入 fallback；retriever 单测断言 `embed_query()` 收到原始 query、`search_hybrid()` 收到分析后 sparse query。
+- 涉及文档 catalog 时，覆盖 `list_documents` / `get_document`、`DocumentNotFoundError` 的 404 映射、`parser_strategy` 等 parser metadata 的持久化，以及 `DocumentService` / `AppServices` 的透传语义。
+- 涉及 dataset baseline 时，覆盖：dataset CRUD（create/list/get/delete-empty）、重复名称 409、非空 delete 409、上传时绑定 dataset、文档重绑/解绑、`GET /documents?dataset_id=` 过滤、document list/detail/upload response 中的 `dataset_id`、binding 失败后的 rollback 清理，以及 `DatasetService` 名称校验。
+- 涉及回答阶段时，覆盖 inline citation 编号契约、`<cite:n>` 到 `[n]` 的转换、空 contexts fallback 不变，以及 PDF prompt 中的 `page:` / `pages:` 行。
+- 涉及 page-aware citation 与 parser strategy 时，覆盖：逐页 metadata 与空白页过滤、`page_spans` 对齐、chunker 单页/跨页/无页信息场景、PDF contexts 的 `page_start` / `page_end`、内部键不泄露，以及各 parser 写入对应 `parser_strategy`。
+- 涉及结构化日志与错误处理时，覆盖：`caplog` 断言事件名和关键字段、rollback best-effort 不覆盖原始异常、`QueryService` unexpected exception 仍 wrap 为 `ProcessingError`、HTTP 错误响应 body 不变，以及 `create_app` 启动失败仍抛原异常并记日志。
+- 涉及 observability 扩展时，覆盖：`X-Trace-Id` 透传/自动生成、request/trace context 绑定与清理、text/json formatter 输出、metrics toggle、关键日志带 `trace_id` / `request_id`、低基数 metrics label，以及日志中不泄露完整 query / 原始文档内容。
+- 需要手工 smoke 时，以 `docker/AGENTS.md` 和归档中的本地运行说明为准；不要把 compose 运行产物或截图纳入仓库。
 - 若补充 live integration 测试，只能做小范围、明确目的的验证，不把本地产物混入 `fixtures`。
 
 ## Avoid Here
 - 不要只测 happy path，优先覆盖失败路径、边界行为和分层职责，尤其是 provider 调用失败时的 API 返回行为。
 - 不要把运行时生成文件混进 `fixtures`。
-- 不要为尚未实现的 V2/V3 或空壳能力写占位测试。
+- 不要为未实现能力或空壳接口写占位测试。
