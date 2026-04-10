@@ -10,6 +10,7 @@ __pycache__/
 /.cache/
 /ragflow/
 /网页/
+/auto_tune_rag/
 
 # Keep directory placeholders
 !data/uploads/.gitkeep
