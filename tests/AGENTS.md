@@ -21,6 +21,9 @@
 - 涉及 page-aware citation 与 parser strategy 时，覆盖：逐页 metadata 与空白页过滤、`page_spans` 对齐、chunker 单页/跨页/无页信息场景、PDF contexts 的 `page_start` / `page_end`、内部键不泄露，以及各 parser 写入对应 `parser_strategy`。
 - 涉及结构化日志与错误处理时，覆盖：`caplog` 断言事件名和关键字段、rollback best-effort 不覆盖原始异常、`QueryService` unexpected exception 仍 wrap 为 `ProcessingError`、HTTP 错误响应 body 不变，以及 `create_app` 启动失败仍抛原异常并记日志。
 - 涉及 observability 扩展时，覆盖：`X-Trace-Id` 透传/自动生成、request/trace context 绑定与清理、text/json formatter 输出、metrics toggle、关键日志带 `trace_id` / `request_id`、低基数 metrics label，以及日志中不泄露完整 query / 原始文档内容。
+- 涉及异步 ingestion pipeline 时，覆盖：状态转换（`queued -> processing -> indexed / failed`）、幂等提交（相同 `Idempotency-Key` 返回已有 document / task identity）、自动单次 retry（第一次处理异常后重新入队，第二次失败才终态）、进度映射（step -> percent）、stage cache（parse/chunk 缓存命中与 miss、embed/index 不缓存）、observability（accepted/retry/cache/duration/queue_delay 指标）。
+- 涉及集成测试迁移时，覆盖：`POST /documents` 必须携带 `Idempotency-Key` header、断言立即返回 `202` 与 `Location` header、再通过 `GET /documents/{id}` 轮询任务状态直至终态。
+- 默认不要假设上传请求返回时文档已经 indexed；API / integration 测试应以轮询终态为主，只有明确验证同步兼容入口时才断言即时完成。
 - 需要手工 smoke 时，以 `docker/AGENTS.md` 和归档中的本地运行说明为准；不要把 compose 运行产物或截图纳入仓库。
 - 若补充 live integration 测试，只能做小范围、明确目的的验证，不把本地产物混入 `fixtures`。
 

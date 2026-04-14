@@ -16,11 +16,12 @@
 - 保持现有 inline citation、PDF 页感知 citation 和 parser strategy baseline 稳定；需要引用精确快照时看归档和测试，不在本文件重复展开内部 metadata 细节。
 - 当前 parser baseline 仍是 `txt`、`md`、`pdf` 的现有原生解析路径；`pdf` 继续走数字原生文本，不做 OCR fallback。
 - 低层实现只在明确的异常翻译/吞异常边界记录日志，例如 `parser_failed`、`local_index_write_failed`、startup/rollback failure；不记录原始文档/查询内容。
+- `infrastructure/ingestion/` 提供单进程 in-memory 实现：`InMemoryTaskStore`、`InMemoryStageCache`、`InlineTaskRunner`（线程安全，支持 handler 注入）。这些是进程内实现，不提供跨进程或持久化保证。
 - 应用层负责主链路级日志与业务 outcome；infra 不扩散为全量 provider debug trace，也不在每个 helper 上加噪声日志。
 
 ## Avoid Here
 - 不要在这里定义业务流程和用例编排。
 - 不要反向决定 `domain` 的边界。
 - 不要因为当前只有一个 provider 就提前抽象多 provider 框架，也不要把 provider-specific 配置或密钥处理散落到无关模块。
-- 不要提前接入 OCR/layout/table/DeepDoc 级 PDF 栈、rerank、多 provider 扩展、异步任务编排，也不要在 Ark 之外扩散新的 embedding provider 运行时路径。
+- 不要提前接入 OCR/layout/table/DeepDoc 级 PDF 栈、rerank、多 provider 扩展，也不要在 Ark 之外扩散新的 embedding provider 运行时路径。
 - 不要把 provider request/response payload、原始文本或高基数字段写进日志。

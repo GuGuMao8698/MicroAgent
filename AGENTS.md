@@ -9,20 +9,11 @@
 - Local deployment: `docker compose`
 
 ## Current Stage
-- `V0`-`V2` 已完成。
-- `V3` 异步 ingestion pipeline、任务状态、重试、幂等、进度、基础缓存与性能指标、`RAPTOR` 层级摘要检索。: `未开始`
-- `V4` 保持探索位，包含 OCR/layout/table、query rewrite/multi-query/eval 或平台增强方向。: `未开始`
-
-## Active Boundaries
-根文档这里只保留仓库级现状与边界；具体实现、测试、运行和分层约束以下级 `AGENTS.md` 为准。
-- 当前默认生产检索主路径仍是 Infinity hybrid；不要顺手引入 rerank、新公共配置、新 API 形态或额外检索主路径。
+- 当前处于 `V3` 阶段；阶段目标、当前状态和阶段性边界见 [阶段计划/V3.md](阶段计划/V3.md)。
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。
 - 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
-
-## Archive
-- 归档索引见 [归档入口](归档/agents/README.md)。其中保留阶段账本、V2 实现快照和本地运行 / 密钥流程三类低频信息。
 
 # cx — Semantic Code Navigation
 

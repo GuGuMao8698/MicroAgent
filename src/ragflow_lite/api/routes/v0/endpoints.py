@@ -7,8 +7,10 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -24,6 +26,7 @@ from ragflow_lite.api.schemas.v0 import (
     DatasetListResponse,
     DatasetResponse,
     DocumentDatasetBindingRequest,
+    DocumentDetailResponse,
     DocumentIngestionResponse,
     DocumentListResponse,
     DocumentResponse,
@@ -46,6 +49,7 @@ from ragflow_lite.domain.errors import (
     DocumentNotFoundError,
     DocumentParsingError,
     EmptyDocumentError,
+    IdempotencyKeyMissingError,
     ProcessingError,
     RagflowLiteError,
     UnsupportedFileTypeError,
@@ -185,7 +189,9 @@ async def delete_dataset(
 @router.post(
     "/documents",
     response_model=DocumentIngestionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
         status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
@@ -193,26 +199,35 @@ async def delete_dataset(
 )
 async def ingest_document(
     request: Request,
+    response: Response,
     file: UploadFile = File(...),
     dataset_id: str | None = Form(None),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     pipeline: IngestionPipeline = Depends(get_ingestion_pipeline),
 ) -> DocumentIngestionResponse:
     try:
         content = await file.read()
-        result = pipeline.ingest(file.filename or "", content, dataset_id=dataset_id)
+        snapshot = pipeline.submit(
+            idempotency_key, file.filename or "", content, dataset_id=dataset_id
+        )
         _log_request_event(
             request,
             logging.INFO,
             "document_ingested",
-            document_id=result.document_id,
-            chunk_count=result.chunk_count,
+            document_id=snapshot.document_id,
+            chunk_count=snapshot.chunk_count,
         )
+        response.headers["Location"] = f"/api/v0/documents/{snapshot.document_id}"
         return DocumentIngestionResponse(
-            document_id=result.document_id,
-            file_type=result.file_type,
-            chunk_count=result.chunk_count,
-            status=result.status,
-            dataset_id=result.dataset_id,
+            document_id=snapshot.document_id,
+            status=snapshot.status,
+            file_type=snapshot.file_type,
+            dataset_id=snapshot.dataset_id,
+            attempt=snapshot.attempt,
+            progress_percent=snapshot.progress_percent,
+            step=snapshot.step,
+            chunk_count=snapshot.chunk_count,
+            error=snapshot.error,
         )
     except RagflowLiteError as exc:
         raise _map_error(exc, request) from exc
@@ -252,7 +267,7 @@ async def list_documents(
 
 @router.get(
     "/documents/{document_id}",
-    response_model=DocumentResponse,
+    response_model=DocumentDetailResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
@@ -261,18 +276,52 @@ async def list_documents(
 async def get_document(
     request: Request,
     document_id: str,
+    pipeline: IngestionPipeline = Depends(get_ingestion_pipeline),
     document_service: DocumentService = Depends(get_document_service),
-) -> DocumentResponse:
+) -> DocumentDetailResponse:
     try:
+        # First check task store for task snapshot
+        snapshot = pipeline.get_snapshot(document_id)
+        if snapshot is not None:
+            # Try to enrich with document catalog data
+            doc = None
+            try:
+                doc = document_service.get_document(document_id)
+            except DocumentNotFoundError:
+                pass
+
+            return DocumentDetailResponse(
+                document_id=snapshot.document_id,
+                status=snapshot.status,
+                file_type=snapshot.file_type,
+                dataset_id=doc.dataset_id if doc else snapshot.dataset_id,
+                attempt=snapshot.attempt,
+                progress_percent=snapshot.progress_percent,
+                step=snapshot.step,
+                chunk_count=snapshot.chunk_count,
+                error=snapshot.error,
+                filename=doc.filename if doc else snapshot.filename,
+                size_bytes=doc.size_bytes if doc else None,
+                created_at=doc.created_at if doc else snapshot.created_at.isoformat(),
+                metadata=doc.metadata if doc else None,
+            )
+
+        # No task snapshot -- fall back to document catalog only
         doc = document_service.get_document(document_id)
-        return DocumentResponse(
+        return DocumentDetailResponse(
             document_id=doc.document_id,
-            filename=doc.filename,
+            status="indexed",
             file_type=doc.file_type,
+            dataset_id=doc.dataset_id,
+            attempt=1,
+            progress_percent=100,
+            step=None,
+            chunk_count=None,
+            error=None,
+            filename=doc.filename,
             size_bytes=doc.size_bytes,
             created_at=doc.created_at,
             metadata=doc.metadata,
-            dataset_id=doc.dataset_id,
         )
     except RagflowLiteError as exc:
         raise _map_error(exc, request) from exc
@@ -371,6 +420,12 @@ def _map_error(error: RagflowLiteError, request: Request) -> HTTPException:
 
 
 def _error_to_http(error: RagflowLiteError) -> HTTPException:
+    if isinstance(error, IdempotencyKeyMissingError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        )
+
     if isinstance(error, UnsupportedFileTypeError):
         return HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

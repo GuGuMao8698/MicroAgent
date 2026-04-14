@@ -5,6 +5,12 @@ from ragflow_lite.infrastructure.chunkers.fixed_window import FixedWindowChunker
 from ragflow_lite.infrastructure.embedders.ark_embedder import (
     ArkMultimodalTextEmbedder,
 )
+from ragflow_lite.infrastructure.ingestion.memory import (
+    BackgroundTaskRunner,
+    InlineTaskRunner,
+    InMemoryStageCache,
+    InMemoryTaskStore,
+)
 from ragflow_lite.infrastructure.parsers.document_parsers import CompositeParser
 from ragflow_lite.infrastructure.retrievers import (
     InfinityHybridRetriever,
@@ -19,10 +25,14 @@ from ragflow_lite.infrastructure.vector_indexes.local_json_index import (
 
 __all__ = [
     "ArkMultimodalTextEmbedder",
+    "BackgroundTaskRunner",
     "CompositeParser",
     "FixedWindowChunker",
     "InfinityDenseVectorIndex",
     "InfinityHybridRetriever",
+    "InlineTaskRunner",
+    "InMemoryStageCache",
+    "InMemoryTaskStore",
     "LocalDocumentStore",
     "LocalJsonVectorIndex",
     "OpenAIResponsesAnswerer",

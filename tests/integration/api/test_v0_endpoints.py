@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ragflow_lite.app import create_app
 from ragflow_lite.config import Settings
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
 
 API_LOGGER = "ragflow_lite.api.routes.v0.endpoints"
@@ -123,6 +127,10 @@ def _install_fake_ark_client(client, fake_ark_client: FakeArkClient) -> FakeArkC
     return fake_ark_client
 
 
+def _unique_key() -> str:
+    return f"key-{uuid4().hex}"
+
+
 def _upload_fixture_document(
     client,
     fixture_documents_dir: Path,
@@ -130,9 +138,13 @@ def _upload_fixture_document(
     *,
     upload_name: str | None = None,
     content_type: str | None = None,
+    idempotency_key: str | None = None,
 ):
     filename = upload_name or fixture_name
     suffix = Path(filename).suffix
+    headers: dict[str, str] = {}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     return client.post(
         "/api/v0/documents",
         files={
@@ -142,11 +154,35 @@ def _upload_fixture_document(
                 content_type or _CONTENT_TYPES[suffix],
             )
         },
+        headers=headers,
     )
 
 
 def _query_documents(client, query: str, top_k: int = 4):
     return client.post("/api/v0/queries", json={"query": query, "top_k": top_k})
+
+
+def _wait_for_document_terminal_state(
+    client,
+    document_id: str,
+    *,
+    timeout_seconds: float = 3.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_payload: dict[str, Any] | None = None
+
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/v0/documents/{document_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        last_payload = payload
+        if payload["status"] in {"indexed", "failed"}:
+            return payload
+        time.sleep(0.01)
+
+    raise AssertionError(
+        f"Document {document_id} did not reach terminal status. Last payload: {last_payload}"
+    )
 
 
 def _openai_input(fake_openai_client: FakeOpenAIClient) -> str:
@@ -157,7 +193,9 @@ def _event_records(
     caplog: pytest.LogCaptureFixture,
     event: str,
 ) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if getattr(record, "event", None) == event]
+    return [
+        record for record in caplog.records if getattr(record, "event", None) == event
+    ]
 
 
 def _assert_pdf_context_page_metadata(contexts: list[dict[str, Any]]) -> None:
@@ -207,13 +245,23 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
         client,
         FakeOpenAIClient(output_text="项目支持 txt 和 md 文件格式<cite:1>。"),
     )
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
 
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     upload_payload = upload_response.json()
-    assert upload_payload["status"] == "indexed"
+    document_id = upload_payload["document_id"]
+    assert upload_response.headers["Location"] == f"/api/v0/documents/{document_id}"
+    assert upload_payload["status"] == "queued"
     assert upload_payload["file_type"] == "txt"
-    assert upload_payload["chunk_count"] >= 1
+    assert upload_payload["attempt"] == 1
+    assert upload_payload["progress_percent"] == 0
+    assert upload_payload["chunk_count"] is None
+    assert upload_payload["error"] is None
+    final_payload = _wait_for_document_terminal_state(client, document_id)
+    assert final_payload["status"] == "indexed"
+    assert final_payload["chunk_count"] >= 1
 
     query_response = _query_documents(client, "这个项目支持什么文件类型")
 
@@ -243,6 +291,88 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert first_chunk_text in openai_input
 
 
+def test_upload_returns_202_with_location_before_background_finishes(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    services = client.app.state.services
+    original_parser = services.ingestion_pipeline.parser
+    parser_started = threading.Event()
+    parser_release = threading.Event()
+
+    class _BlockingParser:
+        def parse(self, asset, raw_bytes):
+            parser_started.set()
+            parser_release.wait(timeout=2)
+            return original_parser.parse(asset, raw_bytes)
+
+    services.ingestion_pipeline.parser = _BlockingParser()
+    try:
+        response = _upload_fixture_document(
+            client,
+            fixture_documents_dir,
+            "sample.txt",
+            idempotency_key=_unique_key(),
+        )
+        assert response.status_code == 202
+        payload = response.json()
+        document_id = payload["document_id"]
+        assert response.headers["Location"] == f"/api/v0/documents/{document_id}"
+        assert payload["status"] == "queued"
+        assert parser_started.wait(timeout=2)
+
+        pending_response = client.get(f"/api/v0/documents/{document_id}")
+        assert pending_response.status_code == 200
+        assert pending_response.json()["status"] in {"queued", "processing"}
+    finally:
+        parser_release.set()
+        services.ingestion_pipeline.parser = original_parser
+
+    final = _wait_for_document_terminal_state(client, document_id)
+    assert final["status"] == "indexed"
+
+
+def test_upload_retries_in_background_and_exposes_second_attempt(
+    client,
+    fixture_documents_dir: Path,
+) -> None:
+    _install_fake_ark_client(client, FakeArkClient())
+    services = client.app.state.services
+    original_parser = services.ingestion_pipeline.parser
+
+    class _RetryOnceParser:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def parse(self, asset, raw_bytes):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProcessingError("parse failed once")
+            return original_parser.parse(asset, raw_bytes)
+
+    retry_parser = _RetryOnceParser()
+    services.ingestion_pipeline.parser = retry_parser
+    try:
+        response = _upload_fixture_document(
+            client,
+            fixture_documents_dir,
+            "sample.txt",
+            idempotency_key=_unique_key(),
+        )
+        assert response.status_code == 202
+        final = _wait_for_document_terminal_state(
+            client, response.json()["document_id"]
+        )
+    finally:
+        services.ingestion_pipeline.parser = original_parser
+
+    assert final["status"] == "indexed"
+    assert final["attempt"] == 2
+    assert final["error"] is None
+    assert retry_parser.calls == 2
+
+
 def test_upload_markdown_then_query_uses_markdown_text(
     client,
     fixture_documents_dir: Path,
@@ -252,9 +382,12 @@ def test_upload_markdown_then_query_uses_markdown_text(
         client,
         FakeOpenAIClient(output_text="使用 uvicorn 运行这个最小 RAG。"),
     )
-    response = _upload_fixture_document(client, fixture_documents_dir, "sample.md")
+    response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.md", idempotency_key=_unique_key()
+    )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
+    _wait_for_document_terminal_state(client, response.json()["document_id"])
 
     query_response = _query_documents(client, "如何运行这个最小 RAG")
 
@@ -288,10 +421,20 @@ def test_uploading_unsupported_file_type_returns_415(client) -> None:
     response = client.post(
         "/api/v0/documents",
         files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
+        headers={"Idempotency-Key": _unique_key()},
     )
 
     assert response.status_code == 415
     assert "Unsupported file type" in response.json()["detail"]
+
+
+def test_upload_without_idempotency_key_returns_400(client) -> None:
+    response = client.post(
+        "/api/v0/documents",
+        files={"file": ("sample.txt", b"hello", "text/plain")},
+    )
+
+    assert response.status_code == 400
 
 
 def test_ingestion_failure_rolls_back_only_current_document(
@@ -299,9 +442,13 @@ def test_ingestion_failure_rolls_back_only_current_document(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    first_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert first_response.status_code == 200
+    first_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert first_response.status_code == 202
     first_document_id = first_response.json()["document_id"]
+    first_final = _wait_for_document_terminal_state(client, first_document_id)
+    assert first_final["status"] == "indexed"
 
     services = client.app.state.services
     _install_fake_ark_client(client, FakeArkClient(error=RuntimeError("boom")))
@@ -309,10 +456,15 @@ def test_ingestion_failure_rolls_back_only_current_document(
     failed_response = client.post(
         "/api/v0/documents",
         files={"file": ("broken.txt", b"this should fail after save", "text/plain")},
+        headers={"Idempotency-Key": _unique_key()},
     )
 
-    assert failed_response.status_code == 500
-    assert failed_response.json()["detail"] == "Failed to index document."
+    assert failed_response.status_code == 202
+    failed_document_id = failed_response.json()["document_id"]
+    failed_final = _wait_for_document_terminal_state(client, failed_document_id)
+    assert failed_final["status"] == "failed"
+    assert failed_final["attempt"] == 2
+    assert failed_final["error"] == "boom"
 
     # 第一份文档的原始文件仍应保留。
     uploads = list(services.settings.uploads_dir.glob("*"))
@@ -332,9 +484,12 @@ def test_query_returns_500_when_openai_request_fails(
     _install_fake_ark_client(client, FakeArkClient())
     _install_fake_openai_client(client, FakeOpenAIClient(error=RuntimeError("boom")))
 
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
 
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     query_response = _query_documents(client, "这个项目支持什么文件类型")
 
@@ -348,8 +503,11 @@ def test_query_returns_500_when_ark_query_embedding_fails(
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
 
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     _install_fake_ark_client(client, FakeArkClient(error=RuntimeError("boom")))
 
@@ -365,8 +523,11 @@ def test_query_returns_error_when_infinity_unreachable(
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
 
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     # 通过清空内部表数据来模拟 Infinity 当前查不到任何记录。
     services = client.app.state.services
@@ -390,13 +551,19 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
         client,
         FakeOpenAIClient(output_text="PDF content found."),
     )
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.pdf")
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.pdf", idempotency_key=_unique_key()
+    )
 
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     upload_payload = upload_response.json()
-    assert upload_payload["status"] == "indexed"
+    assert upload_payload["status"] == "queued"
     assert upload_payload["file_type"] == "pdf"
-    assert upload_payload["chunk_count"] >= 1
+    final_payload = _wait_for_document_terminal_state(
+        client, upload_payload["document_id"]
+    )
+    assert final_payload["status"] == "indexed"
+    assert final_payload["chunk_count"] >= 1
 
     query_response = _query_documents(client, "PDF test")
 
@@ -424,8 +591,11 @@ def test_query_returns_500_when_embedding_signature_mismatch(
         client, FakeOpenAIClient(output_text="should not reach")
     )
 
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     # 篡改已存 chunk 的 embedding 签名，模拟陈旧数据。
     services = client.app.state.services
@@ -442,10 +612,14 @@ def test_query_returns_500_when_embedding_signature_mismatch(
 
 def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    response = _upload_fixture_document(client, fixture_documents_dir, "empty.pdf")
+    response = _upload_fixture_document(
+        client, fixture_documents_dir, "empty.pdf", idempotency_key=_unique_key()
+    )
 
-    assert response.status_code == 422
-    assert "empty" in response.json()["detail"].lower()
+    assert response.status_code == 202
+    final = _wait_for_document_terminal_state(client, response.json()["document_id"])
+    assert final["status"] == "failed"
+    assert "empty" in final["error"].lower()
 
 
 def test_upload_encrypted_pdf_returns_422(client) -> None:
@@ -464,10 +638,13 @@ def test_upload_encrypted_pdf_returns_422(client) -> None:
     response = client.post(
         "/api/v0/documents",
         files={"file": ("encrypted.pdf", encrypted_bytes, "application/pdf")},
+        headers={"Idempotency-Key": _unique_key()},
     )
 
-    assert response.status_code == 422
-    assert "parse" in response.json()["detail"].lower()
+    assert response.status_code == 202
+    final = _wait_for_document_terminal_state(client, response.json()["document_id"])
+    assert final["status"] == "failed"
+    assert "parse" in final["error"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -486,9 +663,12 @@ def test_list_documents_after_txt_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
 
     response = client.get("/api/v0/documents")
     assert response.status_code == 200
@@ -509,16 +689,22 @@ def test_get_document_after_txt_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
 
     response = client.get(f"/api/v0/documents/{document_id}")
     assert response.status_code == 200
     doc = response.json()
     assert doc["document_id"] == document_id
-    assert doc["filename"] == "sample.txt"
+    assert doc["status"] == "indexed"
     assert doc["file_type"] == "txt"
+    assert doc["filename"] == "sample.txt"
+    assert doc["attempt"] == 1
+    assert doc["progress_percent"] == 100
 
 
 def test_get_document_after_pdf_upload(
@@ -526,9 +712,12 @@ def test_get_document_after_pdf_upload(
     fixture_documents_dir: Path,
 ) -> None:
     _install_fake_ark_client(client, FakeArkClient())
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "sample.pdf")
-    assert upload_response.status_code == 200
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.pdf", idempotency_key=_unique_key()
+    )
+    assert upload_response.status_code == 202
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
 
     response = client.get(f"/api/v0/documents/{document_id}")
     assert response.status_code == 200
@@ -557,9 +746,13 @@ def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
     _install_fake_ark_client(client, FakeArkClient())
     ids: list[str] = []
     for fname in ("sample.txt", "sample.md"):
-        resp = _upload_fixture_document(client, fixture_documents_dir, fname)
-        assert resp.status_code == 200
-        ids.append(resp.json()["document_id"])
+        resp = _upload_fixture_document(
+            client, fixture_documents_dir, fname, idempotency_key=_unique_key()
+        )
+        assert resp.status_code == 202
+        document_id = resp.json()["document_id"]
+        _wait_for_document_terminal_state(client, document_id)
+        ids.append(document_id)
 
     response = client.get("/api/v0/documents")
     assert response.status_code == 200
@@ -585,8 +778,10 @@ def test_filename_sparse_recalls_when_text_misses(
         fixture_documents_dir,
         "sample.md",
         upload_name="ragflow-manual.md",
+        idempotency_key=_unique_key(),
     )
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     # "manual" 不在 sample.md 的正文中，但 filename 包含 "manual"。
     query_response = _query_documents(client, "manual")
@@ -611,12 +806,15 @@ def test_upload_two_page_pdf_then_query_returns_page_range(
         client,
         FakeOpenAIClient(output_text="Found alpha and beta."),
     )
-    upload_response = _upload_fixture_document(client, fixture_documents_dir, "two_pages.pdf")
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "two_pages.pdf", idempotency_key=_unique_key()
+    )
 
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     upload_payload = upload_response.json()
-    assert upload_payload["status"] == "indexed"
+    assert upload_payload["status"] == "queued"
     assert upload_payload["file_type"] == "pdf"
+    _wait_for_document_terminal_state(client, upload_payload["document_id"])
 
     query_response = _query_documents(client, "alpha beta")
 
@@ -642,14 +840,16 @@ def test_ingest_success_produces_info_log(
     """POST /documents 成功时产生 document_ingested info 日志。"""
     _install_fake_ark_client(client, FakeArkClient())
     with caplog.at_level(logging.INFO, logger=API_LOGGER):
-        response = _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+        response = _upload_fixture_document(
+            client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+        )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     events = _event_records(caplog, "document_ingested")
     assert len(events) == 1
     assert events[0].method == "POST"
     assert events[0].path == "/api/v0/documents"
-    assert events[0].chunk_count >= 1
+    assert events[0].document_id == response.json()["document_id"]
 
 
 def test_ingest_trace_id_is_propagated_and_logged(
@@ -662,7 +862,7 @@ def test_ingest_trace_id_is_propagated_and_logged(
     with caplog.at_level(logging.INFO, logger=API_LOGGER):
         response = client.post(
             "/api/v0/documents",
-            headers={"X-Trace-Id": "trace-123"},
+            headers={"X-Trace-Id": "trace-123", "Idempotency-Key": _unique_key()},
             files={
                 "file": (
                     "sample.txt",
@@ -672,7 +872,7 @@ def test_ingest_trace_id_is_propagated_and_logged(
             },
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.headers["X-Trace-Id"] == "trace-123"
     event = _event_records(caplog, "document_ingested")[0]
     assert event.trace_id == "trace-123"
@@ -687,7 +887,10 @@ def test_query_success_produces_info_log(
     """POST /queries 成功时产生 query_answered info 日志。"""
     _install_fake_ark_client(client, FakeArkClient())
     _install_fake_openai_client(client, FakeOpenAIClient(output_text="回答"))
-    _upload_fixture_document(client, fixture_documents_dir, "sample.txt")
+    upload_response = _upload_fixture_document(
+        client, fixture_documents_dir, "sample.txt", idempotency_key=_unique_key()
+    )
+    _wait_for_document_terminal_state(client, upload_response.json()["document_id"])
 
     with caplog.at_level(logging.INFO, logger=API_LOGGER):
         response = _query_documents(client, "test query", top_k=3)
@@ -709,6 +912,7 @@ def test_domain_error_produces_warning_log(
         response = client.post(
             "/api/v0/documents",
             files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
+            headers={"Idempotency-Key": _unique_key()},
         )
 
     assert response.status_code == 415
@@ -727,6 +931,7 @@ def test_error_response_body_unchanged(client) -> None:
     resp = client.post(
         "/api/v0/documents",
         files={"file": ("bad.exe", b"x", "application/octet-stream")},
+        headers={"Idempotency-Key": _unique_key()},
     )
     assert resp.status_code == 415
     assert set(resp.json().keys()) == {"detail"}
@@ -779,13 +984,19 @@ def test_metrics_route_enabled_exposes_prometheus_metrics(
 
     with TestClient(app) as metrics_client:
         _install_fake_ark_client(metrics_client, FakeArkClient())
-        _install_fake_openai_client(metrics_client, FakeOpenAIClient(output_text="回答"))
+        _install_fake_openai_client(
+            metrics_client, FakeOpenAIClient(output_text="回答")
+        )
         upload_response = _upload_fixture_document(
             metrics_client,
             fixture_documents_dir,
             "sample.txt",
+            idempotency_key=_unique_key(),
         )
-        assert upload_response.status_code == 200
+        assert upload_response.status_code == 202
+        _wait_for_document_terminal_state(
+            metrics_client, upload_response.json()["document_id"]
+        )
 
         query_response = _query_documents(metrics_client, "test query")
         assert query_response.status_code == 200
@@ -793,6 +1004,7 @@ def test_metrics_route_enabled_exposes_prometheus_metrics(
         bad_response = metrics_client.post(
             "/api/v0/documents",
             files={"file": ("bad.exe", b"x", "application/octet-stream")},
+            headers={"Idempotency-Key": _unique_key()},
         )
         assert bad_response.status_code == 415
 
@@ -802,7 +1014,7 @@ def test_metrics_route_enabled_exposes_prometheus_metrics(
     body = metrics_response.text
     assert "ragflow_lite_http_requests_total" in body
     assert (
-        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="200"}'
+        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="202"}'
         in body
     )
     assert (
@@ -826,10 +1038,16 @@ def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
             first_client,
             fixture_documents_dir,
             "sample.txt",
+            idempotency_key=_unique_key(),
         )
-        assert upload_response.status_code == 200
+        assert upload_response.status_code == 202
+        _wait_for_document_terminal_state(
+            first_client, upload_response.json()["document_id"]
+        )
 
-        second_app = create_app(_build_settings(tmp_path / "app_two", metrics_enabled=False))
+        second_app = create_app(
+            _build_settings(tmp_path / "app_two", metrics_enabled=False)
+        )
         with TestClient(second_app) as second_client:
             disabled_metrics_response = second_client.get("/metrics")
 
@@ -838,10 +1056,13 @@ def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
     assert disabled_metrics_response.status_code == 404
     assert first_metrics_response.status_code == 200
     assert (
-        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="200"}'
+        'ragflow_lite_http_requests_total{method="POST",route="/api/v0/documents",status_code="202"}'
         in first_metrics_response.text
     )
-    assert 'ragflow_lite_ingest_total{file_type="txt",outcome="succeeded"}' in first_metrics_response.text
+    assert (
+        'ragflow_lite_ingest_total{file_type="txt",outcome="succeeded"}'
+        in first_metrics_response.text
+    )
 
 
 def test_method_not_allowed_metrics_use_partial_route_label(tmp_path: Path) -> None:
@@ -911,11 +1132,21 @@ def test_logs_do_not_include_raw_query_or_document_content(
         with caplog.at_level(logging.INFO):
             upload_response = test_client.post(
                 "/api/v0/documents",
-                files={"file": ("secret.txt", secret_document.encode("utf-8"), "text/plain")},
+                files={
+                    "file": (
+                        "secret.txt",
+                        secret_document.encode("utf-8"),
+                        "text/plain",
+                    )
+                },
+                headers={"Idempotency-Key": _unique_key()},
+            )
+            _wait_for_document_terminal_state(
+                test_client, upload_response.json()["document_id"]
             )
             query_response = _query_documents(test_client, secret_query)
 
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     assert query_response.status_code == 200
 
     relevant_events = {
@@ -927,7 +1158,9 @@ def test_logs_do_not_include_raw_query_or_document_content(
         "query_succeeded",
     }
     relevant_records = [
-        record for record in caplog.records if getattr(record, "event", None) in relevant_events
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) in relevant_events
     ]
 
     assert relevant_records

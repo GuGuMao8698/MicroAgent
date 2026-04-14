@@ -47,3 +47,8 @@ class DatasetNotEmptyError(RagflowLiteError):
         super().__init__(
             f"Dataset '{dataset_id}' is not empty. Remove all documents first."
         )
+
+
+class IdempotencyKeyMissingError(RagflowLiteError):
+    def __init__(self) -> None:
+        super().__init__("Idempotency-Key header is required.")
