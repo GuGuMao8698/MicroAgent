@@ -349,7 +349,10 @@ class InfinityDenseVectorIndex:
         """创建 dataset，名称做精确唯一约束。"""
         table = self._db.get_table(self._datasets_table)
         # 名称唯一性检查
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["dataset_id", "name", "description", "created_at"],
+        ):
             if row.get("name") == name:
                 raise DatasetAlreadyExistsError(name)
         dataset_id = f"ds_{uuid4().hex}"
@@ -381,13 +384,20 @@ class InfinityDenseVectorIndex:
                 description=row["description"],
                 created_at=row["created_at"],
             )
-            for row in table.rows
+            for row in self._table_rows(
+                table,
+                ["dataset_id", "name", "description", "created_at"],
+            )
         ]
 
     def get_dataset(self, dataset_id: str) -> Dataset:
         """按 dataset_id 读取单个 dataset，未命中抛 DatasetNotFoundError。"""
         table = self._db.get_table(self._datasets_table)
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["dataset_id", "name", "description", "created_at"],
+            filter_expr=_dataset_id_filter(dataset_id),
+        ):
             if row.get("dataset_id") == dataset_id:
                 return Dataset(
                     dataset_id=row["dataset_id"],
@@ -406,7 +416,7 @@ class InfinityDenseVectorIndex:
         if count > 0:
             raise DatasetNotEmptyError(dataset_id)
         table = self._db.get_table(self._datasets_table)
-        table.delete(f"dataset_id = '{dataset_id}'")
+        table.delete(_dataset_id_filter(dataset_id))
 
     def bind_document(self, document_id: str, dataset_id: str) -> None:
         """将文档绑定到 dataset，单归属语义（upsert）。"""
@@ -432,7 +442,11 @@ class InfinityDenseVectorIndex:
     def get_dataset_id_for_document(self, document_id: str) -> str | None:
         """查询文档绑定的 dataset_id，未绑定返回 None。"""
         table = self._db.get_table(self._dataset_bindings_table)
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["document_id", "dataset_id"],
+            filter_expr=_doc_id_filter(document_id),
+        ):
             if row.get("document_id") == document_id:
                 return row["dataset_id"]
         return None
@@ -442,7 +456,11 @@ class InfinityDenseVectorIndex:
         table = self._db.get_table(self._dataset_bindings_table)
         return [
             row["document_id"]
-            for row in table.rows
+            for row in self._table_rows(
+                table,
+                ["document_id", "dataset_id"],
+                filter_expr=_dataset_id_filter(dataset_id),
+            )
             if row.get("dataset_id") == dataset_id
         ]
 
@@ -482,7 +500,10 @@ class InfinityDenseVectorIndex:
         """批量填充文档的 dataset_id 字段。"""
         bindings_table = self._db.get_table(self._dataset_bindings_table)
         doc_to_ds: dict[str, str] = {}
-        for row in bindings_table.rows:
+        for row in self._table_rows(
+            bindings_table,
+            ["document_id", "dataset_id"],
+        ):
             doc_to_ds[row["document_id"]] = row["dataset_id"]
         for doc in docs:
             doc.dataset_id = doc_to_ds.get(doc.document_id)
@@ -499,6 +520,33 @@ class InfinityDenseVectorIndex:
         if isinstance(columns_info, tuple):
             return columns_info[0]
         return columns_info
+
+    @staticmethod
+    def _query_dataframe(
+        table: Any,
+        columns: list[str],
+        *,
+        filter_expr: str | None = None,
+    ) -> Any:
+        """使用 Infinity query API 读取表数据，避免依赖非兼容的 `table.rows`。"""
+        query = table.output(columns)
+        if filter_expr is not None:
+            query = query.filter(filter_expr)
+        result = query.to_pl()
+        return result[0] if isinstance(result, tuple) else result
+
+    def _table_rows(
+        self,
+        table: Any,
+        columns: list[str],
+        *,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """将表查询结果物化为命名行列表。"""
+        df = self._query_dataframe(table, columns, filter_expr=filter_expr)
+        if df.is_empty():
+            return []
+        return list(df.iter_rows(named=True))
 
     def _validate_query_dimensions(self, query_vector: list[float]) -> None:
         """校验查询向量维度是否与当前 embedding 配置一致。"""
@@ -683,3 +731,9 @@ def _doc_id_filter(document_id: str) -> str:
     """构造 `document_id` 等值 filter 字符串，转义单引号。"""
     escaped = document_id.replace("'", "''")
     return f"document_id = '{escaped}'"
+
+
+def _dataset_id_filter(dataset_id: str) -> str:
+    """构造 `dataset_id` 等值 filter 字符串，转义单引号。"""
+    escaped = dataset_id.replace("'", "''")
+    return f"dataset_id = '{escaped}'"

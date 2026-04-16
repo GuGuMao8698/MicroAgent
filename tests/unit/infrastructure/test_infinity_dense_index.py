@@ -589,6 +589,56 @@ class TestInfinityDenseVectorIndex:
         assert "_chunk_index" not in results[0].metadata
         assert "chunk_index" not in results[0].metadata
 
+    def test_search_hybrid_fusion_contract_matches_sdk(self, make_index) -> None:
+        """fusion 调用必须使用 Thrift SDK 文档支持的参数形状。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        chunk_table = client.get_database("default_db").get_table("chunks")
+        fk = chunk_table.last_fusion_kwargs
+        assert fk is not None
+        # Only these three keys are allowed — matches Thrift SDK fusion(method, topn, fusion_params)
+        assert set(fk.keys()) == {"method", "topn", "fusion_params"}
+        # method: str
+        assert isinstance(fk["method"], str)
+        assert fk["method"] == "weighted_sum"
+        # topn: int (not positional, but keyword argument)
+        assert isinstance(fk["topn"], int)
+        # fusion_params: dict (not extra positional argument)
+        assert isinstance(fk["fusion_params"], dict)
+        assert "weights" in fk["fusion_params"]
+
+    def test_search_hybrid_fusion_error_propagates(self, make_index) -> None:
+        """fusion 阶段抛异常时，错误应透传为 ProcessingError。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        # monkeypatch: 让 _FakeQueryBuilder 的 _to_pl_fusion 在 fusion 阶段失败
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import conftest as test_conftest
+
+        _FakeQueryBuilder = test_conftest._FakeQueryBuilder
+
+        original = _FakeQueryBuilder._to_pl_fusion
+
+        def _failing_fusion(self: Any) -> Any:
+            raise RuntimeError("Infinity internal fusion error")
+
+        _FakeQueryBuilder._to_pl_fusion = _failing_fusion  # type: ignore[assignment]
+        try:
+            with pytest.raises(RuntimeError, match="Infinity internal fusion error"):
+                idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+        finally:
+            _FakeQueryBuilder._to_pl_fusion = original  # type: ignore[assignment]
+
 
 class TestDocumentCatalog:
     """验证 InfinityDenseVectorIndex 的 DocumentCatalog 实现。"""

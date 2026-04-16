@@ -326,3 +326,20 @@ def test_document_detail_unbound_has_null_dataset_id(client) -> None:
     response = client.get(f"/api/v0/documents/{doc_id}")
     assert response.status_code == 200
     assert response.json()["dataset_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# dataset_id 单引号转义回归
+# ---------------------------------------------------------------------------
+
+
+def test_get_dataset_with_quoted_id_returns_404(client) -> None:
+    """GET /datasets/{dataset_id} 对包含单引号的不存在 ID 返回 404 而非 500。"""
+    response = client.get("/api/v0/datasets/ds_it's")
+    assert response.status_code == 404
+
+
+def test_list_documents_with_quoted_dataset_id_returns_404(client) -> None:
+    """GET /documents?dataset_id=... 对包含单引号的不存在 ID 返回 404。"""
+    response = client.get("/api/v0/documents?dataset_id=ds_no'exist")
+    assert response.status_code == 404
