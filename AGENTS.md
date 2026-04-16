@@ -1,15 +1,8 @@
 # Project Overview
 `ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
 
-## Stack
-- Backend: `FastAPI`
-- Retrieval: `Infinity`
-- Database / cache: `PostgreSQL` + `Redis`
-- Embeddings: Ark text embedding
-- Local deployment: `docker compose`
-
 ## Current Stage
-- 当前处于 `V3` 阶段；阶段目标、当前状态和阶段性边界见 [阶段计划/V3.md](阶段计划/V3.md)。
+- 当前处于 `V3` 阶段: [阶段计划/V3.md](阶段计划/V3.md)
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。
