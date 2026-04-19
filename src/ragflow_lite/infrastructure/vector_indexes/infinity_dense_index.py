@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import infinity
 from infinity.common import ConflictType, NetworkAddress, SortType
+from infinity.index import IndexInfo, IndexType
 
 from ragflow_lite.domain.errors import (
     DatasetAlreadyExistsError,
@@ -274,21 +275,53 @@ class InfinityDenseVectorIndex:
 
     def _ensure_fulltext_index(self) -> None:
         """对 chunk 表的 text、filename 列幂等创建全文索引。"""
-        from infinity.index import IndexType
-
         chunk_table = self._db.get_table(self._chunk_table)
-        for col in ("text", "filename"):
-            index_name = f"{self._chunk_table}_{col}_fulltext_idx"
-            try:
-                chunk_table.create_index(
-                    index_name,
-                    IndexType.FullText,
-                    {col},
-                )
-            except Exception:
-                logger.debug(
-                    "Fulltext index %s may already exist, skipping.", index_name
-                )
+        required_indexes = {
+            f"{self._chunk_table}_text_fulltext_idx": "text",
+            f"{self._chunk_table}_filename_fulltext_idx": "filename",
+        }
+        existing_indexes = self._list_index_names(chunk_table)
+
+        for index_name, column_name in required_indexes.items():
+            if index_name in existing_indexes:
+                continue
+            chunk_table.create_index(
+                index_name,
+                IndexInfo(column_name, IndexType.FullText),
+                ConflictType.Ignore,
+            )
+
+        existing_indexes = self._list_index_names(chunk_table)
+        missing_indexes = [
+            index_name
+            for index_name in required_indexes
+            if index_name not in existing_indexes
+        ]
+        if missing_indexes:
+            raise RuntimeError(
+                f"Chunk table '{self._chunk_table}' is missing required fulltext "
+                f"indexes: {', '.join(sorted(missing_indexes))}. "
+                "Drop and recreate the indexes or repair the Infinity schema."
+            )
+
+    def _list_index_names(self, table: Any) -> set[str]:
+        """尽量读取 RemoteTable 上的索引列表；缺失接口时退化为空集合。"""
+        list_indexes = getattr(table, "list_indexes", None)
+        if not callable(list_indexes):
+            return set()
+
+        response = list_indexes()
+        if response is None:
+            return set()
+        if isinstance(response, tuple):
+            response = response[0]
+
+        names = getattr(response, "index_names", None)
+        if names is None and isinstance(response, dict):
+            names = response.get("index_names")
+        if names is None:
+            return set()
+        return {str(name) for name in names}
 
     # ------------------------------------------------------------------
     # DocumentCatalog 协议实现
@@ -606,6 +639,10 @@ class InfinityDenseVectorIndex:
     def _rows_to_chunks(self, df: Any, *, score_field: str) -> list[RetrievedChunk]:
         """将 polars DataFrame 行映射为 `RetrievedChunk` 列表。"""
         results: list[RetrievedChunk] = []
+        resolved_score_field = self._resolve_score_field_name(
+            list(getattr(df, "columns", [])),
+            requested=score_field,
+        )
         for row in df.iter_rows(named=True):
             metadata = self._parse_json(row.get("chunk_metadata_json", ""))
             metadata["filename"] = row.get("filename")
@@ -617,11 +654,41 @@ class InfinityDenseVectorIndex:
                     chunk_id=row["chunk_id"],
                     document_id=row["document_id"],
                     text=row["text"],
-                    score=float(row[score_field]),
+                    score=float(row[resolved_score_field]),
                     metadata=metadata,
                 )
             )
         return results
+
+    @staticmethod
+    def _resolve_score_field_name(columns: list[str], *, requested: str) -> str:
+        normalized_requested = requested.lstrip("_").lower()
+        normalized_aliases = [normalized_requested]
+        if normalized_requested == "distance":
+            normalized_aliases.append("score")
+
+        candidates: list[str] = []
+        for alias in normalized_aliases:
+            candidates.extend(
+                [
+                    f"_{alias}",
+                    f"_{alias}".upper(),
+                    f"_{alias}".lower(),
+                    alias,
+                    alias.upper(),
+                    alias.lower(),
+                ]
+            )
+
+        for candidate in dict.fromkeys([requested, *candidates]):
+            if candidate in columns:
+                return candidate
+
+        for column in columns:
+            if column.lstrip("_").lower() in normalized_aliases:
+                return column
+
+        raise KeyError(requested)
 
     def _validate_embedding_signature(self, chunks: list[EmbeddedChunk]) -> None:
         """校验 chunk 向量维度是否与当前 embedding 配置一致。"""

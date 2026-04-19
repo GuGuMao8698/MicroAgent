@@ -16,6 +16,7 @@ from ragflow_lite.infrastructure import (
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
 )
+from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
@@ -96,6 +97,30 @@ def test_build_services_uses_infinity_hybrid_retriever(
     answerer = services.query_service.answerer
     assert isinstance(answerer, OpenAIResponsesAnswerer)
     assert answerer.base_url == "https://code.rayinai.com/v1"
+
+
+def test_infrastructure_exports_remain_hybrid_only() -> None:
+    from ragflow_lite import infrastructure
+
+    assert infrastructure.__all__ == [
+        "ArkMultimodalTextEmbedder",
+        "BackgroundTaskRunner",
+        "CompositeParser",
+        "FixedWindowChunker",
+        "InfinityDenseVectorIndex",
+        "InfinityHybridRetriever",
+        "InlineTaskRunner",
+        "InMemoryStageCache",
+        "InMemoryTaskStore",
+        "LocalDocumentStore",
+        "LocalJsonVectorIndex",
+        "OpenAIResponsesAnswerer",
+    ]
+    assert retrievers_module.__all__ == ["InfinityHybridRetriever"]
+    assert not hasattr(infrastructure, "VectorRetriever")
+    assert not hasattr(infrastructure, "InfinityFullTextRetriever")
+    assert not hasattr(retrievers_module, "VectorRetriever")
+    assert not hasattr(retrievers_module, "InfinityFullTextRetriever")
 
 
 def test_build_services_embedder_dimensions_match_settings(

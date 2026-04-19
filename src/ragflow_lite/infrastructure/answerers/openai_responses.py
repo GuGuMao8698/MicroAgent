@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
+
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
 from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 
 _CITATION_TOKEN_RE = re.compile(r"<cite:(\d+)>")
+_MAX_OPENAI_RETRIES = 2
+_RETRY_BACKOFF_SECONDS = 1.0
 
 
 def _format_page(metadata: dict[str, Any]) -> str:
@@ -72,14 +83,8 @@ class OpenAIResponsesAnswerer:
         ordered_contexts = sorted(
             contexts, key=lambda context: context.score, reverse=True
         )
-        response = self.client.responses.create(
-            model=self.model,
-            instructions=ANSWERER_INSTRUCTIONS,
-            input=self._build_input(query, ordered_contexts),
-            reasoning={"effort": self.reasoning_effort},
-            store=self.store,
-            text={"verbosity": self.verbosity},
-        )
+        input_text = self._build_input(query, ordered_contexts)
+        response = self._create_response(input_text)
 
         raw_answer = response.output_text.strip()
         return AnswerResult(
@@ -92,6 +97,25 @@ class OpenAIResponsesAnswerer:
                 "store": self.store,
             },
         )
+
+    def _create_response(
+        self,
+        input_text: str,
+    ) -> Any:
+        for attempt in range(_MAX_OPENAI_RETRIES + 1):
+            try:
+                return self.client.responses.create(
+                    model=self.model,
+                    instructions=ANSWERER_INSTRUCTIONS,
+                    input=input_text,
+                    reasoning={"effort": self.reasoning_effort},
+                    store=self.store,
+                    text={"verbosity": self.verbosity},
+                )
+            except Exception as exc:
+                if attempt >= _MAX_OPENAI_RETRIES or not _should_retry_error(exc):
+                    raise
+                time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
 
     @staticmethod
     def _clean_citations(text: str, max_index: int) -> str:
@@ -141,3 +165,23 @@ class OpenAIResponsesAnswerer:
             )
 
         return "\n".join(lines).strip()
+
+
+def _should_retry_error(exc: Exception) -> bool:
+    if isinstance(
+        exc,
+        (
+            RateLimitError,
+            APIConnectionError,
+            APITimeoutError,
+            InternalServerError,
+        ),
+    ):
+        return True
+    if isinstance(exc, APIStatusError):
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+        return isinstance(status_code, int) and status_code >= 500
+    return False

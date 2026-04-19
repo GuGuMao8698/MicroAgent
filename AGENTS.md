@@ -1,3 +1,4 @@
+**本文档MUST NOT EDIT/WRITE**
 # Project Overview
 `ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
 

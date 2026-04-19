@@ -30,6 +30,7 @@ for _name in (
 # ---------------------------------------------------------------------------
 
 import re
+from types import SimpleNamespace
 
 import polars as pl
 
@@ -128,10 +129,23 @@ class FakeInfinityTable:
     def create_index(
         self,
         index_name: str,
-        index_type: Any,
-        columns: Any,
+        index_info: Any,
+        conflict_type: Any = None,
+        index_comment: str = "",
     ) -> None:
-        self._indexes[index_name] = {"type": index_type, "columns": columns}
+        self._indexes[index_name] = {
+            "type": getattr(index_info, "index_type", index_info),
+            "columns": getattr(index_info, "target_name", None),
+            "conflict_type": conflict_type,
+            "comment": index_comment,
+        }
+
+    def list_indexes(self) -> Any:
+        return SimpleNamespace(
+            error_code=0,
+            error_msg="",
+            index_names=list(self._indexes.keys()),
+        )
 
     def show_blocks(self) -> list:
         return []
