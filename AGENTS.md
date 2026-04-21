@@ -3,7 +3,7 @@
 `ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
 
 ## Current Stage
-- 当前处于 `V3` 阶段: [阶段计划/V3.md](阶段计划/V3.md)
+- 当前处于 `deepeval` 阶段: [阶段计划/索引页/deepeval.md](阶段计划/索引页/deepeval.md)
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。

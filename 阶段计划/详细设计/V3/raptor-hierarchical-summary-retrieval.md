@@ -1,23 +1,18 @@
 # RAPTOR 层级摘要检索
 
-# 目标
+# 说明
 
-在基础 chunk 之上增加一个最小可用的层级摘要检索闭环，改善长文档和多章节文档的召回表现。V3 的最小实现只引入“一层摘要父节点”，让系统既能命中原子 chunk，也能命中能够代表一组 chunk 主题的摘要节点。
+本文件不再承担 `V3` 内 `RAPTOR` 的单体详细设计。为降低单次实现压力，并让索引页能直接标记每个子能力的实际代码状态，`RAPTOR` 已拆分为 4 份独立设计文档，各自对应一个可独立实现与验收的条目。
 
-# 范围与非目标
+# 拆分后的设计文档
 
-本文件只定义一层摘要父节点的构建与检索参与方式：基础 chunk 如何被归组、摘要节点如何锚定子 chunk、命中摘要后如何回落到子 chunk。它不定义任意深度的摘要树、不定义复杂的查询路由策略、不定义最终排序融合，也不替代基础 chunk 检索本身。V3 不在本文件扩展多层树重写、跨文档聚类或专用 reranker 策略。
+1. [raptor-file-scope-ingestion-closure.md](./raptor-file-scope-ingestion-closure.md)：`file scope` 下的多层树构建、停止条件、任务挂载与摘要 chunk 写回
+2. [raptor-generic-retrieval-visibility.md](./raptor-generic-retrieval-visibility.md)：生成后的摘要 chunk 如何通过现有通用检索链路变为候选
+3. [raptor-runtime-safeguards-and-maintenance.md](./raptor-runtime-safeguards-and-maintenance.md)：structured data 自动跳过、缺 embedding 跳过、重复运行、错误中止与清理
+4. [raptor-dataset-scope-expansion.md](./raptor-dataset-scope-expansion.md)：从 `file scope` 扩展到 `dataset scope` 的范围与边界
 
-# 核心契约
+# 共同边界
 
-`RAPTOR` 的最小输入是已经稳定落位的一组基础 chunk；最小输出是在这些 chunk 之上新增的一层摘要父节点，以及“父节点 -> 子 chunk 列表”的稳定映射。每个摘要节点必须能明确回指其覆盖的 chunk 集合，不能成为脱离原文的孤立文本。摘要节点和基础 chunk 可以共同参与检索，但摘要命中的作用是把系统带回到对应子 chunk 组，而不是直接替代最终可读证据。
+上述 4 份文档共同服务于 `V3` 内完整 `RAPTOR` 的最终目标：参考上游 `RAGFlow` 的递归多层树结构，在 ingestion side 生成多层摘要 chunk，并继续沿用现有通用检索链路，而不是额外引入专门的 query-time `tree-walk API`。
 
-V3 的最小实现只允许一层父节点，不在这里引入多层树高、动态层级剪枝或单独的摘要检索 API。检索阶段若命中摘要节点，下游必须仍能展开到可追踪的子 chunk 候选；若没有摘要命中，基础 chunk 检索路径仍然完整可用。这样可以把 `RAPTOR` 固定为“补充长文档主题入口”的能力，而不是重写整个检索系统。
-
-# 验收口径
-
-先失败的条件是：摘要节点无法回指到稳定的子 chunk 集合、系统只保留摘要而失去原子 chunk 证据、`RAPTOR` 需要额外的专用检索 API 才能工作、或最小实现已经扩展成任意深度树构建。通过后的可观察结果是：长文档能额外产出可检索的摘要父节点；查询命中摘要后可以回落到对应子 chunk；基础 chunk 路径仍可独立工作；评估时可以区分“摘要命中带来额外候选”和“基础 chunk 直接命中”两类来源。
-
-# 依赖与边界
-
-本文件依赖稳定的基础 chunk 基线，因为摘要节点必须建立在可追踪的原子文本单元之上。它通常由 ingestion 流程承载，因为摘要构建属于文档入库侧扩充，而不是 query-time 生成。`Jina` 重排、多路扩展编排与候选去重分数组合都只能消费这里产出的候选，不得在本文件内反向合并为一个混合实现。
+具体实现时，建议按 1 -> 4 的顺序推进，并分别维护各自的状态标识与实现验收，不再把 4 个问题面耦合成一份单体设计文档。

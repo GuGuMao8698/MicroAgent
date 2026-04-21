@@ -3,6 +3,11 @@
 data/uploads/*
 data/tmp/*
 data/local_index/*
+data/deepeval/raw/*
+data/deepeval/summary/*
+data/deepeval/failed/*
+data/deepeval/metrics/*
+data/deepeval/compare/*
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -12,9 +17,20 @@ __pycache__/
 /网页/
 /auto_tune_rag/
 /参考/
+.deepeval
+模版/
+data/deepeval/
+归档/
+阶段计划/归档/
+data/
 
 # Keep directory placeholders
 !data/uploads/.gitkeep
 !data/tmp/.gitkeep
 !data/local_index/.gitkeep
+!data/deepeval/raw/.gitkeep
+!data/deepeval/summary/.gitkeep
+!data/deepeval/failed/.gitkeep
+!data/deepeval/metrics/.gitkeep
+!data/deepeval/compare/.gitkeep
 .codex

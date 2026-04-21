@@ -8,12 +8,12 @@
 
 ## 2. 测试门控与运行时契约
 
-1. [test-gating-and-runtime-contract.md](../详细设计/deepeval/test-gating-and-runtime-contract.md)：`Partially Implemented in Code`
+1. [test-gating-and-runtime-contract.md](../详细设计/deepeval/test-gating-and-runtime-contract.md)：`Implemented in Code`
 
 ## 3. 评测集与指标
 
-1. [eval-dataset-and-metrics.md](../详细设计/deepeval/eval-dataset-and-metrics.md)：`Not Implemented in Code`
+1. [eval-dataset-and-metrics.md](../详细设计/deepeval/eval-dataset-and-metrics.md)：`Implemented in Code`
 
 ## 4. 执行入口与 CI 路径
 
-1. [execution-and-ci-path.md](../详细设计/deepeval/execution-and-ci-path.md)：`Not Implemented in Code`
+1. [execution-and-ci-path.md](../详细设计/deepeval/execution-and-ci-path.md)：`Implemented in Code`

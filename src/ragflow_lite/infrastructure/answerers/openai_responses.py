@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from openai import (
@@ -52,6 +53,28 @@ Grounding rules:
 - Do not mention any documents that are not included in the contexts."""
 
 
+def _load_answerer_instructions(
+    instructions: str | None = None,
+    instructions_path: str | None = None,
+) -> str:
+    if instructions is not None and instructions_path is not None:
+        raise RuntimeError("Use either instructions or instructions_path, not both.")
+
+    if instructions_path is not None:
+        loaded = Path(instructions_path).read_text(encoding="utf-8").strip()
+        if not loaded:
+            raise RuntimeError("Custom answerer prompt file must not be empty.")
+        return loaded
+
+    if instructions is not None:
+        loaded = instructions.strip()
+        if not loaded:
+            raise RuntimeError("Custom answerer instructions must not be empty.")
+        return loaded
+
+    return ANSWERER_INSTRUCTIONS
+
+
 class OpenAIResponsesAnswerer:
     """Use OpenAI Responses API to synthesize grounded answers."""
 
@@ -64,12 +87,18 @@ class OpenAIResponsesAnswerer:
         store: bool,
         verbosity: str,
         client: Any | None = None,
+        instructions: str | None = None,
+        instructions_path: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.store = store
         self.verbosity = verbosity
+        self.instructions = _load_answerer_instructions(
+            instructions=instructions,
+            instructions_path=instructions_path,
+        )
         self.client = client or self._build_client(api_key, base_url)
 
     def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult:
@@ -106,7 +135,7 @@ class OpenAIResponsesAnswerer:
             try:
                 return self.client.responses.create(
                     model=self.model,
-                    instructions=ANSWERER_INSTRUCTIONS,
+                    instructions=self.instructions,
                     input=input_text,
                     reasoning={"effort": self.reasoning_effort},
                     store=self.store,

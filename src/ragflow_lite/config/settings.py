@@ -71,6 +71,7 @@ class OpenAIAnsweringRuntimeConfig:
     base_url: str
     model: str
     reasoning_effort: str
+    prompt_path: str | None
     store: bool
     verbosity: str
 
@@ -103,6 +104,11 @@ class Settings:
     openai_base_url: str = "https://code.rayinai.com/v1"
     openai_answer_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "medium"
+    openai_answer_prompt_path: str | None = field(
+        default_factory=lambda: _read_optional_env(
+            "RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH"
+        )
+    )
     openai_store: bool = False
     openai_text_verbosity: str = "medium"
     ark_api_key: str | None = field(
@@ -173,6 +179,13 @@ class Settings:
         if openai_api_key is None or ark_api_key is None or ark_embedding_model is None:
             raise RuntimeError("Missing required runtime configuration.")
 
+        prompt_path = self.openai_answer_prompt_path
+        if prompt_path is not None:
+            prompt_file = Path(prompt_path).expanduser()
+            if not prompt_file.is_absolute():
+                prompt_file = self.project_root / prompt_file
+            prompt_path = str(prompt_file)
+
         return (
             ArkEmbeddingRuntimeConfig(
                 api_key=ark_api_key,
@@ -184,6 +197,7 @@ class Settings:
                 base_url=self.openai_base_url,
                 model=self.openai_answer_model,
                 reasoning_effort=self.openai_reasoning_effort,
+                prompt_path=prompt_path,
                 store=self.openai_store,
                 verbosity=self.openai_text_verbosity,
             ),
