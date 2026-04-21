@@ -20,6 +20,9 @@ __pycache__/
 .deepeval
 模版/
 data/deepeval/
+归档/
+data/
+
 
 # Keep directory placeholders
 !data/uploads/.gitkeep

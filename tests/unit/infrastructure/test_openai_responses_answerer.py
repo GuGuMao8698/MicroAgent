@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import httpx
+import openai
 import pytest
 
 from ragflow_lite.domain.models import RetrievedChunk
@@ -17,16 +19,18 @@ class FakeResponsesAPI:
     def __init__(
         self,
         output_text: str = "基于上下文的回答。",
-        error: Exception | None = None,
+        errors: list[Exception | None] | None = None,
     ) -> None:
         self.output_text = output_text
-        self.error = error
+        self.errors = list(errors or [])
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
-        if self.error is not None:
-            raise self.error
+        if self.errors:
+            current = self.errors.pop(0)
+            if current is not None:
+                raise current
         return type("FakeResponse", (), {"output_text": self.output_text})()
 
 
@@ -34,9 +38,12 @@ class FakeOpenAIClient:
     def __init__(
         self,
         output_text: str = "基于上下文的回答。",
-        error: Exception | None = None,
+        errors: list[Exception | None] | None = None,
     ) -> None:
-        self.responses = FakeResponsesAPI(output_text=output_text, error=error)
+        self.responses = FakeResponsesAPI(
+            output_text=output_text,
+            errors=errors,
+        )
 
 
 def _build_answerer(client: FakeOpenAIClient | None = None) -> OpenAIResponsesAnswerer:
@@ -75,6 +82,25 @@ def _make_pdf_chunk(
             "page_start": page_start,
             "page_end": page_end,
         },
+    )
+
+
+def _make_rate_limit_error() -> openai.RateLimitError:
+    request = httpx.Request("POST", "https://code.rayinai.com/v1/responses")
+    response = httpx.Response(
+        429,
+        request=request,
+        json={
+            "error": {
+                "message": "Too many pending requests, please retry later",
+                "type": "rate_limit_error",
+            }
+        },
+    )
+    return openai.RateLimitError(
+        "Too many pending requests, please retry later",
+        response=response,
+        body=response.json(),
     )
 
 
@@ -259,13 +285,50 @@ def test_answer_uses_custom_instructions_from_path(tmp_path: Path) -> None:
 
 
 def test_answer_bubbles_up_openai_errors() -> None:
-    answerer = _build_answerer(FakeOpenAIClient(error=RuntimeError("boom")))
+    answerer = _build_answerer(FakeOpenAIClient(errors=[RuntimeError("boom")]))
 
     with pytest.raises(RuntimeError, match="boom"):
         answerer.answer(
             "这个请求会失败吗",
             [_make_chunk("1", 0.8)],
         )
+
+
+def test_answer_retries_rate_limit_error_then_succeeds(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.answerers.openai_responses.time.sleep",
+        lambda _: None,
+    )
+    client = FakeOpenAIClient(
+        output_text="恢复后的回答",
+        errors=[_make_rate_limit_error(), None],
+    )
+    answerer = _build_answerer(client)
+
+    result = answerer.answer("这个请求会重试吗", [_make_chunk("1", 0.8)])
+
+    assert result.answer == "恢复后的回答"
+    assert len(client.responses.calls) == 2
+
+
+def test_answer_raises_after_retry_exhausted(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.answerers.openai_responses.time.sleep",
+        lambda _: None,
+    )
+    client = FakeOpenAIClient(
+        errors=[
+            _make_rate_limit_error(),
+            _make_rate_limit_error(),
+            _make_rate_limit_error(),
+        ]
+    )
+    answerer = _build_answerer(client)
+
+    with pytest.raises(openai.RateLimitError, match="Too many pending requests"):
+        answerer.answer("这个请求会失败吗", [_make_chunk("1", 0.8)])
+
+    assert len(client.responses.calls) == 3
 
 
 # -- page info in prompt --
