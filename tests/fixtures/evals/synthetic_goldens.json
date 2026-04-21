@@ -1,0 +1,1142 @@
+[
+  {
+    "name": "best-practices-overview",
+    "input": "What's the simple mental model for getting more out of Codex?",
+    "expectedOutput": "Start with task context, use AGENTS.md for durable guidance, configure Codex to match your workflow, connect MCPs, turn repeatable work into skills, and automate stable workflows.",
+    "expected_output": "Start with task context, use AGENTS.md for durable guidance, configure Codex to match your workflow, connect MCPs, turn repeatable work into skills, and automate stable workflows.",
+    "context": [
+      "Start with task context, use AGENTS.md for durable guidance, configure Codex to match your workflow, connect MCPs, turn repeatable work into skills, and automate stable workflows."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-constraints-meaning",
+    "input": "What should go under constraints?",
+    "expectedOutput": "The standards, architecture, safety requirements, or conventions Codex should follow.",
+    "expected_output": "The standards, architecture, safety requirements, or conventions Codex should follow.",
+    "context": [
+      "The standards, architecture, safety requirements, or conventions Codex should follow."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-context-meaning",
+    "input": "What counts as context in the prompt?",
+    "expectedOutput": "The files, folders, docs, examples, or errors that matter for the task.",
+    "expected_output": "The files, folders, docs, examples, or errors that matter for the task.",
+    "context": [
+      "The files, folders, docs, examples, or errors that matter for the task."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-done-when-meaning",
+    "input": "What belongs in the done-when part?",
+    "expectedOutput": "What should be true before the task is complete, such as tests passing or a bug no longer reproducing.",
+    "expected_output": "What should be true before the task is complete, such as tests passing or a bug no longer reproducing.",
+    "context": [
+      "What should be true before the task is complete, such as tests passing or a bug no longer reproducing."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-four-parts",
+    "input": "If I'm writing a task prompt, what should I include by default?",
+    "expectedOutput": "Include the goal, the relevant context, the constraints, and what done looks like.",
+    "expected_output": "Include the goal, the relevant context, the constraints, and what done looks like.",
+    "context": [
+      "Include the goal, the relevant context, the constraints, and what done looks like."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-goal-meaning",
+    "input": "What does goal mean in that prompt structure?",
+    "expectedOutput": "It is what you're trying to change or build.",
+    "expected_output": "It is what you're trying to change or build.",
+    "context": [
+      "It is what you're trying to change or build."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "prompt-structure-benefit",
+    "input": "Why bother giving Codex that structure up front?",
+    "expectedOutput": "It helps Codex stay scoped, make fewer assumptions, and produce work that's easier to review.",
+    "expected_output": "It helps Codex stay scoped, make fewer assumptions, and produce work that's easier to review.",
+    "context": [
+      "It helps Codex stay scoped, make fewer assumptions, and produce work that's easier to review."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "reasoning-low",
+    "input": "When would low reasoning be enough?",
+    "expectedOutput": "Use Low for faster, well-scoped tasks.",
+    "expected_output": "Use Low for faster, well-scoped tasks.",
+    "context": [
+      "Use Low for faster, well-scoped tasks."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "reasoning-medium-high",
+    "input": "When does the guide suggest medium or high reasoning?",
+    "expectedOutput": "For more complex changes or debugging.",
+    "expected_output": "For more complex changes or debugging.",
+    "context": [
+      "For more complex changes or debugging."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "teammate-not-one-off",
+    "input": "What's the mindset shift this guide wants me to make with Codex?",
+    "expectedOutput": "Treat Codex less like a one-off assistant and more like a teammate you configure and improve over time.",
+    "expected_output": "Treat Codex less like a one-off assistant and more like a teammate you configure and improve over time.",
+    "context": [
+      "Treat Codex less like a one-off assistant and more like a teammate you configure and improve over time."
+    ],
+    "sourceFile": "CodexBestpractices.md",
+    "source_file": "CodexBestpractices.md",
+    "additionalMetadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "CodexBestpractices.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-async-default",
+    "input": "What does async_mode do, and what is its default value?",
+    "expectedOutput": "It enables concurrent execution within measure(), and it defaults to True.",
+    "expected_output": "It enables concurrent execution within measure(), and it defaults to True.",
+    "context": [
+      "async_mode is a boolean which when set to True, enables concurrent execution within the measure() method. Defaulted to True."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-default-threshold",
+    "input": "What is the default threshold for FaithfulnessMetric?",
+    "expectedOutput": "The default threshold is 0.5.",
+    "expected_output": "The default threshold is 0.5.",
+    "context": [
+      "There are EIGHT optional parameters when creating a FaithfulnessMetric: threshold is a float representing the minimum passing threshold, defaulted to 0.5."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-evaluation-template",
+    "input": "Why would you pass an evaluation_template to FaithfulnessMetric?",
+    "expectedOutput": "To override the default prompts used to compute the FaithfulnessMetric score.",
+    "expected_output": "To override the default prompts used to compute the FaithfulnessMetric score.",
+    "context": [
+      "evaluation_template is a class of type FaithfulnessTemplate, which allows you to override the default prompts used to compute the FaithfulnessMetric score."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-purpose",
+    "input": "What does the Faithfulness metric evaluate in a RAG pipeline?",
+    "expectedOutput": "It evaluates whether the actual_output factually aligns with the retrieval_context.",
+    "expected_output": "It evaluates whether the actual_output factually aligns with the retrieval_context.",
+    "context": [
+      "The faithfulness metric uses LLM-as-a-judge to measure the quality of your RAG pipeline's generator by evaluating whether the actual_output factually aligns with the contents of your retrieval_context."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-required-arguments",
+    "input": "Which LLMTestCase arguments are required to use the FaithfulnessMetric?",
+    "expectedOutput": "It requires input, actual_output, and retrieval_context.",
+    "expected_output": "It requires input, actual_output, and retrieval_context.",
+    "context": [
+      "To use the FaithfulnessMetric, you'll have to provide the following arguments when creating an LLMTestCase: input, actual_output, retrieval_context."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-self-explaining",
+    "input": "Besides a score, what extra output does deepeval's Faithfulness metric provide?",
+    "expectedOutput": "It provides a reason for its metric score because it is a self-explaining LLM-Eval.",
+    "expected_output": "It provides a reason for its metric score because it is a self-explaining LLM-Eval.",
+    "context": [
+      "deepeval's faithfulness metric is a self-explaining LLM-Eval, meaning it outputs a reason for its metric score."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-strict-mode",
+    "input": "What happens when strict_mode is set to True in FaithfulnessMetric?",
+    "expectedOutput": "It enforces a binary score of 1 for perfection and 0 otherwise, and also sets the threshold to 1.",
+    "expected_output": "It enforces a binary score of 1 for perfection and 0 otherwise, and also sets the threshold to 1.",
+    "context": [
+      "strict_mode is a boolean which when set to True, enforces a binary metric score: 1 for perfection, 0 otherwise. It also overrides the current threshold and sets it to 1."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-truths-limit",
+    "input": "What is truths_extraction_limit used for?",
+    "expectedOutput": "It sets the maximum number of factual truths to extract from retrieval_context for the faithfulness check.",
+    "expected_output": "It sets the maximum number of factual truths to extract from retrieval_context for the faithfulness check.",
+    "context": [
+      "truths_extraction_limit is an int which when set, determines the maximum number of factual truths to extract from the retrieval_context. The truths extracted will be used to determine the degree of factual alignment."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-verbose-default",
+    "input": "What does verbose_mode do in FaithfulnessMetric?",
+    "expectedOutput": "It prints the intermediate scoring steps to the console, and it defaults to False.",
+    "expected_output": "It prints the intermediate scoring steps to the console, and it defaults to False.",
+    "context": [
+      "verbose_mode is a boolean which when set to True, prints the intermediate steps used to calculate said metric to the console. Defaulted to False."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "faithfulness-vs-hallucination",
+    "input": "How is the Faithfulness metric different from the HallucinationMetric?",
+    "expectedOutput": "It focuses on contradictions between actual_output and retrieval_context in RAG pipelines, rather than hallucination in the LLM itself.",
+    "expected_output": "It focuses on contradictions between actual_output and retrieval_context in RAG pipelines, rather than hallucination in the LLM itself.",
+    "context": [
+      "Although similar to the HallucinationMetric, the faithfulness metric in deepeval is more concerned with contradictions between the actual_output and retrieval_context in RAG pipelines, rather than hallucination in the actual LLM itself."
+    ],
+    "sourceFile": "Faithfulness.md",
+    "source_file": "Faithfulness.md",
+    "additionalMetadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Faithfulness.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "basic-worker-rights",
+    "input": "我刚入职，法律上劳动者最基本有哪些权利？",
+    "expectedOutput": "劳动者享有平等就业和选择职业、取得劳动报酬、休息休假、劳动安全卫生保护、职业技能培训、社会保险和福利、提请劳动争议处理等权利。",
+    "expected_output": "劳动者享有平等就业和选择职业、取得劳动报酬、休息休假、劳动安全卫生保护、职业技能培训、社会保险和福利、提请劳动争议处理等权利。",
+    "context": [
+      "劳动者享有平等就业和选择职业、取得劳动报酬、休息休假、劳动安全卫生保护、职业技能培训、社会保险和福利、提请劳动争议处理等权利。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "employer-rulemaking-duty",
+    "input": "公司内部规章制度依法应该由谁来建立和完善？",
+    "expectedOutput": "用人单位应当依法建立和完善规章制度，保障劳动者享有劳动权利并履行劳动义务。",
+    "expected_output": "用人单位应当依法建立和完善规章制度，保障劳动者享有劳动权利并履行劳动义务。",
+    "context": [
+      "用人单位应当依法建立和完善规章制度，保障劳动者享有劳动权利并履行劳动义务。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "indefinite-contract-after-ten-years",
+    "input": "我在同一家公司干满十年，续签时能要求无固定期限合同吗？",
+    "expectedOutput": "劳动者在同一用人单位连续工作满十年以上，双方同意续延劳动合同且劳动者提出订立无固定期限劳动合同的，应当订立无固定期限劳动合同。",
+    "expected_output": "劳动者在同一用人单位连续工作满十年以上，双方同意续延劳动合同且劳动者提出订立无固定期限劳动合同的，应当订立无固定期限劳动合同。",
+    "context": [
+      "劳动者在同一用人单位连续工作满十年以上，双方同意续延劳动合同且劳动者提出订立无固定期限劳动合同的，应当订立无固定期限劳动合同。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "invalid-contract-conditions",
+    "input": "什么样的劳动合同会被认定无效？",
+    "expectedOutput": "违反法律、行政法规的劳动合同，以及采取欺诈、威胁等手段订立的劳动合同无效。",
+    "expected_output": "违反法律、行政法规的劳动合同，以及采取欺诈、威胁等手段订立的劳动合同无效。",
+    "context": [
+      "违反法律、行政法规的劳动合同，以及采取欺诈、威胁等手段订立的劳动合同无效。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "labor-contract-required",
+    "input": "开始上班后，劳动关系是不是一定要签劳动合同？",
+    "expectedOutput": "是。建立劳动关系应当订立劳动合同。",
+    "expected_output": "是。建立劳动关系应当订立劳动合同。",
+    "context": [
+      "是。建立劳动关系应当订立劳动合同。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "minimum-working-age",
+    "input": "普通单位最低可以招多大的未成年人？",
+    "expectedOutput": "禁止用人单位招用未满十六周岁的未成年人。",
+    "expected_output": "禁止用人单位招用未满十六周岁的未成年人。",
+    "context": [
+      "禁止用人单位招用未满十六周岁的未成年人。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "no-employment-discrimination",
+    "input": "找工作时，单位能因为民族或者宗教信仰不一样就不录用我吗？",
+    "expectedOutput": "不能。劳动者就业，不因民族、种族、性别、宗教信仰不同而受歧视。",
+    "expected_output": "不能。劳动者就业，不因民族、种族、性别、宗教信仰不同而受歧视。",
+    "context": [
+      "不能。劳动者就业，不因民族、种族、性别、宗教信仰不同而受歧视。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "probation-max-six-months",
+    "input": "试用期最长能约多久？",
+    "expectedOutput": "劳动合同可以约定试用期，但试用期最长不得超过六个月。",
+    "expected_output": "劳动合同可以约定试用期，但试用期最长不得超过六个月。",
+    "context": [
+      "劳动合同可以约定试用期，但试用期最长不得超过六个月。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "women-equal-hiring",
+    "input": "招聘时能直接把女性门槛设得更高吗？",
+    "expectedOutput": "除国家规定不适合妇女的工种或者岗位外，不得以性别为由拒绝录用妇女或者提高录用标准。",
+    "expected_output": "除国家规定不适合妇女的工种或者岗位外，不得以性别为由拒绝录用妇女或者提高录用标准。",
+    "context": [
+      "除国家规定不适合妇女的工种或者岗位外，不得以性别为由拒绝录用妇女或者提高录用标准。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "written-contract-required-terms",
+    "input": "劳动合同最少要写清哪些内容？",
+    "expectedOutput": "应当以书面形式订立，并具备期限、工作内容、劳动保护和条件、劳动报酬、劳动纪律、终止条件、违反合同责任等条款。",
+    "expected_output": "应当以书面形式订立，并具备期限、工作内容、劳动保护和条件、劳动报酬、劳动纪律、终止条件、违反合同责任等条款。",
+    "context": [
+      "应当以书面形式订立，并具备期限、工作内容、劳动保护和条件、劳动报酬、劳动纪律、终止条件、违反合同责任等条款。"
+    ],
+    "sourceFile": "MinerU_markdown_中华人民共和国劳动法.md",
+    "source_file": "MinerU_markdown_中华人民共和国劳动法.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_中华人民共和国劳动法.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-agentic-environment",
+    "input": "How does the document describe Claude Code at a high level?",
+    "expectedOutput": "Claude Code is an agentic coding environment that can read files, run commands, make changes, and autonomously work through problems while you watch, redirect, or step away.",
+    "expected_output": "Claude Code is an agentic coding environment that can read files, run commands, make changes, and autonomously work through problems while you watch, redirect, or step away.",
+    "context": [
+      "Claude Code is an agentic coding environment that can read your files, run commands, make changes, and autonomously work through problems."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-context-window-resource",
+    "input": "What does the guide call the most important resource to manage when using Claude Code?",
+    "expectedOutput": "The context window is the most important resource to manage because it fills up fast and Claude's performance degrades as it fills.",
+    "expected_output": "The context window is the most important resource to manage because it fills up fast and Claude's performance degrades as it fills.",
+    "context": [
+      "Claude's context window fills up fast, and performance degrades as it fills. The context window is the most important resource to manage."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-verification-high-leverage",
+    "input": "What is the single highest-leverage thing the guide says you can do for Claude Code?",
+    "expectedOutput": "Give Claude a way to verify its work by including tests, screenshots, or expected outputs so it can check itself.",
+    "expected_output": "Give Claude a way to verify its work by including tests, screenshots, or expected outputs so it can check itself.",
+    "context": [
+      "Include tests, screenshots, or expected outputs so Claude can check itself. This is the single highest-leverage thing you can do."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-four-phase-workflow",
+    "input": "What four phases does the recommended workflow use?",
+    "expectedOutput": "The recommended workflow has four phases: Explore, Plan, Implement, and Commit.",
+    "expected_output": "The recommended workflow has four phases: Explore, Plan, Implement, and Commit.",
+    "context": [
+      "The recommended workflow has four phases: Explore, Plan, Implement, and Commit."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-when-to-skip-plan",
+    "input": "When does the guide say you can skip planning?",
+    "expectedOutput": "You can skip planning when the scope is clear and the fix is small, such as a typo, a log line, or a rename that can be described in one sentence.",
+    "expected_output": "You can skip planning when the scope is clear and the fix is small, such as a typo, a log line, or a rename that can be described in one sentence.",
+    "context": [
+      "For tasks where the scope is clear and the fix is small, ask Claude to do it directly. If you could describe the diff in one sentence, skip the plan."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-specific-context",
+    "input": "How can you reduce the number of corrections Claude needs?",
+    "expectedOutput": "Provide specific context in your prompts by referencing files, mentioning constraints, and pointing to example patterns or likely locations.",
+    "expected_output": "Provide specific context in your prompts by referencing files, mentioning constraints, and pointing to example patterns or likely locations.",
+    "context": [
+      "The more precise your instructions, the fewer corrections you will need. Reference specific files, mention constraints, and point to example patterns."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-rich-content-options",
+    "input": "What are some ways to provide rich content to Claude Code?",
+    "expectedOutput": "You can reference files with @, paste images, provide URLs, pipe data into Claude, or let Claude fetch what it needs with commands and tools.",
+    "expected_output": "You can reference files with @, paste images, provide URLs, pipe data into Claude, or let Claude fetch what it needs with commands and tools.",
+    "context": [
+      "You can provide rich data by referencing files with @, pasting images, giving URLs, piping in data, or letting Claude fetch what it needs."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-claudemd-purpose",
+    "input": "What is CLAUDE.md used for?",
+    "expectedOutput": "CLAUDE.md is a special file Claude reads at the start of every conversation, and it should contain Bash commands, code style, and workflow rules.",
+    "expected_output": "CLAUDE.md is a special file Claude reads at the start of every conversation, and it should contain Bash commands, code style, and workflow rules.",
+    "context": [
+      "CLAUDE.md is a special file that Claude reads at the start of every conversation. Include Bash commands, code style, and workflow rules."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-claudemd-include",
+    "input": "What kinds of information should go into CLAUDE.md?",
+    "expectedOutput": "CLAUDE.md should include things Claude cannot infer well, such as Bash commands it cannot guess, nondefault style rules, testing instructions, repository etiquette, architectural decisions, environment quirks, and common gotchas.",
+    "expected_output": "CLAUDE.md should include things Claude cannot infer well, such as Bash commands it cannot guess, nondefault style rules, testing instructions, repository etiquette, architectural decisions, environment quirks, and common gotchas.",
+    "context": [
+      "Include Bash commands Claude cannot guess, code style rules that differ from defaults, testing instructions, repository etiquette, architectural decisions, environment quirks, and common gotchas."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "claude-code-claudemd-concise",
+    "input": "Why does the guide say to keep CLAUDE.md concise?",
+    "expectedOutput": "Because CLAUDE.md is loaded every session, and if it becomes bloated Claude may ignore your actual instructions or lose important rules in the noise.",
+    "expected_output": "Because CLAUDE.md is loaded every session, and if it becomes bloated Claude may ignore your actual instructions or lose important rules in the noise.",
+    "context": [
+      "Keep CLAUDE.md concise. Bloated CLAUDE.md files cause Claude to ignore your actual instructions."
+    ],
+    "sourceFile": "Best Practices for Claude Code.md",
+    "source_file": "Best Practices for Claude Code.md",
+    "additionalMetadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "Best Practices for Claude Code.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-company-name",
+    "input": "这份 2025 年度主要经营数据公告对应的是哪家公司？",
+    "expectedOutput": "这份公告对应的公司是合盛硅业股份有限公司。",
+    "expected_output": "这份公告对应的公司是合盛硅业股份有限公司。",
+    "context": [
+      "# 合盛硅业股份有限公司\n# 2025年度主要经营数据公告"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-industrial-silicon-production",
+    "input": "2025 年 1-12 月，工业硅的生产量是多少？",
+    "expectedOutput": "工业硅 2025 年 1-12 月的生产量为 1,454,741.02 吨。",
+    "expected_output": "工业硅 2025 年 1-12 月的生产量为 1,454,741.02 吨。",
+    "context": [
+      "工业硅 2025年1-12月生产量（吨）为 1,454,741.02。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-industrial-silicon-sales-volume",
+    "input": "2025 年 1-12 月，工业硅的销售量是多少？",
+    "expectedOutput": "工业硅 2025 年 1-12 月的销售量为 1,105,578.14 吨。",
+    "expected_output": "工业硅 2025 年 1-12 月的销售量为 1,105,578.14 吨。",
+    "context": [
+      "工业硅 2025年1-12月销售量（吨）为 1,105,578.14。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-industrial-silicon-sales-amount",
+    "input": "2025 年 1-12 月，工业硅的销售金额是多少？",
+    "expectedOutput": "工业硅 2025 年 1-12 月的销售金额为 906,409.35 万元。",
+    "expected_output": "工业硅 2025 年 1-12 月的销售金额为 906,409.35 万元。",
+    "context": [
+      "工业硅 2025年1-12月销售金额（万元）为 906,409.35。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-silicone-rubber-sales-amount",
+    "input": "2025 年 1-12 月，硅橡胶的销售金额是多少？",
+    "expectedOutput": "硅橡胶 2025 年 1-12 月的销售金额为 814,764.09 万元。",
+    "expected_output": "硅橡胶 2025 年 1-12 月的销售金额为 814,764.09 万元。",
+    "context": [
+      "硅橡胶 2025年1-12月销售金额（万元）为 814,764.09。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-industrial-silicon-price-2025",
+    "input": "工业硅 2025 年 1-12 月的平均价格是多少？",
+    "expectedOutput": "工业硅 2025 年 1-12 月的平均价格为 8,198.51 元/吨。",
+    "expected_output": "工业硅 2025 年 1-12 月的平均价格为 8,198.51 元/吨。",
+    "context": [
+      "工业硅 2025年1-12月平均价格（元/吨）为 8,198.51。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-largest-product-price-drop",
+    "input": "在主要产品里，2025 年平均价格同比降幅最大的是哪一项？",
+    "expectedOutput": "同比降幅最大的是工业硅，平均价格同比下降 26.63%。",
+    "expected_output": "同比降幅最大的是工业硅，平均价格同比下降 26.63%。",
+    "context": [
+      "主要产品同比变动比率中，工业硅为 -26.63%，是表中降幅最大的项目。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-petroleum-coke-yoy",
+    "input": "主要原材料里，哪一项 2025 年平均价格同比上涨，涨幅是多少？",
+    "expectedOutput": "石油焦的 2025 年平均价格同比上涨 35.91%。",
+    "expected_output": "石油焦的 2025 年平均价格同比上涨 35.91%。",
+    "context": [
+      "主要原材料同比变动比率中，石油焦为 35.91%，是表中明显上涨的项目。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-methanol-price-2025",
+    "input": "甲醇在 2025 年 1-12 月的平均价格是多少？",
+    "expectedOutput": "甲醇在 2025 年 1-12 月的平均价格为 1,720.17 元/吨。",
+    "expected_output": "甲醇在 2025 年 1-12 月的平均价格为 1,720.17 元/吨。",
+    "context": [
+      "甲醇 2025年1-12月平均价格（元/吨）为 1,720.17。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "hoshine-cyclic-siloxane-self-use",
+    "input": "注释里提到环体硅氧烷的自用量是多少？",
+    "expectedOutput": "注释里写明环体硅氧烷的自用量为 43.98 万吨。",
+    "expected_output": "注释里写明环体硅氧烷的自用量为 43.98 万吨。",
+    "context": [
+      "注：以上产品自用量分别为工业硅37.67万吨、硅橡胶10.08万吨、硅油0.44万吨、环体硅氧烷43.98万吨。"
+    ],
+    "sourceFile": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "source_file": "MinerU_markdown_603260_20260417_2LSZ.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_603260_20260417_2LSZ.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-purpose",
+    "input": "《期货公司监督管理办法（征求意见稿）》第一条的制定目的是什么？",
+    "expectedOutput": "第一条的目的，是加强对期货公司的监督管理，规范期货公司的行为，防范风险，保护客户合法权益，维护社会公共利益。",
+    "expected_output": "第一条的目的，是加强对期货公司的监督管理，规范期货公司的行为，防范风险，保护客户合法权益，维护社会公共利益。",
+    "context": [
+      "第一条 为了加强对期货公司的监督管理，规范期货公司的行为，防范期货公司的风险，保护客户的合法权益，维护社会公共利益。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-core-obligations",
+    "input": "第二条要求期货公司在经营中遵循哪些基本要求？",
+    "expectedOutput": "第二条要求期货公司遵守法律和中国证监会规定，聚焦主业，审慎经营，勤勉尽责，防范利益冲突，并履行对客户的诚信义务。",
+    "expected_output": "第二条要求期货公司遵守法律和中国证监会规定，聚焦主业，审慎经营，勤勉尽责，防范利益冲突，并履行对客户的诚信义务。",
+    "context": [
+      "第二条 期货公司应当遵守法律、行政法规和中国证券监督管理委员会的规定，聚焦主业，审慎经营，勤勉尽责，防范利益冲突，履行对客户的诚信义务。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-supervision-bodies",
+    "input": "第四条中，谁依法履行对期货公司的监督管理职责？",
+    "expectedOutput": "第四条规定，中国证监会依法履行监督管理职责，派出机构在授权范围内履职；中国期货业协会、期货交易场所、期货结算机构实行自律管理，中国期货监控负责监测监控。",
+    "expected_output": "第四条规定，中国证监会依法履行监督管理职责，派出机构在授权范围内履职；中国期货业协会、期货交易场所、期货结算机构实行自律管理，中国期货监控负责监测监控。",
+    "context": [
+      "第四条 中国证监会依法履行对期货公司的监督管理职责。中国证监会派出机构在授权范围内履行职责。中国期货业协会、期货交易场所、期货结算机构实行自律管理，中国期货监控实施监测监控。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-capital-brokerage-only",
+    "input": "如果期货公司只从事境内期货经纪业务，注册资本最低是多少？",
+    "expectedOutput": "如果只从事境内期货经纪业务，注册资本最低为人民币一亿元。",
+    "expected_output": "如果只从事境内期货经纪业务，注册资本最低为人民币一亿元。",
+    "context": [
+      "第六条 期货公司从事境内期货经纪业务的，注册资本不低于人民币一亿元。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-capital-brokerage-plus-consulting",
+    "input": "如果期货公司同时从事境内期货经纪和期货交易咨询业务，注册资本最低是多少？",
+    "expectedOutput": "如果同时从事境内期货经纪和期货交易咨询业务，注册资本最低为人民币二亿元。",
+    "expected_output": "如果同时从事境内期货经纪和期货交易咨询业务，注册资本最低为人民币二亿元。",
+    "context": [
+      "第六条 从事境内期货经纪和期货交易咨询业务的，注册资本不低于人民币二亿元。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-capital-one-trading-business",
+    "input": "如果期货公司经营一种交易类业务，注册资本最低是多少？",
+    "expectedOutput": "如果经营一种交易类业务，注册资本最低为人民币五亿元。",
+    "expected_output": "如果经营一种交易类业务，注册资本最低为人民币五亿元。",
+    "context": [
+      "第六条 期货公司从事交易类业务之一的，注册资本不低于人民币五亿元。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-capital-multiple-trading-businesses",
+    "input": "如果期货公司经营两种及以上交易类业务，注册资本最低是多少？",
+    "expectedOutput": "如果经营两种及以上交易类业务，注册资本最低为人民币十亿元。",
+    "expected_output": "如果经营两种及以上交易类业务，注册资本最低为人民币十亿元。",
+    "context": [
+      "第六条 经营二种以上交易类业务的，注册资本不低于人民币十亿元。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-establishment-staffing",
+    "input": "第七条对设立期货公司的人员配置提出了什么最低要求？",
+    "expectedOutput": "第七条要求设立期货公司时，至少有十五名符合从事期货业务条件的人员，以及三名以上符合任职条件的高级管理人员。",
+    "expected_output": "第七条要求设立期货公司时，至少有十五名符合从事期货业务条件的人员，以及三名以上符合任职条件的高级管理人员。",
+    "context": [
+      "第七条 设立期货公司，应当有十五名以上符合从事期货业务条件的人员，三名以上符合任职条件的高级管理人员。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-shareholder-funding",
+    "input": "第八条对股东出资资金来源和形式有哪些要求？",
+    "expectedOutput": "第八条要求股东以自有资金出资，出资额不得超过其净资产，资金来源应当合法；境外股东应当以可自由兑换货币或者人民币出资。",
+    "expected_output": "第八条要求股东以自有资金出资，出资额不得超过其净资产，资金来源应当合法；境外股东应当以可自由兑换货币或者人民币出资。",
+    "context": [
+      "第八条 股东应当以自有资金出资，出资额不得超过其净资产。股东出资资金来源应当合法。境外股东应当以可自由兑换货币或者人民币出资。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  },
+  {
+    "name": "futures-rule-shareholder-change-approval",
+    "input": "第十四条规定，哪些股东控制权变更事项需要经中国证监会核准？",
+    "expectedOutput": "第十四条规定，变更第一大股东、控股股东、实际控制人，新增境外主要股东，或者新增由外资参股、控股、实际控制的境内主要股东时，应当经中国证监会核准。",
+    "expected_output": "第十四条规定，变更第一大股东、控股股东、实际控制人，新增境外主要股东，或者新增由外资参股、控股、实际控制的境内主要股东时，应当经中国证监会核准。",
+    "context": [
+      "第十四条 期货公司变更第一大股东、控股股东、实际控制人，新增境外主要股东，或者新增由外资参股、控股、实际控制的境内主要股东的，应当经中国证监会核准。"
+    ],
+    "sourceFile": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "source_file": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+    "additionalMetadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    },
+    "additional_metadata": {
+      "document_fixture": "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md",
+      "top_k": 4
+    }
+  }
+]

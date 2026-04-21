@@ -65,9 +65,47 @@ def test_settings_group_runtime_provider_configuration(
         base_url="https://code.rayinai.com/v1",
         model="gpt-5.4-mini",
         reasoning_effort="medium",
+        prompt_path=None,
         store=False,
         verbosity="medium",
     )
+
+
+def test_settings_reads_optional_answerer_prompt_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH",
+        "/tmp/optimized_answerer_prompt.txt",
+    )
+
+    _, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
+
+    assert openai_config.prompt_path == "/tmp/optimized_answerer_prompt.txt"
+
+
+def test_build_services_resolves_relative_answerer_prompt_path_from_project_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt_relative_path = Path("tests/fixtures/evals/runtime_override.txt")
+    prompt_path = tmp_path / prompt_relative_path
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text("Runtime override instructions.", encoding="utf-8")
+    monkeypatch.setenv(
+        "RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH",
+        str(prompt_relative_path),
+    )
+    off_repo_dir = tmp_path / "other-working-dir"
+    off_repo_dir.mkdir()
+    monkeypatch.chdir(off_repo_dir)
+
+    services = build_services(_build_settings(tmp_path))
+
+    answerer = services.query_service.answerer
+    assert isinstance(answerer, OpenAIResponsesAnswerer)
+    assert answerer.instructions == "Runtime override instructions."
 
 
 def test_create_app_rejects_missing_ark_embedding_model(

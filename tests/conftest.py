@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -9,9 +10,14 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
+TESTS_PATH = PROJECT_ROOT / "tests"
 
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
+if str(TESTS_PATH) not in sys.path:
+    sys.path.insert(0, str(TESTS_PATH))
+
+from eval_support import is_live_infinity_enabled, validate_deepeval_env
 
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
@@ -20,8 +26,6 @@ for _name in (
     "RAGFLOW_LITE_LOG_LEVEL",
     "RAGFLOW_LITE_LOG_FORMAT",
     "RAGFLOW_LITE_METRICS_ENABLED",
-    "RAGFLOW_LITE_INFINITY_HOST",
-    "RAGFLOW_LITE_INFINITY_PORT",
 ):
     os.environ.pop(_name, None)
 
@@ -450,6 +454,7 @@ def _fake_connect(*args: Any, **kwargs: Any) -> FakeInfinityClient:
 import infinity
 from infinity.common import SortType  # noqa: E402
 
+_REAL_INFINITY_CONNECT = infinity.connect
 infinity.connect = _fake_connect  # type: ignore[assignment]
 
 from ragflow_lite.app import create_app  # noqa: E402
@@ -460,12 +465,88 @@ from ragflow_lite.config import Settings  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-live-infinity",
+        action="store_true",
+        default=False,
+        help="run tests that connect to a real Infinity instance",
+    )
+    parser.addoption(
+        "--run-deepeval",
+        action="store_true",
+        default=False,
+        help="run optional deepeval-backed evaluation tests",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "live_infinity: connect to a real Infinity instance instead of the fake client",
+    )
+    config.addinivalue_line(
+        "markers",
+        "deepeval: run optional deepeval-based RAG evaluation",
+    )
+
+    if config.getoption("--run-deepeval"):
+        import importlib.util
+
+        if importlib.util.find_spec("deepeval") is None:
+            raise pytest.UsageError(
+                "--run-deepeval requires the 'deepeval' package. "
+                "Install it with: pip install deepeval"
+            )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    skip_live_infinity = pytest.mark.skip(
+        reason="need --run-live-infinity to run tests against real Infinity"
+    )
+    skip_deepeval = pytest.mark.skip(
+        reason="need --run-deepeval to run deepeval-based evaluation tests"
+    )
+    run_deepeval = config.getoption("--run-deepeval")
+    run_live_infinity = config.getoption("--run-live-infinity") or run_deepeval
+
+    for item in items:
+        if item.get_closest_marker("deepeval") is not None and not run_deepeval:
+            item.add_marker(skip_deepeval)
+
+        if (
+            item.get_closest_marker("live_infinity") is not None
+            and not run_live_infinity
+        ):
+            item.add_marker(skip_live_infinity)
+
+
 @pytest.fixture(autouse=True)
-def _patch_infinity_connect(monkeypatch: pytest.MonkeyPatch) -> None:
-    """确保每个测试用例里 `infinity.connect` 都保持为假的实现。"""
+def _patch_infinity_connect(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认保持 fake Infinity；live tests 显式切回真实连接。"""
     import infinity as _inf
 
-    monkeypatch.setattr(_inf, "connect", _fake_connect)
+    use_live_infinity = is_live_infinity_enabled(
+        {marker.name for marker in request.node.iter_markers()},
+        run_live_infinity=request.config.getoption("--run-live-infinity"),
+    )
+    connect_impl = _REAL_INFINITY_CONNECT if use_live_infinity else _fake_connect
+    monkeypatch.setattr(_inf, "connect", connect_impl)
+
+
+@pytest.fixture(autouse=True)
+def _require_deepeval_runtime_env(request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("deepeval") is None:
+        return
+    if not request.config.getoption("--run-deepeval"):
+        return
+    validate_deepeval_env(os.environ)
 
 
 @pytest.fixture
@@ -486,6 +567,12 @@ def fixture_documents_dir() -> Path:
     return PROJECT_ROOT / "tests" / "fixtures" / "documents"
 
 
+def _build_test_scope_suffix(tmp_path: Path) -> str:
+    base_name = tmp_path.name.replace("-", "_")
+    path_hash = hashlib.sha1(str(tmp_path).encode("utf-8")).hexdigest()[:10]
+    return f"{base_name}_{path_hash}"
+
+
 @pytest.fixture
 def app_settings(tmp_path: Path) -> Settings:
     settings = Settings(
@@ -494,6 +581,9 @@ def app_settings(tmp_path: Path) -> Settings:
         local_index_dir=tmp_path / "local_index",
         temp_dir=tmp_path / "tmp",
     )
+    scope_suffix = _build_test_scope_suffix(tmp_path)
+    settings.infinity_document_table = f"documents_{scope_suffix}"
+    settings.infinity_chunk_table = f"chunks_{scope_suffix}"
     settings.ensure_directories()
     return settings
 

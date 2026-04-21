@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -235,6 +236,26 @@ def test_answer_calls_responses_api_with_expected_parameters() -> None:
     assert call["store"] is False
     assert call["text"] == {"verbosity": "medium"}
     assert call["instructions"]
+
+
+def test_answer_uses_custom_instructions_from_path(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "optimized_prompt.txt"
+    prompt_path.write_text("Custom optimized instructions.", encoding="utf-8")
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = OpenAIResponsesAnswerer(
+        api_key="test-openai-api-key",
+        base_url="https://code.rayinai.com/v1",
+        model="gpt-5.4-mini",
+        reasoning_effort="medium",
+        store=False,
+        verbosity="medium",
+        client=client,
+        instructions_path=str(prompt_path),
+    )
+
+    answerer.answer("支持什么文件类型", [_make_chunk("high", 0.9)])
+
+    assert client.responses.calls[0]["instructions"] == "Custom optimized instructions."
 
 
 def test_answer_bubbles_up_openai_errors() -> None:
