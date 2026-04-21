@@ -22,6 +22,20 @@ DIMS = 4
 SIGNATURE = {"provider": "ark", "model": "ep-test-model", "dimensions": DIMS}
 
 
+class _RowlessTableProxy:
+    """模拟真实 RemoteTable：保留 query API，但不暴露 `.rows`。"""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    @property
+    def rows(self) -> Any:
+        raise AttributeError("'RemoteTable' object has no attribute 'rows'")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 @pytest.fixture
 def make_index(fake_infinity_client_factory):
     def factory(
@@ -66,6 +80,12 @@ def _make_chunk(document_id: str = "doc_1", chunk_id: str = "chunk_1") -> Embedd
         index=0,
         vector=[1.0, 0.0, 0.0, 0.0],
     )
+
+
+def _wrap_dataset_tables_without_rows(client: Any) -> None:
+    db = client.get_database("default_db")
+    for table_name in ("documents_datasets", "documents_dataset_bindings"):
+        db._tables[table_name] = _RowlessTableProxy(db._tables[table_name])
 
 
 # ---------------------------------------------------------------------------
@@ -314,4 +334,69 @@ def test_get_document_includes_dataset_id(make_index) -> None:
     index.bind_document("doc_1", ds.dataset_id)
 
     doc = index.get_document("doc_1")
+    assert doc.dataset_id == ds.dataset_id
+
+
+# ---------------------------------------------------------------------------
+# dataset_id 单引号转义回归
+# ---------------------------------------------------------------------------
+
+
+def test_get_dataset_with_quoted_id_found(make_index) -> None:
+    """get_dataset() 对包含单引号的 dataset_id 能正确命中。"""
+    client, index = make_index()
+    tricky_id = "ds_it's"
+    # 直接往 fake 表里插入一行带引号 dataset_id 的数据。
+    db = client.get_database("default_db")
+    datasets_table = db.get_table(index._datasets_table)
+    datasets_table.rows.append(
+        {
+            "dataset_id": tricky_id,
+            "name": "带引号的数据集",
+            "description": "测试",
+            "created_at": "2025-01-01T00:00:00+00:00",
+        }
+    )
+
+    found = index.get_dataset(tricky_id)
+    assert found.dataset_id == tricky_id
+    assert found.name == "带引号的数据集"
+
+
+def test_get_dataset_with_quoted_id_not_found_raises(make_index) -> None:
+    """get_dataset() 对不存在但包含单引号的 dataset_id 抛 DatasetNotFoundError。"""
+    _, index = make_index()
+    with pytest.raises(DatasetNotFoundError):
+        index.get_dataset("ds_no'exist")
+
+
+def test_get_document_ids_for_dataset_with_quoted_id(make_index) -> None:
+    """get_document_ids_for_dataset() 对包含单引号的 dataset_id 返回空列表。"""
+    _, index = make_index()
+    result = index.get_document_ids_for_dataset("ds_it's")
+    assert result == []
+
+
+def test_delete_dataset_with_quoted_id_not_found_raises(make_index) -> None:
+    """delete_dataset() 对不存在但包含单引号的 dataset_id 抛 DatasetNotFoundError。"""
+    _, index = make_index()
+    with pytest.raises(DatasetNotFoundError):
+        index.delete_dataset("ds_no'exist")
+
+
+def test_dataset_store_paths_do_not_depend_on_table_rows(make_index) -> None:
+    client, index = make_index()
+    _wrap_dataset_tables_without_rows(client)
+
+    ds = index.create_dataset("无 rows", "")
+    asset = _make_asset()
+    index.index_document(asset, [_make_chunk()])
+    index.bind_document("doc_1", ds.dataset_id)
+
+    datasets = index.list_datasets()
+    docs = index.list_documents()
+    doc = index.get_document("doc_1")
+
+    assert [item.name for item in datasets] == ["无 rows"]
+    assert docs[0].dataset_id == ds.dataset_id
     assert doc.dataset_id == ds.dataset_id

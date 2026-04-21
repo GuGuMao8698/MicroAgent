@@ -93,3 +93,53 @@ class IngestionResult:
     chunk_count: int
     status: str
     dataset_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Async ingestion task snapshot
+# ---------------------------------------------------------------------------
+
+# Task status values
+TASK_QUEUED = "queued"
+TASK_PROCESSING = "processing"
+TASK_INDEXED = "indexed"
+TASK_FAILED = "failed"
+
+# Processing step values
+STEP_PARSING = "parsing"
+STEP_NORMALIZING = "normalizing"
+STEP_CHUNKING = "chunking"
+STEP_EMBEDDING = "embedding"
+STEP_INDEXING = "indexing"
+STEP_BINDING = "binding"
+
+# Fixed progress mapping per step
+STEP_PROGRESS: dict[str, int] = {
+    STEP_PARSING: 15,
+    STEP_NORMALIZING: 30,
+    STEP_CHUNKING: 45,
+    STEP_EMBEDDING: 60,
+    STEP_INDEXING: 80,
+    STEP_BINDING: 95,
+}
+
+MAX_ATTEMPTS = 2
+
+
+@dataclass(slots=True)
+class IngestionTaskSnapshot:
+    """异步 ingestion 任务的不可变快照。"""
+
+    document_id: str
+    idempotency_key: str
+    status: str
+    step: str | None
+    progress_percent: int
+    attempt: int
+    file_type: str
+    dataset_id: str | None
+    chunk_count: int | None
+    error: str | None
+    filename: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)

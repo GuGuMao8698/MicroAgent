@@ -12,6 +12,6 @@
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
 
 ## Avoid Here
-- 不要把 OCR/layout/table/DeepDoc、外部 rerank、dataset-aware query filter、异步 pipeline 等尚未进入默认主链路的能力提前塞进当前实现。当前只允许已落地的基础 dataset 管理 baseline（显式 dataset CRUD、单文档单归属、上传可选绑定、重绑/解绑、管理面过滤），不允许顺手把 query filter / rerank / 新主路径一起带入。
+- 不要把 OCR/layout/table/DeepDoc、外部 rerank、dataset-aware query filter 等尚未进入默认主链路的能力提前塞进当前实现。当前只允许已落地的基础 dataset 管理 baseline（显式 dataset CRUD、单文档单归属、上传可选绑定、重绑/解绑、管理面过滤）和异步 ingestion pipeline（任务状态、幂等、重试、进度、stage cache），不允许顺手把 query filter / rerank / 新主路径一起带入。
 - 不要跨层放置代码，例如把路由逻辑写进 `domain`，或把业务流程塞进 `api`。
 - 不要把”暂时不知道放哪”的代码默认丢进 `shared`，尤其不要把业务编排、provider 调用或路由控制流塞进去。

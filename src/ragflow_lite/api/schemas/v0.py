@@ -10,11 +10,50 @@ class HealthResponse(BaseModel):
 
 
 class DocumentIngestionResponse(BaseModel):
+    """202 Accepted response for async ingestion submission."""
+
     document_id: str
-    file_type: str
-    chunk_count: int
     status: str
+    file_type: str
     dataset_id: str | None = None
+    attempt: int
+    progress_percent: int
+    step: str | None = None
+    chunk_count: int | None = None
+    error: str | None = None
+
+
+class DocumentTaskResponse(BaseModel):
+    """Task detail response for GET /documents/{document_id}."""
+
+    document_id: str
+    status: str
+    file_type: str
+    dataset_id: str | None = None
+    attempt: int
+    progress_percent: int
+    step: str | None = None
+    chunk_count: int | None = None
+    error: str | None = None
+
+
+class DocumentDetailResponse(BaseModel):
+    """Combined task + document detail for GET /documents/{document_id}."""
+
+    document_id: str
+    status: str
+    file_type: str
+    dataset_id: str | None = None
+    attempt: int
+    progress_percent: int
+    step: str | None = None
+    chunk_count: int | None = None
+    error: str | None = None
+    # Document catalog fields (present when status=indexed and document exists in catalog)
+    filename: str | None = None
+    size_bytes: int | None = None
+    created_at: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class QueryRequest(BaseModel):

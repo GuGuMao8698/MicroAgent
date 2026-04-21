@@ -125,6 +125,11 @@ class _MetricsState:
     http_request_exceptions_total: Counter | None = None
     ingest_total: Counter | None = None
     query_total: Counter | None = None
+    ingest_task_accepted_total: Counter | None = None
+    ingest_task_retry_total: Counter | None = None
+    ingest_stage_cache_total: Counter | None = None
+    ingest_task_duration_seconds: Histogram | None = None
+    ingest_task_queue_delay_seconds: Histogram | None = None
 
 
 _TRACE_ID_GENERATOR = SnowflakeIdGenerator()
@@ -400,6 +405,38 @@ def _build_metrics_state(enabled: bool) -> _MetricsState:
             ("outcome",),
             registry=registry,
         ),
+        ingest_task_accepted_total=Counter(
+            "ragflow_lite_ingest_task_accepted_total",
+            "Async ingestion task acceptance count.",
+            ("file_type",),
+            registry=registry,
+        ),
+        ingest_task_retry_total=Counter(
+            "ragflow_lite_ingest_task_retry_total",
+            "Async ingestion task retry count.",
+            ("file_type",),
+            registry=registry,
+        ),
+        ingest_stage_cache_total=Counter(
+            "ragflow_lite_ingest_stage_cache_total",
+            "Async ingestion stage cache hit/miss count.",
+            ("outcome",),
+            registry=registry,
+        ),
+        ingest_task_duration_seconds=Histogram(
+            "ragflow_lite_ingest_task_duration_seconds",
+            "Async ingestion task processing duration.",
+            ("outcome",),
+            buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+            registry=registry,
+        ),
+        ingest_task_queue_delay_seconds=Histogram(
+            "ragflow_lite_ingest_task_queue_delay_seconds",
+            "Async ingestion task queue delay.",
+            (),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+            registry=registry,
+        ),
     )
 
 
@@ -499,3 +536,53 @@ def record_query_outcome(outcome: str) -> None:
     if counter is None:
         return
     counter.labels(outcome=outcome).inc()
+
+
+def record_ingest_task_accepted(file_type: str) -> None:
+    metrics_state = _current_metrics_state()
+    if metrics_state is None:
+        return
+    counter = metrics_state.ingest_task_accepted_total
+    if counter is None:
+        return
+    counter.labels(file_type=file_type).inc()
+
+
+def record_ingest_task_retry(file_type: str) -> None:
+    metrics_state = _current_metrics_state()
+    if metrics_state is None:
+        return
+    counter = metrics_state.ingest_task_retry_total
+    if counter is None:
+        return
+    counter.labels(file_type=file_type).inc()
+
+
+def record_ingest_stage_cache(outcome: str) -> None:
+    metrics_state = _current_metrics_state()
+    if metrics_state is None:
+        return
+    counter = metrics_state.ingest_stage_cache_total
+    if counter is None:
+        return
+    counter.labels(outcome=outcome).inc()
+
+
+def record_ingest_task_duration(outcome: str, duration_seconds: float) -> None:
+    metrics_state = _current_metrics_state()
+    if metrics_state is None:
+        return
+    histogram = metrics_state.ingest_task_duration_seconds
+    if histogram is None:
+        return
+    histogram.labels(outcome=outcome).observe(duration_seconds)
+
+
+def record_ingest_task_queue_delay(duration_seconds: float) -> None:
+    metrics_state = _current_metrics_state()
+    if metrics_state is None:
+        return
+    histogram = metrics_state.ingest_task_queue_delay_seconds
+    if histogram is None:
+        return
+    histogram.observe(duration_seconds)

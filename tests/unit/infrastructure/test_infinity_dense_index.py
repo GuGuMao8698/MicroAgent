@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import polars as pl
 import pytest
 
 from ragflow_lite.domain.errors import ProcessingError
@@ -88,6 +89,26 @@ def _search_hybrid_and_get_chunk_table(
     return client.get_database("default_db").get_table("chunks")
 
 
+def _create_existing_chunk_table_without_fulltext_indexes(db: Any) -> Any:
+    db.create_table(
+        "chunks",
+        {
+            "chunk_id": {"type": "varchar"},
+            "document_id": {"type": "varchar"},
+            "chunk_index": {"type": "integer"},
+            "text": {"type": "varchar"},
+            "vec": {"type": f"vector,{DIMS},float"},
+            "filename": {"type": "varchar"},
+            "file_type": {"type": "varchar"},
+            "chunk_metadata_json": {"type": "varchar"},
+            "embedding_provider": {"type": "varchar"},
+            "embedding_model": {"type": "varchar"},
+            "embedding_dimensions": {"type": "integer"},
+        },
+    )
+    return db.get_table("chunks")
+
+
 class TestInfinityDenseVectorIndex:
     def test_creates_tables_on_init(self, make_index) -> None:
         client, _ = make_index()
@@ -151,6 +172,50 @@ class TestInfinityDenseVectorIndex:
         assert results[0].document_id == "doc_1"
         assert results[0].score > 0
         assert results[0].metadata["filename"] == "test.txt"
+
+    @pytest.mark.parametrize("score_column", ["SCORE", "score"])
+    def test_search_accepts_live_infinity_score_column_names(
+        self, make_index, monkeypatch: pytest.MonkeyPatch, score_column: str
+    ) -> None:
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(
+            vector=[1.0, 0.0, 0.0, 0.0],
+            text="dense row",
+            metadata={"source": "fixture"},
+        )
+        idx.index_document(asset, [chunk])
+
+        chunk_table = client.get_database("default_db").get_table("chunks")
+        original_match_dense = chunk_table.match_dense
+
+        def match_dense_with_live_score(**kwargs: Any) -> Any:
+            builder = original_match_dense(**kwargs)
+            original_to_pl_dense = builder._to_pl_dense
+
+            def to_pl_dense_with_live_score(
+                match_kwargs: dict[str, Any],
+            ) -> tuple[pl.DataFrame, dict]:
+                df, extra = original_to_pl_dense(match_kwargs)
+                if df.is_empty():
+                    return df, extra
+                return df.rename({"_distance": score_column}), extra
+
+            monkeypatch.setattr(builder, "_to_pl_dense", to_pl_dense_with_live_score)
+            return builder
+
+        monkeypatch.setattr(chunk_table, "match_dense", match_dense_with_live_score)
+
+        results = idx.search([1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        assert len(results) == 1
+        assert results[0].chunk_id == "chunk_doc_1_0"
+        assert results[0].document_id == "doc_1"
+        assert results[0].text == "dense row"
+        assert results[0].score == pytest.approx(1.0)
+        assert results[0].metadata["source"] == "fixture"
+        assert results[0].metadata["filename"] == "test.txt"
+        assert results[0].metadata["file_type"] == "txt"
 
     def test_search_returns_empty_for_no_match(self, make_index) -> None:
         _, idx = make_index()
@@ -284,6 +349,56 @@ class TestInfinityDenseVectorIndex:
         assert "chunks_text_fulltext_idx" in chunk_table._indexes
         assert "chunks_filename_fulltext_idx" in chunk_table._indexes
 
+    def test_init_repairs_missing_fulltext_indexes_on_existing_chunk_table(
+        self,
+        fake_infinity_client_factory,
+    ) -> None:
+        client = fake_infinity_client_factory()
+        db = client.get_database("default_db")
+        _create_existing_chunk_table_without_fulltext_indexes(db)
+
+        InfinityDenseVectorIndex(
+            host="127.0.0.1",
+            port=23817,
+            database="default_db",
+            document_table="documents",
+            chunk_table="chunks",
+            embedding_dimensions=DIMS,
+            embedding_signature=SIGNATURE,
+            client=client,
+        )
+
+        chunk_table = db.get_table("chunks")
+        assert chunk_table.list_indexes().index_names == [
+            "chunks_text_fulltext_idx",
+            "chunks_filename_fulltext_idx",
+        ]
+
+    def test_init_fails_when_fulltext_index_creation_fails(
+        self,
+        fake_infinity_client_factory,
+    ) -> None:
+        client = fake_infinity_client_factory()
+        db = client.get_database("default_db")
+        chunk_table = _create_existing_chunk_table_without_fulltext_indexes(db)
+
+        def _raise(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("index create failed")
+
+        chunk_table.create_index = _raise
+
+        with pytest.raises(RuntimeError, match="index create failed"):
+            InfinityDenseVectorIndex(
+                host="127.0.0.1",
+                port=23817,
+                database="default_db",
+                document_table="documents",
+                chunk_table="chunks",
+                embedding_dimensions=DIMS,
+                embedding_signature=SIGNATURE,
+                client=client,
+            )
+
     def test_search_text_returns_matching_chunks(self, make_index) -> None:
         _, idx = make_index()
         asset = _make_asset()
@@ -323,6 +438,27 @@ class TestInfinityDenseVectorIndex:
         assert results[0].document_id == "doc_1"
         assert results[0].score > 0
         assert results[0].metadata["filename"] == "test.txt"
+
+    def test_rows_to_chunks_accepts_uppercase_score_column(self, make_index) -> None:
+        _, idx = make_index()
+        df = pl.DataFrame(
+            [
+                {
+                    "chunk_id": "chunk_doc_1_0",
+                    "document_id": "doc_1",
+                    "text": "hello world",
+                    "filename": "test.txt",
+                    "file_type": "txt",
+                    "chunk_metadata_json": "{}",
+                    "SCORE": 0.75,
+                }
+            ]
+        )
+
+        results = idx._rows_to_chunks(df, score_field="_score")
+
+        assert len(results) == 1
+        assert results[0].score == pytest.approx(0.75)
 
     def test_search_hybrid_overlap_chunk_returns_one(self, make_index) -> None:
         _, idx = make_index()
@@ -588,6 +724,56 @@ class TestInfinityDenseVectorIndex:
         assert len(results) == 1
         assert "_chunk_index" not in results[0].metadata
         assert "chunk_index" not in results[0].metadata
+
+    def test_search_hybrid_fusion_contract_matches_sdk(self, make_index) -> None:
+        """fusion 调用必须使用 Thrift SDK 文档支持的参数形状。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        chunk_table = client.get_database("default_db").get_table("chunks")
+        fk = chunk_table.last_fusion_kwargs
+        assert fk is not None
+        # Only these three keys are allowed — matches Thrift SDK fusion(method, topn, fusion_params)
+        assert set(fk.keys()) == {"method", "topn", "fusion_params"}
+        # method: str
+        assert isinstance(fk["method"], str)
+        assert fk["method"] == "weighted_sum"
+        # topn: int (not positional, but keyword argument)
+        assert isinstance(fk["topn"], int)
+        # fusion_params: dict (not extra positional argument)
+        assert isinstance(fk["fusion_params"], dict)
+        assert "weights" in fk["fusion_params"]
+
+    def test_search_hybrid_fusion_error_propagates(self, make_index) -> None:
+        """fusion 阶段抛异常时，错误应透传为 ProcessingError。"""
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        # monkeypatch: 让 _FakeQueryBuilder 的 _to_pl_fusion 在 fusion 阶段失败
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import conftest as test_conftest
+
+        _FakeQueryBuilder = test_conftest._FakeQueryBuilder
+
+        original = _FakeQueryBuilder._to_pl_fusion
+
+        def _failing_fusion(self: Any) -> Any:
+            raise RuntimeError("Infinity internal fusion error")
+
+        _FakeQueryBuilder._to_pl_fusion = _failing_fusion  # type: ignore[assignment]
+        try:
+            with pytest.raises(RuntimeError, match="Infinity internal fusion error"):
+                idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+        finally:
+            _FakeQueryBuilder._to_pl_fusion = original  # type: ignore[assignment]
 
 
 class TestDocumentCatalog:

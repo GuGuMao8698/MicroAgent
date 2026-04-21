@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 _CONTENT_TYPES = {
     ".txt": "text/plain",
     ".md": "text/markdown",
@@ -38,10 +40,15 @@ def _install_fake_ark_client(client):
     services.ingestion_pipeline.embedder.client = FakeArkClient()
 
 
+def _unique_key() -> str:
+    return f"key-{uuid4().hex}"
+
+
 def _upload_txt(client, content: bytes = b"hello world", name: str = "test.txt"):
     return client.post(
         "/api/v0/documents",
         files={"file": (name, content, "text/plain")},
+        headers={"Idempotency-Key": _unique_key()},
     )
 
 
@@ -161,17 +168,20 @@ def test_upload_document_with_dataset_binding(client) -> None:
         "/api/v0/documents",
         data={"dataset_id": dataset_id},
         files={"file": ("test.txt", b"hello world", "text/plain")},
+        headers={"Idempotency-Key": _unique_key()},
     )
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     payload = upload_response.json()
-    assert payload["status"] == "indexed"
+    document_id = payload["document_id"]
+    assert upload_response.headers["Location"] == f"/api/v0/documents/{document_id}"
+    assert payload["status"] == "queued"
     assert payload["dataset_id"] == dataset_id
 
 
 def test_upload_document_without_dataset_binding(client) -> None:
     _install_fake_ark_client(client)
     upload_response = _upload_txt(client)
-    assert upload_response.status_code == 200
+    assert upload_response.status_code == 202
     assert upload_response.json()["dataset_id"] is None
 
 
@@ -316,3 +326,20 @@ def test_document_detail_unbound_has_null_dataset_id(client) -> None:
     response = client.get(f"/api/v0/documents/{doc_id}")
     assert response.status_code == 200
     assert response.json()["dataset_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# dataset_id 单引号转义回归
+# ---------------------------------------------------------------------------
+
+
+def test_get_dataset_with_quoted_id_returns_404(client) -> None:
+    """GET /datasets/{dataset_id} 对包含单引号的不存在 ID 返回 404 而非 500。"""
+    response = client.get("/api/v0/datasets/ds_it's")
+    assert response.status_code == 404
+
+
+def test_list_documents_with_quoted_dataset_id_returns_404(client) -> None:
+    """GET /documents?dataset_id=... 对包含单引号的不存在 ID 返回 404。"""
+    response = client.get("/api/v0/documents?dataset_id=ds_no'exist")
+    assert response.status_code == 404

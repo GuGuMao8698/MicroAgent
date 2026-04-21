@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import Depends, Request
 
@@ -18,13 +18,20 @@ from ragflow_lite.application import (
     normalize_text,
 )
 from ragflow_lite.config import Settings
-from ragflow_lite.domain.ports.interfaces import Retriever
+from ragflow_lite.domain.ports.interfaces import (
+    IngestionStageCache,
+    IngestionTaskStore,
+    Retriever,
+)
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
+    BackgroundTaskRunner,
     CompositeParser,
     FixedWindowChunker,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
+    InMemoryStageCache,
+    InMemoryTaskStore,
     LocalDocumentStore,
     OpenAIResponsesAnswerer,
 )
@@ -40,6 +47,8 @@ class AppServices:
     query_service: QueryService
     document_service: DocumentService
     dataset_service: DatasetService
+    task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
+    stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
 
 
 def _build_vector_index(
@@ -96,17 +105,28 @@ def build_services(settings: Settings) -> AppServices:
     )
     retriever = _build_retriever(embedder, vector_index)
 
+    task_store = InMemoryTaskStore()
+    stage_cache = InMemoryStageCache()
+    runner = BackgroundTaskRunner()
+
+    pipeline = IngestionPipeline(
+        document_store=document_store,
+        parser=parser,
+        chunker=chunker,
+        embedder=embedder,
+        vector_index=vector_index,
+        normalizer=normalize_text,
+        dataset_store=vector_index,
+        task_store=task_store,
+        stage_cache=stage_cache,
+        runner=runner,
+    )
+
+    runner.set_handler(pipeline.process_task)
+
     return AppServices(
         settings=settings,
-        ingestion_pipeline=IngestionPipeline(
-            document_store=document_store,
-            parser=parser,
-            chunker=chunker,
-            embedder=embedder,
-            vector_index=vector_index,
-            normalizer=normalize_text,
-            dataset_store=vector_index,
-        ),
+        ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=QueryService(
             retriever=retriever,
@@ -117,6 +137,8 @@ def build_services(settings: Settings) -> AppServices:
             dataset_store=vector_index,
         ),
         dataset_service=DatasetService(store=vector_index),
+        task_store=task_store,
+        stage_cache=stage_cache,
     )
 
 

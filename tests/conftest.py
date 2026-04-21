@@ -30,6 +30,7 @@ for _name in (
 # ---------------------------------------------------------------------------
 
 import re
+from types import SimpleNamespace
 
 import polars as pl
 
@@ -85,6 +86,7 @@ class FakeInfinityTable:
         self.last_hybrid_dense_topn: int | None = None
         self.last_hybrid_fusion_topn: int | None = None
         self.last_hybrid_text_fields: str | None = None
+        self.last_fusion_kwargs: dict[str, Any] | None = None
 
     def insert(self, data: list[dict[str, Any]]) -> None:
         self.rows.extend(data)
@@ -127,10 +129,23 @@ class FakeInfinityTable:
     def create_index(
         self,
         index_name: str,
-        index_type: Any,
-        columns: Any,
+        index_info: Any,
+        conflict_type: Any = None,
+        index_comment: str = "",
     ) -> None:
-        self._indexes[index_name] = {"type": index_type, "columns": columns}
+        self._indexes[index_name] = {
+            "type": getattr(index_info, "index_type", index_info),
+            "columns": getattr(index_info, "target_name", None),
+            "conflict_type": conflict_type,
+            "comment": index_comment,
+        }
+
+    def list_indexes(self) -> Any:
+        return SimpleNamespace(
+            error_code=0,
+            error_msg="",
+            index_names=list(self._indexes.keys()),
+        )
 
     def show_blocks(self) -> list:
         return []
@@ -167,8 +182,15 @@ class _FakeQueryBuilder:
         self._dense_kwargs = kwargs
         return self
 
-    def fusion(self, method: str, **kwargs: Any) -> _FakeQueryBuilder:
-        self._fusion_kwargs = {"method": method, **kwargs}
+    def fusion(
+        self,
+        method: str,
+        topn: int,
+        fusion_params: dict[str, Any] | None = None,
+    ) -> _FakeQueryBuilder:
+        self._fusion_kwargs = {"method": method, "topn": topn}
+        if fusion_params is not None:
+            self._fusion_kwargs["fusion_params"] = fusion_params
         return self
 
     def output(self, columns: list[str]) -> _FakeQueryBuilder:
@@ -314,6 +336,9 @@ class _FakeQueryBuilder:
         self._table.last_hybrid_fusion_topn = topn
         self._table.last_hybrid_text_fields = (
             self._text_kwargs.get("fields") if self._text_kwargs else None
+        )
+        self._table.last_fusion_kwargs = (
+            dict(self._fusion_kwargs) if self._fusion_kwargs else None
         )
 
         text_results = self._collect_text_hits()

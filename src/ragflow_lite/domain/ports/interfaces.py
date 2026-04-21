@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from ragflow_lite.domain.models import (
     AnswerResult,
@@ -10,9 +10,47 @@ from ragflow_lite.domain.models import (
     DocumentAsset,
     EmbeddedChunk,
     IndexedDocument,
+    IngestionTaskSnapshot,
     ParsedDocument,
     RetrievedChunk,
 )
+
+# ---------------------------------------------------------------------------
+# Async ingestion internal contracts
+# ---------------------------------------------------------------------------
+
+
+class IngestionTaskStore(Protocol):
+    """任务快照的存储契约（第一版为单进程内存实现）。"""
+
+    def create(self, snapshot: IngestionTaskSnapshot) -> IngestionTaskSnapshot: ...
+
+    def reserve(
+        self,
+        snapshot: IngestionTaskSnapshot,
+    ) -> tuple[IngestionTaskSnapshot, bool]: ...
+
+    def release(self, idempotency_key: str, document_id: str) -> None: ...
+
+    def get(self, document_id: str) -> IngestionTaskSnapshot | None: ...
+
+    def get_by_idempotency_key(self, key: str) -> IngestionTaskSnapshot | None: ...
+
+    def update(self, snapshot: IngestionTaskSnapshot) -> IngestionTaskSnapshot: ...
+
+
+class IngestionStageCache(Protocol):
+    """阶段产物缓存契约（只缓存 parse 和 chunk 结果）。"""
+
+    def get(self, key: str) -> Any | None: ...
+
+    def put(self, key: str, value: Any) -> None: ...
+
+
+class IngestionTaskRunner(Protocol):
+    """任务执行器契约（第一版为应用内 executor）。"""
+
+    def submit(self, document_id: str) -> None: ...
 
 
 class DatasetStore(Protocol):

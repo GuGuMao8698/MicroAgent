@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import infinity
 from infinity.common import ConflictType, NetworkAddress, SortType
+from infinity.index import IndexInfo, IndexType
 
 from ragflow_lite.domain.errors import (
     DatasetAlreadyExistsError,
@@ -274,21 +275,53 @@ class InfinityDenseVectorIndex:
 
     def _ensure_fulltext_index(self) -> None:
         """对 chunk 表的 text、filename 列幂等创建全文索引。"""
-        from infinity.index import IndexType
-
         chunk_table = self._db.get_table(self._chunk_table)
-        for col in ("text", "filename"):
-            index_name = f"{self._chunk_table}_{col}_fulltext_idx"
-            try:
-                chunk_table.create_index(
-                    index_name,
-                    IndexType.FullText,
-                    {col},
-                )
-            except Exception:
-                logger.debug(
-                    "Fulltext index %s may already exist, skipping.", index_name
-                )
+        required_indexes = {
+            f"{self._chunk_table}_text_fulltext_idx": "text",
+            f"{self._chunk_table}_filename_fulltext_idx": "filename",
+        }
+        existing_indexes = self._list_index_names(chunk_table)
+
+        for index_name, column_name in required_indexes.items():
+            if index_name in existing_indexes:
+                continue
+            chunk_table.create_index(
+                index_name,
+                IndexInfo(column_name, IndexType.FullText),
+                ConflictType.Ignore,
+            )
+
+        existing_indexes = self._list_index_names(chunk_table)
+        missing_indexes = [
+            index_name
+            for index_name in required_indexes
+            if index_name not in existing_indexes
+        ]
+        if missing_indexes:
+            raise RuntimeError(
+                f"Chunk table '{self._chunk_table}' is missing required fulltext "
+                f"indexes: {', '.join(sorted(missing_indexes))}. "
+                "Drop and recreate the indexes or repair the Infinity schema."
+            )
+
+    def _list_index_names(self, table: Any) -> set[str]:
+        """尽量读取 RemoteTable 上的索引列表；缺失接口时退化为空集合。"""
+        list_indexes = getattr(table, "list_indexes", None)
+        if not callable(list_indexes):
+            return set()
+
+        response = list_indexes()
+        if response is None:
+            return set()
+        if isinstance(response, tuple):
+            response = response[0]
+
+        names = getattr(response, "index_names", None)
+        if names is None and isinstance(response, dict):
+            names = response.get("index_names")
+        if names is None:
+            return set()
+        return {str(name) for name in names}
 
     # ------------------------------------------------------------------
     # DocumentCatalog 协议实现
@@ -349,7 +382,10 @@ class InfinityDenseVectorIndex:
         """创建 dataset，名称做精确唯一约束。"""
         table = self._db.get_table(self._datasets_table)
         # 名称唯一性检查
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["dataset_id", "name", "description", "created_at"],
+        ):
             if row.get("name") == name:
                 raise DatasetAlreadyExistsError(name)
         dataset_id = f"ds_{uuid4().hex}"
@@ -381,13 +417,20 @@ class InfinityDenseVectorIndex:
                 description=row["description"],
                 created_at=row["created_at"],
             )
-            for row in table.rows
+            for row in self._table_rows(
+                table,
+                ["dataset_id", "name", "description", "created_at"],
+            )
         ]
 
     def get_dataset(self, dataset_id: str) -> Dataset:
         """按 dataset_id 读取单个 dataset，未命中抛 DatasetNotFoundError。"""
         table = self._db.get_table(self._datasets_table)
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["dataset_id", "name", "description", "created_at"],
+            filter_expr=_dataset_id_filter(dataset_id),
+        ):
             if row.get("dataset_id") == dataset_id:
                 return Dataset(
                     dataset_id=row["dataset_id"],
@@ -406,7 +449,7 @@ class InfinityDenseVectorIndex:
         if count > 0:
             raise DatasetNotEmptyError(dataset_id)
         table = self._db.get_table(self._datasets_table)
-        table.delete(f"dataset_id = '{dataset_id}'")
+        table.delete(_dataset_id_filter(dataset_id))
 
     def bind_document(self, document_id: str, dataset_id: str) -> None:
         """将文档绑定到 dataset，单归属语义（upsert）。"""
@@ -432,7 +475,11 @@ class InfinityDenseVectorIndex:
     def get_dataset_id_for_document(self, document_id: str) -> str | None:
         """查询文档绑定的 dataset_id，未绑定返回 None。"""
         table = self._db.get_table(self._dataset_bindings_table)
-        for row in table.rows:
+        for row in self._table_rows(
+            table,
+            ["document_id", "dataset_id"],
+            filter_expr=_doc_id_filter(document_id),
+        ):
             if row.get("document_id") == document_id:
                 return row["dataset_id"]
         return None
@@ -442,7 +489,11 @@ class InfinityDenseVectorIndex:
         table = self._db.get_table(self._dataset_bindings_table)
         return [
             row["document_id"]
-            for row in table.rows
+            for row in self._table_rows(
+                table,
+                ["document_id", "dataset_id"],
+                filter_expr=_dataset_id_filter(dataset_id),
+            )
             if row.get("dataset_id") == dataset_id
         ]
 
@@ -482,7 +533,10 @@ class InfinityDenseVectorIndex:
         """批量填充文档的 dataset_id 字段。"""
         bindings_table = self._db.get_table(self._dataset_bindings_table)
         doc_to_ds: dict[str, str] = {}
-        for row in bindings_table.rows:
+        for row in self._table_rows(
+            bindings_table,
+            ["document_id", "dataset_id"],
+        ):
             doc_to_ds[row["document_id"]] = row["dataset_id"]
         for doc in docs:
             doc.dataset_id = doc_to_ds.get(doc.document_id)
@@ -499,6 +553,33 @@ class InfinityDenseVectorIndex:
         if isinstance(columns_info, tuple):
             return columns_info[0]
         return columns_info
+
+    @staticmethod
+    def _query_dataframe(
+        table: Any,
+        columns: list[str],
+        *,
+        filter_expr: str | None = None,
+    ) -> Any:
+        """使用 Infinity query API 读取表数据，避免依赖非兼容的 `table.rows`。"""
+        query = table.output(columns)
+        if filter_expr is not None:
+            query = query.filter(filter_expr)
+        result = query.to_pl()
+        return result[0] if isinstance(result, tuple) else result
+
+    def _table_rows(
+        self,
+        table: Any,
+        columns: list[str],
+        *,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """将表查询结果物化为命名行列表。"""
+        df = self._query_dataframe(table, columns, filter_expr=filter_expr)
+        if df.is_empty():
+            return []
+        return list(df.iter_rows(named=True))
 
     def _validate_query_dimensions(self, query_vector: list[float]) -> None:
         """校验查询向量维度是否与当前 embedding 配置一致。"""
@@ -558,6 +639,10 @@ class InfinityDenseVectorIndex:
     def _rows_to_chunks(self, df: Any, *, score_field: str) -> list[RetrievedChunk]:
         """将 polars DataFrame 行映射为 `RetrievedChunk` 列表。"""
         results: list[RetrievedChunk] = []
+        resolved_score_field = self._resolve_score_field_name(
+            list(getattr(df, "columns", [])),
+            requested=score_field,
+        )
         for row in df.iter_rows(named=True):
             metadata = self._parse_json(row.get("chunk_metadata_json", ""))
             metadata["filename"] = row.get("filename")
@@ -569,11 +654,41 @@ class InfinityDenseVectorIndex:
                     chunk_id=row["chunk_id"],
                     document_id=row["document_id"],
                     text=row["text"],
-                    score=float(row[score_field]),
+                    score=float(row[resolved_score_field]),
                     metadata=metadata,
                 )
             )
         return results
+
+    @staticmethod
+    def _resolve_score_field_name(columns: list[str], *, requested: str) -> str:
+        normalized_requested = requested.lstrip("_").lower()
+        normalized_aliases = [normalized_requested]
+        if normalized_requested == "distance":
+            normalized_aliases.append("score")
+
+        candidates: list[str] = []
+        for alias in normalized_aliases:
+            candidates.extend(
+                [
+                    f"_{alias}",
+                    f"_{alias}".upper(),
+                    f"_{alias}".lower(),
+                    alias,
+                    alias.upper(),
+                    alias.lower(),
+                ]
+            )
+
+        for candidate in dict.fromkeys([requested, *candidates]):
+            if candidate in columns:
+                return candidate
+
+        for column in columns:
+            if column.lstrip("_").lower() in normalized_aliases:
+                return column
+
+        raise KeyError(requested)
 
     def _validate_embedding_signature(self, chunks: list[EmbeddedChunk]) -> None:
         """校验 chunk 向量维度是否与当前 embedding 配置一致。"""
@@ -683,3 +798,9 @@ def _doc_id_filter(document_id: str) -> str:
     """构造 `document_id` 等值 filter 字符串，转义单引号。"""
     escaped = document_id.replace("'", "''")
     return f"document_id = '{escaped}'"
+
+
+def _dataset_id_filter(dataset_id: str) -> str:
+    """构造 `dataset_id` 等值 filter 字符串，转义单引号。"""
+    escaped = dataset_id.replace("'", "''")
+    return f"dataset_id = '{escaped}'"

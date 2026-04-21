@@ -31,10 +31,18 @@ def _disconnect_vector_index(app: FastAPI) -> None:
         disconnect()
 
 
+def _close_ingestion_runner(app: FastAPI) -> None:
+    services: AppServices = app.state.services
+    close = getattr(services.ingestion_pipeline.runner, "close", None)
+    if callable(close):
+        close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期管理，负责启动和关闭时的资源清理。"""
     yield
+    _close_ingestion_runner(app)
     _disconnect_vector_index(app)
 
 
@@ -63,7 +71,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     try:
         app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
         install_observability(app, enable_metrics=resolved_settings.metrics_enabled)
-        app.state.services = build_services(resolved_settings)
+        services = build_services(resolved_settings)
+        set_metrics_state = getattr(
+            services.ingestion_pipeline.runner,
+            "set_metrics_state",
+            None,
+        )
+        if callable(set_metrics_state):
+            set_metrics_state(app.state.metrics_state)
+        app.state.services = services
         app.include_router(v0_router, prefix=resolved_settings.api_prefix)
         return app
     except Exception:
