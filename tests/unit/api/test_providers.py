@@ -69,6 +69,7 @@ def test_settings_group_runtime_provider_configuration(
         prompt_path=None,
         store=False,
         verbosity="medium",
+        render_citations=True,
     )
 
 
@@ -84,6 +85,17 @@ def test_settings_reads_optional_answerer_prompt_path(
     _, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
 
     assert openai_config.prompt_path == "/tmp/optimized_answerer_prompt.txt"
+
+
+def test_settings_reads_optional_render_citations_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
+
+    _, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
+
+    assert openai_config.render_citations is False
 
 
 def test_build_services_resolves_relative_answerer_prompt_path_from_project_root(
@@ -107,6 +119,19 @@ def test_build_services_resolves_relative_answerer_prompt_path_from_project_root
     answerer = services.query_service.answerer
     assert isinstance(answerer, OpenAIResponsesAnswerer)
     assert answerer.instructions == "Runtime override instructions."
+
+
+def test_build_services_threads_render_citations_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
+
+    services = build_services(_build_settings(tmp_path))
+
+    answerer = services.query_service.answerer
+    assert isinstance(answerer, OpenAIResponsesAnswerer)
+    assert answerer.render_citations is False
 
 
 def test_create_app_rejects_missing_ark_embedding_model(

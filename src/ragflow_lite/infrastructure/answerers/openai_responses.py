@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from openai import (
     APIConnectionError,
@@ -19,8 +21,14 @@ from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
 from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 
 _CITATION_TOKEN_RE = re.compile(r"<cite:(\d+)>")
+_BARE_DIGIT_BRACKET_RE = re.compile(r"\[(\d+)\]")
 _MAX_OPENAI_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 1.0
+
+_PACKAGED_TEMPLATES_DIR = Path(__file__).parent
+_DEFAULT_VARIANT = "citations"
+_VARIANT_ENV_VAR = "RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_VARIANT"
+_TEMPLATE_CACHE: dict[str, str] = {}
 
 
 def _format_page(metadata: dict[str, Any]) -> str:
@@ -53,9 +61,22 @@ Grounding rules:
 - Do not mention any documents that are not included in the contexts."""
 
 
+def _load_packaged_template(variant: str) -> str:
+    cached = _TEMPLATE_CACHE.get(variant)
+    if cached is not None:
+        return cached
+    filename = (
+        "answer_with_citations.txt" if variant == "citations" else "answer_plain.txt"
+    )
+    text = (_PACKAGED_TEMPLATES_DIR / filename).read_text(encoding="utf-8").strip()
+    _TEMPLATE_CACHE[variant] = text
+    return text
+
+
 def _load_answerer_instructions(
     instructions: str | None = None,
     instructions_path: str | None = None,
+    variant: str | None = None,
 ) -> str:
     if instructions is not None and instructions_path is not None:
         raise RuntimeError("Use either instructions or instructions_path, not both.")
@@ -72,7 +93,8 @@ def _load_answerer_instructions(
             raise RuntimeError("Custom answerer instructions must not be empty.")
         return loaded
 
-    return ANSWERER_INSTRUCTIONS
+    effective_variant = variant or os.environ.get(_VARIANT_ENV_VAR) or _DEFAULT_VARIANT
+    return _load_packaged_template(effective_variant)
 
 
 class OpenAIResponsesAnswerer:
@@ -89,17 +111,22 @@ class OpenAIResponsesAnswerer:
         client: Any | None = None,
         instructions: str | None = None,
         instructions_path: str | None = None,
+        render_citations: bool = True,
     ) -> None:
         self.base_url = base_url
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.store = store
         self.verbosity = verbosity
+        self.render_citations = render_citations
+        effective_variant = "citations" if render_citations else "plain"
         self.instructions = _load_answerer_instructions(
             instructions=instructions,
             instructions_path=instructions_path,
+            variant=effective_variant,
         )
         self.client = client or self._build_client(api_key, base_url)
+        self._use_text_verbosity = _supports_text_verbosity(base_url)
 
     def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult:
         if not contexts:
@@ -116,8 +143,12 @@ class OpenAIResponsesAnswerer:
         response = self._create_response(input_text)
 
         raw_answer = response.output_text.strip()
+        if self.render_citations:
+            answer_text = self._clean_citations(raw_answer, len(ordered_contexts))
+        else:
+            answer_text = self._strip_citation_residuals(raw_answer)
         return AnswerResult(
-            answer=self._clean_citations(raw_answer, len(ordered_contexts)),
+            answer=answer_text,
             contexts=ordered_contexts,
             metadata={
                 "strategy": "openai_responses",
@@ -133,13 +164,18 @@ class OpenAIResponsesAnswerer:
     ) -> Any:
         for attempt in range(_MAX_OPENAI_RETRIES + 1):
             try:
+                request: dict[str, Any] = {
+                    "model": self.model,
+                    "instructions": self.instructions,
+                    "input": input_text,
+                    "reasoning": {"effort": self.reasoning_effort},
+                    "store": self.store,
+                }
+                if self._use_text_verbosity:
+                    request["text"] = {"verbosity": self.verbosity}
+
                 return self.client.responses.create(
-                    model=self.model,
-                    instructions=self.instructions,
-                    input=input_text,
-                    reasoning={"effort": self.reasoning_effort},
-                    store=self.store,
-                    text={"verbosity": self.verbosity},
+                    **request,
                 )
             except Exception as exc:
                 if attempt >= _MAX_OPENAI_RETRIES or not _should_retry_error(exc):
@@ -153,6 +189,12 @@ class OpenAIResponsesAnswerer:
             return f"[{n}]" if 1 <= n <= max_index else ""
 
         return _CITATION_TOKEN_RE.sub(_replace, text)
+
+    @staticmethod
+    def _strip_citation_residuals(text: str) -> str:
+        """Remove <cite:N> tokens and bare [N] digit brackets from text."""
+        text = _CITATION_TOKEN_RE.sub("", text)
+        return _BARE_DIGIT_BRACKET_RE.sub("", text)
 
     @staticmethod
     def _build_client(api_key: str, base_url: str) -> Any:
@@ -214,3 +256,8 @@ def _should_retry_error(exc: Exception) -> bool:
             status_code = getattr(response, "status_code", None)
         return isinstance(status_code, int) and status_code >= 500
     return False
+
+
+def _supports_text_verbosity(base_url: str) -> bool:
+    host = urlparse(base_url).hostname or ""
+    return not host.endswith("volces.com")

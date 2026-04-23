@@ -1,21 +1,41 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import sys
 from collections import Counter
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 pytest.importorskip("deepeval")
 
 from deepeval.dataset import Golden  # noqa: E402
+from deepeval.metrics.utils import initialize_model  # noqa: E402
 from evals.cleanup_infinity import select_eval_cleanup_tables  # noqa: E402
-from evals.generate_goldens import (  # noqa: E402
+from evals.eval_models import ArkResponsesDeepEvalModel  # noqa: E402
+from evals.generate_goldens import (
     DEFAULT_GOLDENS_PATH,
+    ArkContextConstructionEmbeddingModel,
+    build_context_construction_config,
+    build_synthesizer_model,
+    emit_context_construction_debug_summary,
     generate_goldens_artifact,
     golden_to_payload,
+    install_context_construction_debug_hooks,
     sync_eval_source_documents,
 )
-from evals.optimize_prompt import build_optimizer, load_goldens  # noqa: E402
+from evals.optimize_prompt import (  # noqa: E402
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    _sha256_text,
+    build_eval_model,
+    build_optimizer,
+    load_goldens,
+    main,
+    validate_goldens,
+)
 
 _EXPECTED_EVAL_SOURCE_FILES = {
     "Best Practices for Claude Code.md": 10,
@@ -111,6 +131,13 @@ def test_checked_in_goldens_artifact_loads_via_prompt_consumer() -> None:
     assert all(golden.context for golden in goldens)
 
 
+def test_checked_in_goldens_artifact_mirrors_context_into_retrieval_context() -> None:
+    goldens = load_goldens(DEFAULT_GOLDENS_PATH)
+
+    assert all(golden.retrieval_context for golden in goldens)
+    assert all(golden.retrieval_context == golden.context for golden in goldens)
+
+
 def test_checked_in_goldens_artifact_has_exactly_ten_per_source_document() -> None:
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
     counts = Counter(golden.source_file for golden in goldens if golden.source_file)
@@ -126,7 +153,7 @@ def test_generate_goldens_artifact_requires_exactly_ten_per_document(
     document_path.write_text("# doc\n", encoding="utf-8")
 
     class FakeSynthesizer:
-        def __init__(self, model=None):
+        def __init__(self, model=None, max_concurrent=None):
             self.model = model
 
         def generate_goldens_from_docs(
@@ -135,10 +162,12 @@ def test_generate_goldens_artifact_requires_exactly_ten_per_document(
             *,
             include_expected_output,
             max_goldens_per_context,
+            context_construction_config,
         ):
             assert doc_paths == [str(document_path)]
             assert include_expected_output is True
             assert max_goldens_per_context == 10
+            assert context_construction_config is None
             return [
                 Golden(
                     name=f"doc-{index:03d}",
@@ -159,10 +188,577 @@ def test_generate_goldens_artifact_requires_exactly_ten_per_document(
         )
 
 
-def test_build_optimizer_uses_gepa_and_rag_triad(
+def test_generate_goldens_artifact_trims_extra_goldens_to_requested_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "doc.md"
+    document_path.write_text("# doc\n", encoding="utf-8")
+
+    class FakeSynthesizer:
+        def __init__(self, model=None, max_concurrent=None):
+            self.model = model
+
+        def generate_goldens_from_docs(
+            self,
+            doc_paths,
+            *,
+            include_expected_output,
+            max_goldens_per_context,
+            context_construction_config,
+        ):
+            assert doc_paths == [str(document_path)]
+            assert include_expected_output is True
+            assert max_goldens_per_context == 10
+            assert context_construction_config is None
+            return [
+                Golden(
+                    name=f"doc-{index:03d}",
+                    input=f"question {index}",
+                    expected_output=f"answer {index}",
+                    source_file=document_path.name,
+                    context=[f"context {index}"],
+                )
+                for index in range(1, 31)
+            ]
+
+    monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
+
+    payloads = generate_goldens_artifact(
+        document_paths=[document_path],
+        output_path=tmp_path / "goldens.json",
+    )
+
+    assert len(payloads) == 10
+    assert [payload["input"] for payload in payloads] == [
+        f"question {index}" for index in range(1, 11)
+    ]
+
+
+def test_generate_goldens_artifact_limits_synthesizer_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "doc.md"
+    document_path.write_text("# doc\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class FakeSynthesizer:
+        def __init__(self, model=None, max_concurrent=None):
+            captured["model"] = model
+            captured["max_concurrent"] = max_concurrent
+
+        def generate_goldens_from_docs(
+            self,
+            doc_paths,
+            *,
+            include_expected_output,
+            max_goldens_per_context,
+            context_construction_config,
+        ):
+            return [
+                Golden(
+                    name=f"doc-{index:03d}",
+                    input=f"question {index}",
+                    expected_output=f"answer {index}",
+                    source_file=document_path.name,
+                    context=[f"context {index}"],
+                )
+                for index in range(1, 11)
+            ]
+
+    monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
+
+    generate_goldens_artifact(
+        document_paths=[document_path],
+        output_path=tmp_path / "goldens.json",
+    )
+
+    assert captured["max_concurrent"] == 30
+
+
+def test_generate_goldens_artifact_forwards_context_construction_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "doc.md"
+    document_path.write_text("# doc\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    context_config = object()
+
+    class FakeSynthesizer:
+        def __init__(self, model=None, max_concurrent=None):
+            captured["model"] = model
+
+        def generate_goldens_from_docs(
+            self,
+            doc_paths,
+            *,
+            include_expected_output,
+            max_goldens_per_context,
+            context_construction_config,
+        ):
+            captured["context_construction_config"] = context_construction_config
+            return [
+                Golden(
+                    name=f"doc-{index:03d}",
+                    input=f"question {index}",
+                    expected_output=f"answer {index}",
+                    source_file=document_path.name,
+                    context=[f"context {index}"],
+                )
+                for index in range(1, 11)
+            ]
+
+    monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
+
+    generate_goldens_artifact(
+        document_paths=[document_path],
+        output_path=tmp_path / "goldens.json",
+        context_construction_config=context_config,
+    )
+
+    assert captured["context_construction_config"] is context_config
+
+
+def test_generate_goldens_artifact_sanitizes_staged_doc_name_for_context_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "Best Practices for Claude Code.md"
+    document_path.write_text("# doc\n", encoding="utf-8")
+    context_config = object()
+    captured: dict[str, object] = {}
+
+    class FakeSynthesizer:
+        def __init__(self, model=None, max_concurrent=None):
+            captured["model"] = model
+
+        def generate_goldens_from_docs(
+            self,
+            doc_paths,
+            *,
+            include_expected_output,
+            max_goldens_per_context,
+            context_construction_config,
+        ):
+            staged_path = Path(doc_paths[0])
+            captured["staged_path"] = staged_path
+            assert include_expected_output is True
+            assert max_goldens_per_context == 10
+            assert context_construction_config is context_config
+            assert staged_path.suffix == ".md"
+            assert " " not in staged_path.name
+            assert staged_path.read_text(encoding="utf-8") == document_path.read_text(
+                encoding="utf-8"
+            )
+            return [
+                Golden(
+                    name=f"doc-{index:03d}",
+                    input=f"question {index}",
+                    expected_output=f"answer {index}",
+                    source_file=staged_path.name,
+                    context=[f"context {index}"],
+                )
+                for index in range(1, 11)
+            ]
+
+    monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
+
+    payloads = generate_goldens_artifact(
+        document_paths=[document_path],
+        output_path=tmp_path / "goldens.json",
+        context_construction_config=context_config,
+    )
+
+    staged_path = captured["staged_path"]
+    assert isinstance(staged_path, Path)
+    assert staged_path.name != document_path.name
+    assert payloads[0]["sourceFile"] == document_path.name
+    assert payloads[0]["additionalMetadata"]["document_fixture"] == document_path.name
+
+
+def test_build_context_construction_config_wraps_ark_embedder() -> None:
+    critic_model = build_synthesizer_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+    config = build_context_construction_config(
+        api_key="ark-key",
+        model="ep-embedding",
+        dimensions=1024,
+        critic_model=critic_model,
+    )
+
+    assert isinstance(config.embedder, ArkContextConstructionEmbeddingModel)
+    assert config.embedder.name == "ep-embedding"
+    assert config.embedder.get_model_name() == "ep-embedding (Ark)"
+    assert config.critic_model is critic_model
+    assert config.critic_model.get_model_name() == "ep-20260423004926-v99zw"
+
+
+def test_build_context_construction_config_keeps_native_gpt_model_for_deepeval() -> (
+    None
+):
+    critic_model = build_synthesizer_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    config = build_context_construction_config(
+        api_key="ark-key",
+        model="ep-embedding",
+        critic_model=critic_model,
+    )
+
+    initialized_model, using_native_model = initialize_model(config.critic_model)
+
+    assert initialized_model is config.critic_model
+    assert using_native_model is True
+
+
+def test_build_synthesizer_model_passes_reasoning_effort_generation_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
+
+    class FakeArkResponsesDeepEvalModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "evals.generate_goldens.ArkResponsesDeepEvalModel",
+        FakeArkResponsesDeepEvalModel,
+    )
+
+    synthesizer_model = build_synthesizer_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    assert synthesizer_model.__class__ is FakeArkResponsesDeepEvalModel
+    assert captured == {
+        "model": "ep-20260423004926-v99zw",
+        "api_key": "test-key",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "reasoning_effort": "medium",
+    }
+
+
+def test_generate_goldens_artifact_passes_native_synthesizer_model_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "doc.md"
+    document_path.write_text("# doc\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class FakeArkResponsesDeepEvalModel:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def get_model_name(self) -> str:
+            return self.kwargs["model"]
+
+    class FakeSynthesizer:
+        def __init__(self, model=None, max_concurrent=None):
+            captured["model"] = model
+
+        def generate_goldens_from_docs(
+            self,
+            doc_paths,
+            *,
+            include_expected_output,
+            max_goldens_per_context,
+            context_construction_config,
+        ):
+            return [
+                Golden(
+                    name=f"doc-{index:03d}",
+                    input=f"question {index}",
+                    expected_output=f"answer {index}",
+                    source_file=document_path.name,
+                    context=[f"context {index}"],
+                )
+                for index in range(1, 11)
+            ]
+
+    monkeypatch.setattr(
+        "evals.generate_goldens.ArkResponsesDeepEvalModel",
+        FakeArkResponsesDeepEvalModel,
+    )
+    monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
+
+    synthesizer_model = build_synthesizer_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    generate_goldens_artifact(
+        document_paths=[document_path],
+        output_path=tmp_path / "goldens.json",
+        model=synthesizer_model,
+    )
+
+    assert captured["model"] is synthesizer_model
+
+
+def test_ark_responses_deepeval_model_uses_responses_parse_for_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class ParsedResponse(BaseModel):
+        answer: str
+
+    class FakeResponses:
+        def parse(self, **kwargs):
+            captured["parse_kwargs"] = kwargs
+            return type(
+                "Response",
+                (),
+                {"output_parsed": ParsedResponse(answer="structured")},
+            )()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["openai_kwargs"] = kwargs
+            self.responses = FakeResponses()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["async_openai_kwargs"] = kwargs
+            self.responses = object()
+
+    monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeAsyncOpenAI)
+
+    model = ArkResponsesDeepEvalModel(
+        api_key="ark-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    result = model.generate("hello", schema=ParsedResponse)
+
+    assert result == ParsedResponse(answer="structured")
+    assert captured["openai_kwargs"] == {
+        "api_key": "ark-key",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    }
+    assert captured["parse_kwargs"] == {
+        "model": "ep-20260423004926-v99zw",
+        "input": "hello",
+        "reasoning": {"effort": "medium"},
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "timeout": 300.0,
+        "text_format": ParsedResponse,
+    }
+
+
+def test_ark_responses_deepeval_model_async_create_returns_output_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponses:
+        async def create(self, **kwargs):
+            return type("Response", (), {"output_text": "plain"})()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = object()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeAsyncOpenAI)
+
+    model = ArkResponsesDeepEvalModel(
+        api_key="ark-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    assert asyncio.run(model.a_generate("hello")) == "plain"
+
+
+def test_emit_context_construction_debug_summary_logs_effective_models(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    synthesizer_model = build_synthesizer_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+    context_config = build_context_construction_config(
+        api_key="ark-key",
+        model="ep-embedding",
+        critic_model=synthesizer_model,
+    )
+
+    with caplog.at_level("WARNING"):
+        emit_context_construction_debug_summary(
+            document_path=Path(
+                "tests/fixtures/documents/Best Practices for Claude Code.md"
+            ),
+            synthesis_path=Path("/tmp/01-Best-Practices.md"),
+            synthesizer_model=synthesizer_model,
+            context_construction_config=context_config,
+        )
+
+    assert "synthesizer_model=ep-20260423004926-v99zw" in caplog.text
+    assert "context_critic_model=ep-20260423004926-v99zw" in caplog.text
+    assert "context_embedder=ep-embedding (Ark)" in caplog.text
+
+
+def test_install_context_construction_debug_hooks_logs_zero_contexts_after_expansion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FakeModel:
+        name = "gpt-4.1"
+
+    class FakeEmbedder:
+        def get_model_name(self) -> str:
+            return "ep-embedding (Ark)"
+
+    class FakeContextGenerator:
+        def __init__(self) -> None:
+            self.model = FakeModel()
+            self.embedder = FakeEmbedder()
+
+        async def _a_get_n_random_contexts_per_source_file(
+            self,
+            path: str,
+            n_contexts_per_source_file: int,
+            context_size: int,
+            similarity_threshold: float,
+            source_files_to_collections_map: dict,
+            progress=None,
+            pbar_generate_contexts_id=None,
+        ):
+            return [], [0.91, 0.73]
+
+        async def _a_process_document_async(
+            self,
+            *,
+            path: str,
+            num_context_per_source_file: int,
+            max_context_size: int,
+            source_files_to_collections_map: dict,
+            progress=None,
+            pbar_generate_contexts_id=None,
+        ):
+            return [path], [], [0.91, 0.73]
+
+    install_context_construction_debug_hooks(FakeContextGenerator)
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(
+            FakeContextGenerator()._a_get_n_random_contexts_per_source_file(
+                path="tests/fixtures/documents/Best Practices for Claude Code.md",
+                n_contexts_per_source_file=3,
+                context_size=3,
+                similarity_threshold=0.5,
+                source_files_to_collections_map={},
+            )
+        )
+
+    assert "zero_contexts_after_expansion" in caplog.text
+    assert "critic_model=gpt-4.1" in caplog.text
+    assert "embedder=ep-embedding (Ark)" in caplog.text
+
+
+def test_install_context_construction_debug_hooks_logs_process_document_completion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FakeContextGenerator:
+        async def _a_get_n_random_contexts_per_source_file(self, **kwargs):
+            return [["ctx-1"], ["ctx-2"]], [0.91, 0.73]
+
+        async def _a_process_document_async(
+            self,
+            *,
+            path: str,
+            num_context_per_source_file: int,
+            max_context_size: int,
+            source_files_to_collections_map: dict,
+            progress=None,
+            pbar_generate_contexts_id=None,
+        ):
+            return [path], [["ctx-1"], ["ctx-2"]], [0.91, 0.73]
+
+    install_context_construction_debug_hooks(FakeContextGenerator)
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(
+            FakeContextGenerator()._a_process_document_async(
+                path="tests/fixtures/documents/Best Practices for Claude Code.md",
+                num_context_per_source_file=3,
+                max_context_size=3,
+                source_files_to_collections_map={},
+            )
+        )
+
+    assert "process_document_start" in caplog.text
+    assert "process_document_complete" in caplog.text
+    assert "returned_contexts=2" in caplog.text
+    assert "returned_scores=2" in caplog.text
+
+
+def test_install_context_construction_debug_hooks_logs_process_document_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FakeContextGenerator:
+        async def _a_get_n_random_contexts_per_source_file(self, **kwargs):
+            return [["ctx-1"]], [0.91]
+
+        async def _a_process_document_async(
+            self,
+            *,
+            path: str,
+            num_context_per_source_file: int,
+            max_context_size: int,
+            source_files_to_collections_map: dict,
+            progress=None,
+            pbar_generate_contexts_id=None,
+        ):
+            raise RuntimeError("boom")
+
+    install_context_construction_debug_hooks(FakeContextGenerator)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="boom"):
+            asyncio.run(
+                FakeContextGenerator()._a_process_document_async(
+                    path="tests/fixtures/documents/Best Practices for Claude Code.md",
+                    num_context_per_source_file=3,
+                    max_context_size=3,
+                    source_files_to_collections_map={},
+                )
+            )
+
+    assert "process_document_start" in caplog.text
+    assert "process_document_failed" in caplog.text
+
+
+def test_build_optimizer_uses_gepa_and_five_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    judge_model = object()
+    optimizer_model = object()
 
     class FakeGEPA:
         pass
@@ -185,15 +781,246 @@ def test_build_optimizer_uses_gepa_and_rag_triad(
         "evals.optimize_prompt.ContextualRelevancyMetric",
         lambda model: ("ContextualRelevancyMetric", model),
     )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.ContextualPrecisionMetric",
+        lambda model: ("ContextualPrecisionMetric", model),
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.ContextualRecallMetric",
+        lambda model: ("ContextualRecallMetric", model),
+    )
 
-    build_optimizer(judge_model="judge-model", model_callback=lambda prompt, golden: "")
+    build_optimizer(
+        judge_model=judge_model,
+        optimizer_model=optimizer_model,
+        model_callback=lambda prompt, golden: "",
+    )
 
     assert captured["algorithm"].__class__ is FakeGEPA
+    assert captured["optimizer_model"] is optimizer_model
     assert captured["metrics"] == [
-        ("AnswerRelevancyMetric", "judge-model"),
-        ("FaithfulnessMetric", "judge-model"),
-        ("ContextualRelevancyMetric", "judge-model"),
+        ("AnswerRelevancyMetric", judge_model),
+        ("FaithfulnessMetric", judge_model),
+        ("ContextualRelevancyMetric", judge_model),
+        ("ContextualPrecisionMetric", judge_model),
+        ("ContextualRecallMetric", judge_model),
     ]
+
+
+def test_build_eval_model_uses_explicit_openai_compatible_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeArkResponsesDeepEvalModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.ArkResponsesDeepEvalModel",
+        FakeArkResponsesDeepEvalModel,
+    )
+
+    model = build_eval_model(
+        api_key="test-key",
+        model="ep-20260423004926-v99zw",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        reasoning_effort="medium",
+    )
+
+    assert model.__class__ is FakeArkResponsesDeepEvalModel
+    assert captured == {
+        "model": "ep-20260423004926-v99zw",
+        "api_key": "test-key",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "reasoning_effort": "medium",
+    }
+
+
+def test_main_defaults_optimizer_to_doubao_medium_on_ark(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    captured: dict[str, object] = {}
+    calls: dict[str, object] = {}
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+    prompt = object()
+    goldens = ["golden"]
+
+    class FakeOptimizer:
+        optimization_report = type(
+            "OptimizationReport",
+            (),
+            {"optimization_id": "opt-123"},
+        )()
+
+        def optimize(self, *, prompt, goldens):
+            captured["prompt"] = prompt
+            captured["goldens"] = goldens
+            return type("OptimizedPrompt", (), {"text_template": "optimized"})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["optimize_prompt.py", "--output", str(output_path)],
+    )
+    eval_model_call_count = 0
+
+    def _fake_build_eval_model(**kwargs):
+        nonlocal eval_model_call_count
+        eval_model_call_count += 1
+        if eval_model_call_count == 1:
+            calls["judge_model_kwargs"] = kwargs
+            return judge_model
+        calls["optimizer_model_kwargs"] = kwargs
+        return optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _fake_build_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: calls.update({"goldens_path": path}) or goldens,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: "packaged-plain-template",
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_prompt",
+        lambda **kwargs: calls.update({"build_prompt_kwargs": kwargs}) or prompt,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: (
+            calls.update({"model_callback_kwargs": kwargs}) or model_callback
+        ),
+    )
+
+    def fake_build_optimizer(**kwargs):
+        calls["build_optimizer_kwargs"] = kwargs
+        return FakeOptimizer()
+
+    monkeypatch.setattr("evals.optimize_prompt.build_optimizer", fake_build_optimizer)
+
+    main()
+
+    assert calls["judge_model_kwargs"] == {
+        "api_key": "test-key",
+        "model": DEFAULT_MODEL,
+        "base_url": DEFAULT_BASE_URL,
+        "reasoning_effort": "medium",
+    }
+    assert calls["optimizer_model_kwargs"] == {
+        "api_key": "test-key",
+        "model": "ep-20260423004926-v99zw",
+        "base_url": DEFAULT_BASE_URL,
+        "reasoning_effort": "medium",
+    }
+    assert calls["build_optimizer_kwargs"] == {
+        "judge_model": judge_model,
+        "optimizer_model": optimizer_model,
+        "model_callback": model_callback,
+    }
+    assert calls["model_callback_kwargs"] == {
+        "api_key": "test-key",
+        "base_url": DEFAULT_BASE_URL,
+        "model": DEFAULT_MODEL,
+        "reasoning_effort": "medium",
+        "verbosity": "medium",
+        "store": False,
+    }
+    assert calls["build_prompt_kwargs"] == {
+        "text_template": "packaged-plain-template",
+    }
+    assert captured == {"prompt": prompt, "goldens": goldens}
+    assert output_path.read_text(encoding="utf-8") == "optimized"
+
+
+def test_generate_goldens_main_uses_ark_defaults_without_openai_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    output_path = tmp_path / "goldens.json"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    calls: dict[str, object] = {}
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ARK_API_KEY", "ark-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-embedding")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_goldens.py",
+            "--source-dir",
+            str(source_dir),
+            "--target-dir",
+            str(target_dir),
+            "--output",
+            str(output_path),
+        ],
+    )
+    monkeypatch.setattr(
+        "evals.generate_goldens.sync_eval_source_documents",
+        lambda source_dir, target_dir: (
+            calls.update(
+                {
+                    "sync_source_dir": source_dir,
+                    "sync_target_dir": target_dir,
+                }
+            )
+            or [target_dir / "doc.md"]
+        ),
+    )
+    monkeypatch.setattr(
+        "evals.generate_goldens.build_synthesizer_model",
+        lambda **kwargs: calls.update({"synth_kwargs": kwargs}) or "synth-model",
+    )
+    monkeypatch.setattr(
+        "evals.generate_goldens.build_context_construction_config",
+        lambda **kwargs: calls.update({"context_kwargs": kwargs}) or "context-config",
+    )
+    monkeypatch.setattr(
+        "evals.generate_goldens.generate_goldens_artifact",
+        lambda **kwargs: calls.update({"generate_kwargs": kwargs}) or [],
+    )
+
+    from evals.generate_goldens import main as gg_main
+
+    gg_main()
+
+    assert calls["synth_kwargs"] == {
+        "api_key": "ark-key",
+        "model": "ep-20260423004926-v99zw",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "reasoning_effort": "medium",
+    }
+    assert calls["context_kwargs"] == {
+        "api_key": "ark-key",
+        "model": "ep-embedding",
+        "critic_model": "synth-model",
+    }
+    assert calls["generate_kwargs"] == {
+        "document_paths": [target_dir / "doc.md"],
+        "output_path": output_path,
+        "model": "synth-model",
+        "context_construction_config": "context-config",
+        "top_k": 4,
+        "goldens_per_document": 10,
+    }
 
 
 def test_select_eval_cleanup_tables_targets_eval_residue() -> None:
@@ -215,3 +1042,516 @@ def test_select_eval_cleanup_tables_targets_eval_residue() -> None:
         "documents_datasets",
         "documents_liveeval",
     ]
+
+
+# --- optimize_prompt: golden validation tests ---
+
+
+def test_validate_goldens_passes_when_all_fields_present() -> None:
+    goldens = [
+        Golden(
+            input="q1",
+            expected_output="a1",
+            context=["ctx-1"],
+            name="case-1",
+        ),
+        Golden(
+            input="q2",
+            expected_output="a2",
+            context=["ctx-2"],
+            name="case-2",
+        ),
+    ]
+    # Should not raise
+    validate_goldens(goldens)
+
+
+def test_validate_goldens_fails_on_missing_retrieval_context() -> None:
+    goldens = [
+        Golden(
+            input="q1",
+            expected_output="a1",
+            context=[],
+            name="case-no-context",
+        ),
+    ]
+    with pytest.raises(RuntimeError, match="Goldens validation failed"):
+        validate_goldens(goldens)
+
+
+def test_validate_goldens_fails_on_missing_expected_output() -> None:
+    goldens = [
+        Golden(
+            input="q1",
+            expected_output="",
+            context=["ctx-1"],
+            name="case-no-output",
+        ),
+    ]
+    with pytest.raises(RuntimeError, match="Goldens validation failed"):
+        validate_goldens(goldens)
+
+
+def test_validate_goldens_lists_all_deficient_goldens() -> None:
+    goldens = [
+        Golden(
+            input="q1",
+            expected_output="",
+            context=[],
+            name="bad-1",
+        ),
+        Golden(
+            input="q2",
+            expected_output="a2",
+            context=["ctx"],
+            name="good-1",
+        ),
+        Golden(
+            input="q3",
+            expected_output="a3",
+            context=[],
+            name="bad-2",
+        ),
+    ]
+    with pytest.raises(RuntimeError, match=r"bad-1[\s\S]*bad-2") as exc_info:
+        validate_goldens(goldens)
+    msg = str(exc_info.value)
+    assert "bad-1" in msg
+    assert "bad-2" in msg
+    assert "good-1" not in msg
+
+
+# --- optimize_prompt: no-op detection tests ---
+
+
+def test_main_noop_exits_nonzero_without_allow_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    input_prompt_text = "original-prompt"
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+    goldens = ["golden"]
+
+    class FakeOptimizer:
+        def optimize(self, *, prompt, goldens):
+            # Return same text as input -> no-op
+            return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["optimize_prompt.py", "--output", str(output_path)],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: input_prompt_text,
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: goldens,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    # Output file should NOT have been written
+    assert not output_path.exists()
+
+
+def test_main_noop_with_allow_noop_exits_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    input_prompt_text = "original-prompt"
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+    goldens = ["golden"]
+
+    class FakeOptimizer:
+        def optimize(self, *, prompt, goldens):
+            return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_prompt.py",
+            "--output",
+            str(output_path),
+            "--allow-noop",
+        ],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: input_prompt_text,
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: goldens,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    main()  # Should NOT raise SystemExit
+
+    # Output file should still NOT be written (no-op never overwrites)
+    assert not output_path.exists()
+
+
+def test_main_noop_writes_report_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    report_path = tmp_path / "report.json"
+    input_prompt_text = "original-prompt"
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+    goldens = ["golden"]
+
+    class FakeOptimizer:
+        def optimize(self, *, prompt, goldens):
+            return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_prompt.py",
+            "--output",
+            str(output_path),
+            "--report-output",
+            str(report_path),
+            "--allow-noop",
+        ],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: input_prompt_text,
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: goldens,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    main()
+
+    assert report_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["prompt_changed"] is False
+    assert "optimization_id" in report
+    assert "input_prompt_hash" in report
+    assert "output_prompt_hash" in report
+    assert report["input_prompt_hash"] == report["output_prompt_hash"]
+    assert report["output_prompt_path"] == str(output_path)
+
+    captured = capsys.readouterr()
+    assert "本次优化没有产生有效 prompt 改写" in captured.out
+
+
+# --- optimize_prompt: report JSON tests ---
+
+
+def test_main_writes_report_json_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    report_path = tmp_path / "report.json"
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+    goldens = ["golden"]
+
+    class FakeOptimizer:
+        optimization_report = type(
+            "OptimizationReport",
+            (),
+            {"optimization_id": "opt-456"},
+        )()
+
+        def optimize(self, *, prompt, goldens):
+            return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_prompt.py",
+            "--output",
+            str(output_path),
+            "--report-output",
+            str(report_path),
+        ],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: "original-text",
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: goldens,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    main()
+
+    assert report_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["prompt_changed"] is True
+    assert report["optimization_id"] == "opt-456"
+    assert report["input_prompt_hash"] == _sha256_text("original-text")
+    assert report["output_prompt_hash"] == _sha256_text("optimized-text")
+    assert report["input_prompt_hash"] != report["output_prompt_hash"]
+    assert report["output_prompt_path"] == str(output_path)
+    assert "prompt_configurations" in report
+    assert "pareto_scores" in report
+
+
+# --- optimize_prompt: CLI argument tests ---
+
+
+def test_main_input_prompt_path_overrides_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    input_prompt_path = tmp_path / "my_prompt.txt"
+    input_prompt_path.write_text("my-custom-prompt", encoding="utf-8")
+    calls: dict[str, object] = {}
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+
+    class FakeOptimizer:
+        optimization_report = type(
+            "OptimizationReport",
+            (),
+            {"optimization_id": "opt-789"},
+        )()
+
+        def optimize(self, *, prompt, goldens):
+            return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_prompt.py",
+            "--output",
+            str(output_path),
+            "--input-prompt-path",
+            str(input_prompt_path),
+        ],
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: ["golden"],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_prompt",
+        lambda **kwargs: (
+            calls.update({"build_prompt_kwargs": kwargs})
+            or type("Prompt", (), {"text_template": "optimized-text"})()
+        ),
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    main()
+
+    assert calls["build_prompt_kwargs"] == {
+        "text_template": "my-custom-prompt",
+    }
+
+
+def test_main_prompt_variant_citations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "optimized_prompt.txt"
+    calls: dict[str, object] = {}
+    judge_model = object()
+    optimizer_model = object()
+    model_callback = object()
+
+    class FakeOptimizer:
+        optimization_report = type(
+            "OptimizationReport",
+            (),
+            {"optimization_id": "opt-var"},
+        )()
+
+        def optimize(self, *, prompt, goldens):
+            return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
+
+    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_prompt.py",
+            "--output",
+            str(output_path),
+            "--prompt-variant",
+            "citations",
+        ],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt._load_packaged_template",
+        lambda variant: calls.update({"variant": variant}) or "citations-template",
+    )
+    _eval_model_call_idx = 0
+
+    def _dispatch_eval_model(**kwargs):
+        nonlocal _eval_model_call_idx
+        _eval_model_call_idx += 1
+        return judge_model if _eval_model_call_idx == 1 else optimizer_model
+
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_eval_model",
+        _dispatch_eval_model,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.load_goldens",
+        lambda path: ["golden"],
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.validate_goldens",
+        lambda goldens: None,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_model_callback",
+        lambda **kwargs: model_callback,
+    )
+    monkeypatch.setattr(
+        "evals.optimize_prompt.build_optimizer",
+        lambda **kwargs: FakeOptimizer(),
+    )
+
+    main()
+
+    assert calls["variant"] == "citations"

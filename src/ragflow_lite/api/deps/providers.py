@@ -103,6 +103,7 @@ def build_services(settings: Settings) -> AppServices:
         instructions_path=openai_runtime_config.prompt_path,
         store=openai_runtime_config.store,
         verbosity=openai_runtime_config.verbosity,
+        render_citations=openai_runtime_config.render_citations,
     )
     retriever = _build_retriever(embedder, vector_index)
 

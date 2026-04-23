@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
+from evals.eval_models import ArkResponsesDeepEvalModel
+
 if TYPE_CHECKING:
-    from deepeval.models import DeepEvalBaseLLM, GPTModel
+    from deepeval.models import DeepEvalBaseLLM
     from deepeval.test_case import LLMTestCase
 
 _PLACEHOLDER_ENV_VALUES = {
@@ -15,10 +17,14 @@ _PLACEHOLDER_ENV_VALUES = {
     "test-ark-api-key",
     "ep-test-model",
 }
-_DEFAULT_DEEPEVAL_MODEL = "gpt-5.4-mini"
-_DEFAULT_DEEPEVAL_BASE_URL = "https://code.rayinai.com/v1"
+_DEFAULT_DEEPEVAL_MODEL = "ep-20260423004926-v99zw"
+_DEFAULT_DEEPEVAL_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+_DEFAULT_DEEPEVAL_REASONING_EFFORT = "medium"
 _LEADING_JSON_PREFIX_RE = re.compile(r"^\s*json\s*:\s*", re.IGNORECASE)
+_CITE_TOKEN_RE = re.compile(r"<cite:\d+>")
 _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
+_WHITESPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
+_MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,21 +161,25 @@ def validate_deepeval_env(env: Mapping[str, str | None]) -> None:
         )
 
 
-def build_deepeval_judge_model(env: Mapping[str, str | None]) -> GPTModel:
-    from deepeval.models import GPTModel
-
-    api_key = env.get("OPENAI_API_KEY")
+def build_deepeval_judge_model(
+    env: Mapping[str, str | None],
+) -> ArkResponsesDeepEvalModel:
+    api_key = env.get("ARK_API_KEY")
     if api_key is None or api_key.strip() in _PLACEHOLDER_ENV_VALUES:
         raise RuntimeError(
-            "deepeval judge model requires a real OPENAI_API_KEY-compatible credential."
+            "deepeval judge model requires a real ARK_API_KEY-compatible credential."
         )
 
     model_name = env.get("DEEPEVAL_MODEL") or _DEFAULT_DEEPEVAL_MODEL
     base_url = env.get("DEEPEVAL_BASE_URL") or _DEFAULT_DEEPEVAL_BASE_URL
-    return GPTModel(
+    reasoning_effort = (
+        env.get("DEEPEVAL_REASONING_EFFORT") or _DEFAULT_DEEPEVAL_REASONING_EFFORT
+    )
+    return ArkResponsesDeepEvalModel(
         model=model_name,
         api_key=api_key,
         base_url=base_url,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -200,9 +210,10 @@ def _normalize_eval_output(actual_output: str) -> str:
     if parsed is not None:
         text = parsed
 
+    text = _CITE_TOKEN_RE.sub("", text)
     text = _CITATION_BRACKETS_RE.sub("", text)
-    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-    text = re.sub(r"\s{2,}", " ", text)
+    text = _WHITESPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
+    text = _MULTI_SPACE_RE.sub(" ", text)
     return text.strip()
 
 

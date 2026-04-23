@@ -46,7 +46,11 @@ class FakeOpenAIClient:
         )
 
 
-def _build_answerer(client: FakeOpenAIClient | None = None) -> OpenAIResponsesAnswerer:
+def _build_answerer(
+    client: FakeOpenAIClient | None = None,
+    *,
+    render_citations: bool = True,
+) -> OpenAIResponsesAnswerer:
     return OpenAIResponsesAnswerer(
         api_key="test-openai-api-key",
         base_url="https://code.rayinai.com/v1",
@@ -54,6 +58,7 @@ def _build_answerer(client: FakeOpenAIClient | None = None) -> OpenAIResponsesAn
         reasoning_effort="medium",
         store=False,
         verbosity="medium",
+        render_citations=render_citations,
         client=client or FakeOpenAIClient(),
     )
 
@@ -176,6 +181,16 @@ def test_answer_preserves_valid_citations() -> None:
     assert result.answer == "项目支持 txt[1] 和 md[2]。"
 
 
+def test_answer_hides_rendered_citations_when_disabled() -> None:
+    client = FakeOpenAIClient(output_text="项目支持 txt<cite:1> 和 md<cite:2>。")
+    answerer = _build_answerer(client, render_citations=False)
+    contexts = [_make_chunk("a", 0.9), _make_chunk("b", 0.5)]
+
+    result = answerer.answer("问题", contexts)
+
+    assert result.answer == "项目支持 txt 和 md。"
+
+
 def test_answer_strips_out_of_range_citations() -> None:
     client = FakeOpenAIClient(output_text="信息来自 <cite:1> 和 <cite:99>。")
     answerer = _build_answerer(client)
@@ -262,6 +277,25 @@ def test_answer_calls_responses_api_with_expected_parameters() -> None:
     assert call["store"] is False
     assert call["text"] == {"verbosity": "medium"}
     assert call["instructions"]
+
+
+def test_answer_omits_text_verbosity_for_ark_responses_api() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = OpenAIResponsesAnswerer(
+        api_key="test-openai-api-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        model="ep-20260423004926-v99zw",
+        reasoning_effort="medium",
+        store=False,
+        verbosity="medium",
+        client=client,
+    )
+
+    answerer.answer("支持什么文件类型", [_make_chunk("high", 0.9)])
+
+    call = client.responses.calls[0]
+    assert call["reasoning"] == {"effort": "medium"}
+    assert "text" not in call
 
 
 def test_answer_uses_custom_instructions_from_path(tmp_path: Path) -> None:

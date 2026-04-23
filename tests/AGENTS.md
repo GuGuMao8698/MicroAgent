@@ -7,11 +7,20 @@
 - 在 `unit` 放模块级和边界级测试。
 - `unit/test_eval_gating.py` 测试门控基础设施本身（marker、option、env 校验），不依赖 `deepeval` 包。
 - 在 `integration` 放 API 和主链路集成测试。
-- 在 `evals` 放可选的 `deepeval` 评估测试；`eval_support.py` 提供共享基础设施，本地结果读取入口为 `evals/summarize_results.py`。
+- 在 `evals` 放可选的 `deepeval` 评估测试；共享基础设施在 `eval_support.py`，本地结果汇总入口在 `evals/summarize_results.py`。
 - 在 `fixtures/documents` 放 `txt`、`md`、`pdf` 样例，以及边界/异常样例。
+- goldens 生成使用独立的 `./.venv-goldens/bin/python tests/evals/generate_goldens.py`，不要把生成链路依赖混进主项目 `.venv`。
+- prompt optimization 使用主项目环境：运行 `./.venv/bin/python tests/evals/optimize_prompt.py`；它消费已提交的 goldens 和仓库内 answerer/runtime 代码，不走 `.venv-goldens`。默认使用 `plain` 模板（无 citation），新增 CLI：`--input-prompt-path`、`--prompt-variant`、`--report-output`、`--iterations`、`--pareto-size`、`--minibatch-size`、`--random-seed`、`--allow-noop`；无有效改写时非零退出，只有 `--allow-noop` 才允许写出无变化产物。
+- answerer prompt 的 source of truth 是 `src/ragflow_lite/infrastructure/answerers/` 下的 repo-tracked 模板文件（`answer_with_citations.txt` / `answer_plain.txt`），不再是代码内联常量。优先级：`RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH` > `RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_VARIANT` > packaged default。
+- deepeval 测试通过 autouse fixture 自动设置 `RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_VARIANT=plain` 和 `RAGFLOW_LITE_OPENAI_RENDER_CITATIONS=false`，确保评估关闭 citation。
+- 当前 goldens 契约是 `6` 个 markdown 文档、每个 `10` 个 golden，总计 `60` 个；重新生成时保持这个形状。
 - 默认测试路径使用 fake Infinity、fake Ark、fake/stub OpenAI，保持快速和稳定。
 - 真实 Infinity 回归测试使用 `@pytest.mark.live_infinity`，并只在显式传入 `--run-live-infinity` 时运行。
-- `deepeval` 测试使用 `@pytest.mark.deepeval`，并要求真实 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；需要官方结果导出时，运行 `DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval`。一键导出全部本地分析产物时，运行 `./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all`：它会写入 `latest.*` 滚动视图和按时间戳保留的 `summary/failed/metrics` 历史文件；若已有上一轮时间戳 summary，还会自动生成 compare。若要显式指定基线，再追加 `--baseline <raw-export-or-summary>`。
+- `deepeval` 测试使用 `@pytest.mark.deepeval`，并要求真实 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`。
+- 仓库内 `deepeval` pytest 入口是 `./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval`。
+- 需要官方 DeepEval 原始结果导出时，运行 `DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval`。
+- 本地分析产物是独立后处理，不会由 `pytest` 自动写出；运行 `./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all`。
+- `summarize_results.py --export-all` 会写入 `latest.*` 滚动视图和按时间戳保留的 `summary/failed/metrics` 历史文件；若已有上一轮时间戳 summary，还会自动生成 compare。若要显式指定基线，再追加 `--baseline <raw-export-or-summary>`。
 - Infinity fake client 需要保留当前断言所需的最小查询语义：`match_dense`、`match_text(fields)`、`fusion("weighted_sum")`、`create_index`、`list_indexes` 和基本 `output` / `filter` / `sort`。
 - 新增测试优先守住这些高风险点：真实 Infinity 集成、provider / answerer 装配与重试、启动失败路径、维度守卫、文档 catalog 与 dataset 读写契约、异步 ingestion 状态机、inline citation 与 PDF 页信息、结构化日志与 observability。
 - 涉及 sparse-query 分析时，覆盖 NFKC、空白压缩、Latin 小写化、中英/数字边界分隔、技术 token 保留（`c++`/`c#`/`node.js`/`api_v1`/`gpt-4o`）与符号输入 fallback；retriever 单测断言 `embed_query()` 收到原始 query、`search_hybrid()` 收到分析后 sparse query。

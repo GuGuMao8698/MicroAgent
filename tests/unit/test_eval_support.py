@@ -19,9 +19,9 @@ from eval_support import (  # noqa: E402
 )
 
 _JUDGE_MODEL_ENV = {
-    "OPENAI_API_KEY": "judge-real",
-    "DEEPEVAL_MODEL": "gpt-5.4-mini",
-    "DEEPEVAL_BASE_URL": "https://code.rayinai.com/v1",
+    "ARK_API_KEY": "judge-real",
+    "DEEPEVAL_MODEL": "ep-20260423004926-v99zw",
+    "DEEPEVAL_BASE_URL": "https://ark.cn-beijing.volces.com/api/v3",
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
@@ -96,7 +96,10 @@ def test_build_rag_test_case_normalizes_citation_noise_and_json_prefix() -> None
 
     test_case = build_rag_test_case(
         case=case,
-        actual_output='JSON: "The PDF page contains the text Hello from PDF test page [1]."',
+        actual_output=(
+            'JSON: "The PDF page<cite:1> contains the text Hello from PDF test '
+            'page [1]."'
+        ),
         retrieval_context=["Hello from PDF test page"],
     )
 
@@ -208,5 +211,6 @@ def test_markdown_fixture_validation_rejects_non_markdown_cases() -> None:
 def test_build_deepeval_judge_model_uses_explicit_openai_compatible_endpoint() -> None:
     judge_model = _build_judge_model()
 
-    assert judge_model.name == "gpt-5.4-mini"
-    assert judge_model.base_url == "https://code.rayinai.com/v1"
+    assert judge_model.name == "ep-20260423004926-v99zw"
+    assert judge_model.base_url == "https://ark.cn-beijing.volces.com/api/v3"
+    assert judge_model.generation_kwargs == {"reasoning_effort": "medium"}

@@ -74,6 +74,7 @@ class OpenAIAnsweringRuntimeConfig:
     prompt_path: str | None
     store: bool
     verbosity: str
+    render_citations: bool
 
 
 @dataclass(slots=True)
@@ -111,6 +112,11 @@ class Settings:
     )
     openai_store: bool = False
     openai_text_verbosity: str = "medium"
+    openai_render_citations: bool = field(
+        default_factory=lambda: _read_bool_env(
+            "RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", True
+        )
+    )
     ark_api_key: str | None = field(
         default_factory=lambda: _read_optional_env("ARK_API_KEY")
     )
@@ -200,6 +206,7 @@ class Settings:
                 prompt_path=prompt_path,
                 store=self.openai_store,
                 verbosity=self.openai_text_verbosity,
+                render_citations=self.openai_render_citations,
             ),
         )
 

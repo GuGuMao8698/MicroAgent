@@ -11,11 +11,14 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 TESTS_PATH = PROJECT_ROOT / "tests"
+EVALS_PATH = TESTS_PATH / "evals"
 
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 if str(TESTS_PATH) not in sys.path:
     sys.path.insert(0, str(TESTS_PATH))
+if str(EVALS_PATH) not in sys.path:
+    sys.path.insert(0, str(EVALS_PATH))
 
 from eval_support import is_live_infinity_enabled, validate_deepeval_env
 
@@ -572,6 +575,17 @@ def _require_deepeval_runtime_env(request: pytest.FixtureRequest) -> None:
     if not request.config.getoption("--run-deepeval"):
         return
     validate_deepeval_env(os.environ)
+
+
+@pytest.fixture(autouse=True)
+def _set_deepeval_plain_prompt_variant(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """让 deepeval 测试使用 plain 模板（无 citation），避免引用噪声干扰评估指标。"""
+    if request.node.get_closest_marker("deepeval") is None:
+        return
+    monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
 
 
 @pytest.fixture
