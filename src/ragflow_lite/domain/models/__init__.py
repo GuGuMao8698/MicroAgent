@@ -11,6 +11,8 @@ from ragflow_lite.domain.models.entities import (
     TASK_INDEXED,
     TASK_PROCESSING,
     TASK_QUEUED,
+    AnswerBlueprint,
+    AnswerRequest,
     AnswerResult,
     Chunk,
     Dataset,
@@ -26,6 +28,8 @@ from ragflow_lite.domain.models.entities import (
 
 __all__ = [
     "MAX_ATTEMPTS",
+    "AnswerBlueprint",
+    "AnswerRequest",
     "STEP_BINDING",
     "STEP_CHUNKING",
     "STEP_EMBEDDING",

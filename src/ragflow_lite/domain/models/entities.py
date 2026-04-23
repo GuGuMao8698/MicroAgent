@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 Metadata = dict[str, Any]
 Vector = list[float]
@@ -68,6 +68,24 @@ class RetrievedChunk:
     document_id: str
     text: str
     score: float
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AnswerBlueprint:
+    ordered_chunk_ids: list[str]
+    chunk_roles: dict[str, str]
+    answer_constraints: list[str]
+    plan_steps: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AnswerRequest:
+    query: str
+    contexts: list[RetrievedChunk]
+    mode: Literal["standard", "discorag"] = "standard"
+    blueprint: AnswerBlueprint | None = None
     metadata: Metadata = field(default_factory=dict)
 
 

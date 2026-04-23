@@ -7,7 +7,7 @@ import pytest
 
 from ragflow_lite.application.services.query_service import QueryService
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
-from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
+from ragflow_lite.domain.models import AnswerRequest, AnswerResult, RetrievedChunk
 from ragflow_lite.shared.observability import (
     bind_request_context,
     clear_request_context,
@@ -34,9 +34,11 @@ class FakeRetriever:
 @dataclass
 class FakeAnswerer:
     answer_text: str = "回答"
+    last_request: AnswerRequest | None = None
 
-    def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult:
-        return AnswerResult(answer=self.answer_text, contexts=contexts)
+    def answer(self, request: AnswerRequest) -> AnswerResult:
+        self.last_request = request
+        return AnswerResult(answer=self.answer_text, contexts=request.contexts)
 
 
 def _build_service(
@@ -45,9 +47,10 @@ def _build_service(
     retriever_error: Exception | None = None,
     answer_text: str = "回答",
 ) -> QueryService:
+    answerer = FakeAnswerer(answer_text=answer_text)
     return QueryService(
         retriever=FakeRetriever(results=results, error=retriever_error),
-        answerer=FakeAnswerer(answer_text=answer_text),
+        answerer=answerer,
     )
 
 
@@ -57,12 +60,20 @@ def _event_names(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 def test_query_orchestrates_retrieve_then_answer() -> None:
     chunks = [_chunk("a"), _chunk("b")]
-    service = _build_service(results=chunks, answer_text="yes")
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeRetriever(results=chunks),
+        answerer=answerer,
+    )
 
     result = service.query("q", top_k=5)
 
     assert result.answer == "yes"
     assert result.contexts == chunks
+    assert answerer.last_request == AnswerRequest(
+        query="q",
+        contexts=chunks,
+    )
 
 
 def test_query_passes_through_ragflow_lite_error() -> None:
@@ -128,7 +139,9 @@ def test_query_logs_trace_id_request_id_and_error_type(
     finally:
         clear_request_context()
 
-    failed_record = next(record for record in caplog.records if record.event == "query_failed")
+    failed_record = next(
+        record for record in caplog.records if record.event == "query_failed"
+    )
     assert failed_record.trace_id == "trace-query-1"
     assert failed_record.request_id
     assert failed_record.outcome == "failed"

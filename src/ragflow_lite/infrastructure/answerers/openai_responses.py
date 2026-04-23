@@ -17,7 +17,12 @@ from openai import (
     RateLimitError,
 )
 
-from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
+from ragflow_lite.domain.models import (
+    AnswerBlueprint,
+    AnswerRequest,
+    AnswerResult,
+    RetrievedChunk,
+)
 from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 
 _CITATION_TOKEN_RE = re.compile(r"<cite:(\d+)>")
@@ -128,18 +133,22 @@ class OpenAIResponsesAnswerer:
         self.client = client or self._build_client(api_key, base_url)
         self._use_text_verbosity = _supports_text_verbosity(base_url)
 
-    def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult:
-        if not contexts:
+    def answer(self, request: AnswerRequest) -> AnswerResult:
+        if not request.contexts:
             return AnswerResult(
                 answer=FALLBACK_ANSWER,
                 contexts=[],
-                metadata={"strategy": "fallback"},
+                metadata={
+                    "strategy": "fallback",
+                    "answer_mode": request.mode,
+                    "blueprint_applied": False,
+                },
             )
 
-        ordered_contexts = sorted(
-            contexts, key=lambda context: context.score, reverse=True
+        ordered_contexts, blueprint_applied, fallback_reason = self._order_contexts(
+            request
         )
-        input_text = self._build_input(query, ordered_contexts)
+        input_text = self._build_input(request, ordered_contexts)
         response = self._create_response(input_text)
 
         raw_answer = response.output_text.strip()
@@ -155,6 +164,13 @@ class OpenAIResponsesAnswerer:
                 "model": self.model,
                 "reasoning_effort": self.reasoning_effort,
                 "store": self.store,
+                "answer_mode": request.mode,
+                "blueprint_applied": blueprint_applied,
+                **(
+                    {"blueprint_fallback_reason": fallback_reason}
+                    if fallback_reason is not None
+                    else {}
+                ),
             },
         )
 
@@ -203,13 +219,31 @@ class OpenAIResponsesAnswerer:
         return OpenAI(api_key=api_key, base_url=base_url)
 
     @staticmethod
-    def _build_input(query: str, contexts: list[RetrievedChunk]) -> str:
+    def _build_input(
+        request: AnswerRequest,
+        contexts: list[RetrievedChunk],
+    ) -> str:
         lines = [
             "Question:",
-            query.strip(),
+            request.query.strip(),
             "",
-            "Contexts:",
         ]
+
+        blueprint_lines = _format_blueprint_lines(request.blueprint)
+        if blueprint_lines:
+            lines.extend(
+                [
+                    "Blueprint:",
+                    *blueprint_lines,
+                    "",
+                ]
+            )
+
+        lines.extend(
+            [
+                "Contexts:",
+            ]
+        )
 
         for index, context in enumerate(contexts, start=1):
             metadata = context.metadata or {}
@@ -237,6 +271,28 @@ class OpenAIResponsesAnswerer:
 
         return "\n".join(lines).strip()
 
+    @staticmethod
+    def _order_contexts(
+        request: AnswerRequest,
+    ) -> tuple[list[RetrievedChunk], bool, str | None]:
+        score_ordered = sorted(
+            request.contexts, key=lambda context: context.score, reverse=True
+        )
+
+        if request.mode != "discorag":
+            return score_ordered, False, None
+
+        if request.blueprint is None:
+            return score_ordered, False, "missing_blueprint"
+
+        ordered_contexts = _order_contexts_by_blueprint(
+            score_ordered,
+            request.blueprint,
+        )
+        if ordered_contexts is None:
+            return score_ordered, False, "invalid_blueprint"
+        return ordered_contexts, True, None
+
 
 def _should_retry_error(exc: Exception) -> bool:
     if isinstance(
@@ -261,3 +317,51 @@ def _should_retry_error(exc: Exception) -> bool:
 def _supports_text_verbosity(base_url: str) -> bool:
     host = urlparse(base_url).hostname or ""
     return not host.endswith("volces.com")
+
+
+def _order_contexts_by_blueprint(
+    contexts: list[RetrievedChunk],
+    blueprint: AnswerBlueprint,
+) -> list[RetrievedChunk] | None:
+    contexts_by_id = {context.chunk_id: context for context in contexts}
+    selected: list[RetrievedChunk] = []
+    seen_ids: set[str] = set()
+    has_valid_id = False
+
+    for chunk_id in blueprint.ordered_chunk_ids:
+        context = contexts_by_id.get(chunk_id)
+        if context is None:
+            continue
+        has_valid_id = True
+        if chunk_id in seen_ids:
+            continue
+        selected.append(context)
+        seen_ids.add(chunk_id)
+
+    if not has_valid_id:
+        return None
+
+    for context in contexts:
+        if context.chunk_id not in seen_ids:
+            selected.append(context)
+
+    return selected
+
+
+def _format_blueprint_lines(blueprint: AnswerBlueprint | None) -> list[str]:
+    if blueprint is None:
+        return []
+
+    lines: list[str] = []
+    if blueprint.ordered_chunk_ids:
+        lines.append("ordered_chunk_ids: " + ", ".join(blueprint.ordered_chunk_ids))
+    if blueprint.chunk_roles:
+        role_text = "; ".join(
+            f"{chunk_id}={role}" for chunk_id, role in blueprint.chunk_roles.items()
+        )
+        lines.append(f"chunk_roles: {role_text}")
+    if blueprint.answer_constraints:
+        lines.append("answer_constraints: " + " | ".join(blueprint.answer_constraints))
+    if blueprint.plan_steps:
+        lines.append("plan_steps: " + " | ".join(blueprint.plan_steps))
+    return lines

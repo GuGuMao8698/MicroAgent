@@ -14,7 +14,7 @@ evidence package 的输入是 `MiniRAG` 产出的检索上下文；输出是一�
 
 该契约只吸收旧 `candidate-dedup-and-score-composition.md` 中仍然有价值的部分：稳定 canonical 身份、命中证据保留、去重后顺序与 provenance 回查。它不再保留“多路 route score composition”这一旧假设，也不要求不同 route 的原始分值天然可比。首版允许用更直接的证据顺位规则组织输出，但必须让后续层看得见每条证据为何被保留、来自哪些图路径或局部命中。
 
-evidence package 的职责是把检索产物整理为“可被结构化阅读”的证据输入，而不是替 `DiscoRAG` 生成 discourse 计划。它必须对外表现为统一桥接层：上游无论采用何种具体图检索细节，下游只会接收到一份稳定的 evidence package，而不是检索实现的内部中间态。
+evidence package 的职责是把检索产物整理为“可被结构化阅读”的证据输入，而不是替 `DiscoRAG` 生成 discourse 计划，也不是直接成为 answerer 的最终消费契约。它必须对外表现为统一桥接层：上游无论采用何种具体图检索细节，下游只会接收到一份稳定的 evidence package，而不是检索实现的内部中间态；后续若需要把这些证据转成 answerer 可消费的 `AnswerBlueprint` 或等价约束，应由独立的回答规划与消费契约继续承接。
 
 # 验收口径
 
@@ -22,4 +22,4 @@ evidence package 的职责是把检索产物整理为“可被结构化阅读”
 
 # 依赖与边界
 
-本文件依赖 `minirag-query-grounding-and-topology-retrieval.md` 交付统一检索上下文，但不反向规定图检索实现。它向上只服务 `discorag-intra-chunk-discourse-structure.md` 与 `discorag-inter-chunk-graph-and-answer-plan.md`，并保持自身不越权到回答生成层。本文件只对“如何把检索结果收敛成稳定证据包”负责，不对“块内结构怎么抽、块间关系怎么组织、最终提示词如何编写”负责。
+本文件依赖 `minirag-query-grounding-and-topology-retrieval.md` 交付统一检索上下文，但不反向规定图检索实现。它向上只服务 `discorag-intra-chunk-discourse-structure.md`、`discorag-inter-chunk-graph-and-answer-plan.md` 与后续 answerer blueprint 消费契约，并保持自身不越权到回答生成层。本文件只对“如何把检索结果收敛成稳定证据包”负责，不对“块内结构怎么抽、块间关系怎么组织、answerer 如何解释 blueprint、最终提示词如何编写”负责。

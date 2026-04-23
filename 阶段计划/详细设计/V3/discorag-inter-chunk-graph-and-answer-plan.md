@@ -14,7 +14,7 @@
 
 # 核心契约
 
-该层的输入是 evidence package 和对应的 chunk 内局部 discourse 结构；输出是一份 answer blueprint。最小中间步骤包含两部分：一是识别证据之间的块间关系，例如支撑、补充、对比、限定或冲突；二是基于这些关系确定回答呈现顺序与主次结构。answer blueprint 至少需要明确：哪些证据是主干论点、哪些证据是限定条件或反例、回答应按怎样的证据顺序展开，以及 answerer 不应忽略的关系约束。
+该层的输入是 evidence package 和对应的 chunk 内局部 discourse 结构；输出是一份 answer blueprint。最小中间步骤包含两部分：一是识别证据之间的块间关系，例如支撑、补充、对比、限定或冲突；二是基于这些关系确定回答呈现顺序与主次结构。answer blueprint 至少需要明确：哪些证据是主干论点、哪些证据是限定条件或反例、回答应按怎样的证据顺序展开，以及 answerer 不应忽略的关系约束。该 blueprint 是生产端产物，用来表达“应该如何回答”；至于 answerer 具体怎样解释这些字段、怎样与底层 contexts 兼容、以及缺失时如何回退，由独立的 answerer 消费契约继续定义。
 
 该层的职责是“检索后、回答前”的证据组织，而不是再向前发起更多检索。它不能在本文件重启 `CoT`、`HyDE` 或其他多路查询扩展，也不能把 answer blueprint 伪装成最终用户答案。answerer 仍负责把 blueprint 转成自然语言输出，但 answerer 不再独自承担证据组织与叙事顺序的全部责任。
 
@@ -26,4 +26,4 @@
 
 # 依赖与边界
 
-本文件依赖 `evidence-package-contract.md` 提供稳定证据包，并依赖 `discorag-intra-chunk-discourse-structure.md` 提供局部结构化产物，但不重复定义它们的字段。它向上只向 answerer 交付 answer blueprint 或等价的证据组织契约；`RAPTOR` 若后续接入，也只能作为补充证据来源，而不能反向改写本文件的回答规划边界。
+本文件依赖 `evidence-package-contract.md` 提供稳定证据包，并依赖 `discorag-intra-chunk-discourse-structure.md` 提供局部结构化产物，但不重复定义它们的字段。它向上只负责交付 answer blueprint 或等价的证据组织契约；answerer 如何消费该产物、如何与底层 `contexts` 一起进入回答生成，由独立的 answerer blueprint 消费契约承接。`RAPTOR` 若后续接入，也只能作为补充证据来源，而不能反向改写本文件的回答规划边界。

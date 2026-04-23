@@ -23,7 +23,7 @@ from deepeval.optimizer.algorithms import GEPA
 from deepeval.prompt import Prompt
 from eval_models import ArkResponsesDeepEvalModel
 
-from ragflow_lite.domain.models import RetrievedChunk
+from ragflow_lite.domain.models import AnswerRequest, RetrievedChunk
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
     _load_packaged_template,
@@ -193,7 +193,12 @@ def build_model_callback(
             verbosity=verbosity,
             instructions=instructions,
         )
-        return answerer.answer(golden.input, contexts).answer
+        return answerer.answer(
+            AnswerRequest(
+                query=golden.input,
+                contexts=contexts,
+            )
+        ).answer
 
     return _callback
 

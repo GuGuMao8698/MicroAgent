@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
-from ragflow_lite.domain.models import AnswerResult
+from ragflow_lite.domain.models import AnswerRequest, AnswerResult
 from ragflow_lite.domain.ports import Answerer, Retriever
 from ragflow_lite.shared.observability import log_event, record_query_outcome
 
@@ -50,7 +50,12 @@ class QueryService:
         _log_query_event(logging.INFO, "query_started", query, top_k, outcome="started")
         try:
             contexts = self.retriever.retrieve(query, top_k)
-            result = self.answerer.answer(query, contexts)
+            result = self.answerer.answer(
+                AnswerRequest(
+                    query=query,
+                    contexts=contexts,
+                )
+            )
             _log_query_event(
                 logging.INFO,
                 "query_succeeded",

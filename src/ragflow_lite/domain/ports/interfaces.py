@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ragflow_lite.domain.models import (
+    AnswerRequest,
     AnswerResult,
     Chunk,
     Dataset,
@@ -126,4 +127,4 @@ class Retriever(Protocol):
 
 
 class Answerer(Protocol):
-    def answer(self, query: str, contexts: list[RetrievedChunk]) -> AnswerResult: ...
+    def answer(self, request: AnswerRequest) -> AnswerResult: ...

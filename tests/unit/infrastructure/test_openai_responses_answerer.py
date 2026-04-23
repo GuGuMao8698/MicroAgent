@@ -7,7 +7,7 @@ import httpx
 import openai
 import pytest
 
-from ragflow_lite.domain.models import RetrievedChunk
+from ragflow_lite.domain.models import AnswerBlueprint, AnswerRequest, RetrievedChunk
 from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     ANSWERER_INSTRUCTIONS,
@@ -90,6 +90,21 @@ def _make_pdf_chunk(
     )
 
 
+def _make_request(
+    contexts: list[RetrievedChunk],
+    *,
+    query: str = "问题",
+    mode: str = "standard",
+    blueprint: AnswerBlueprint | None = None,
+) -> AnswerRequest:
+    return AnswerRequest(
+        query=query,
+        contexts=contexts,
+        mode=mode,
+        blueprint=blueprint,
+    )
+
+
 def _make_rate_limit_error() -> openai.RateLimitError:
     request = httpx.Request("POST", "https://code.rayinai.com/v1/responses")
     response = httpx.Response(
@@ -134,11 +149,15 @@ def test_answer_returns_fallback_without_calling_openai_when_contexts_are_empty(
     client = FakeOpenAIClient()
     answerer = _build_answerer(client)
 
-    result = answerer.answer("没有文档时怎么办", [])
+    result = answerer.answer(_make_request([], query="没有文档时怎么办"))
 
     assert result.answer == FALLBACK_ANSWER
     assert result.contexts == []
-    assert result.metadata == {"strategy": "fallback"}
+    assert result.metadata == {
+        "strategy": "fallback",
+        "answer_mode": "standard",
+        "blueprint_applied": False,
+    }
     assert client.responses.calls == []
 
 
@@ -151,7 +170,7 @@ def test_answer_returns_contexts_sorted_by_score_descending() -> None:
     low = _make_chunk("low", 0.2)
     high = _make_chunk("high", 0.9)
 
-    result = answerer.answer("问题", [low, high])
+    result = answerer.answer(_make_request([low, high]))
 
     assert result.contexts == [high, low]
 
@@ -162,7 +181,7 @@ def test_answer_prompt_contexts_are_numbered_by_score_order() -> None:
     low = _make_chunk("low", 0.2)
     high = _make_chunk("high", 0.9)
 
-    answerer.answer("问题", [low, high])
+    answerer.answer(_make_request([low, high]))
 
     call_input = client.responses.calls[0]["input"]
     assert call_input.index("chunk-high") < call_input.index("chunk-low")
@@ -176,7 +195,7 @@ def test_answer_preserves_valid_citations() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9), _make_chunk("b", 0.5)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert result.answer == "项目支持 txt[1] 和 md[2]。"
 
@@ -186,7 +205,7 @@ def test_answer_hides_rendered_citations_when_disabled() -> None:
     answerer = _build_answerer(client, render_citations=False)
     contexts = [_make_chunk("a", 0.9), _make_chunk("b", 0.5)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert result.answer == "项目支持 txt 和 md。"
 
@@ -196,7 +215,7 @@ def test_answer_strips_out_of_range_citations() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert result.answer == "信息来自 [1] 和 。"
 
@@ -206,7 +225,7 @@ def test_answer_strips_zero_citation() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert result.answer == "参考  不合法。"
 
@@ -219,7 +238,7 @@ def test_answer_preserves_bare_bracket_numbers_in_text() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert (
         result.answer
@@ -232,7 +251,7 @@ def test_answer_preserves_non_digit_brackets() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert "[abc]" in result.answer
     assert "[1]" in result.answer
@@ -244,7 +263,7 @@ def test_answer_preserves_bare_digit_brackets_as_is() -> None:
     answerer = _build_answerer(client)
     contexts = [_make_chunk("a", 0.9)]
 
-    result = answerer.answer("问题", contexts)
+    result = answerer.answer(_make_request(contexts))
 
     assert result.answer == "状态码 [404] 和端口 [80] 是常见的。"
 
@@ -260,7 +279,7 @@ def test_answer_calls_responses_api_with_expected_parameters() -> None:
         _make_chunk("high", 0.9),
     ]
 
-    result = answerer.answer("支持什么文件类型", contexts)
+    result = answerer.answer(_make_request(contexts, query="支持什么文件类型"))
 
     assert result.answer == "支持 txt 和 md。"
     assert result.metadata == {
@@ -268,6 +287,8 @@ def test_answer_calls_responses_api_with_expected_parameters() -> None:
         "model": "gpt-5.4-mini",
         "reasoning_effort": "medium",
         "store": False,
+        "answer_mode": "standard",
+        "blueprint_applied": False,
     }
 
     assert len(client.responses.calls) == 1
@@ -291,7 +312,7 @@ def test_answer_omits_text_verbosity_for_ark_responses_api() -> None:
         client=client,
     )
 
-    answerer.answer("支持什么文件类型", [_make_chunk("high", 0.9)])
+    answerer.answer(_make_request([_make_chunk("high", 0.9)], query="支持什么文件类型"))
 
     call = client.responses.calls[0]
     assert call["reasoning"] == {"effort": "medium"}
@@ -313,7 +334,7 @@ def test_answer_uses_custom_instructions_from_path(tmp_path: Path) -> None:
         instructions_path=str(prompt_path),
     )
 
-    answerer.answer("支持什么文件类型", [_make_chunk("high", 0.9)])
+    answerer.answer(_make_request([_make_chunk("high", 0.9)], query="支持什么文件类型"))
 
     assert client.responses.calls[0]["instructions"] == "Custom optimized instructions."
 
@@ -323,8 +344,7 @@ def test_answer_bubbles_up_openai_errors() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         answerer.answer(
-            "这个请求会失败吗",
-            [_make_chunk("1", 0.8)],
+            _make_request([_make_chunk("1", 0.8)], query="这个请求会失败吗")
         )
 
 
@@ -339,7 +359,9 @@ def test_answer_retries_rate_limit_error_then_succeeds(monkeypatch) -> None:
     )
     answerer = _build_answerer(client)
 
-    result = answerer.answer("这个请求会重试吗", [_make_chunk("1", 0.8)])
+    result = answerer.answer(
+        _make_request([_make_chunk("1", 0.8)], query="这个请求会重试吗")
+    )
 
     assert result.answer == "恢复后的回答"
     assert len(client.responses.calls) == 2
@@ -360,7 +382,9 @@ def test_answer_raises_after_retry_exhausted(monkeypatch) -> None:
     answerer = _build_answerer(client)
 
     with pytest.raises(openai.RateLimitError, match="Too many pending requests"):
-        answerer.answer("这个请求会失败吗", [_make_chunk("1", 0.8)])
+        answerer.answer(
+            _make_request([_make_chunk("1", 0.8)], query="这个请求会失败吗")
+        )
 
     assert len(client.responses.calls) == 3
 
@@ -370,7 +394,7 @@ def test_answer_raises_after_retry_exhausted(monkeypatch) -> None:
 
 def test_build_input_includes_single_page_info() -> None:
     contexts = [_make_pdf_chunk("a", 0.9, 3, 3)]
-    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+    result = OpenAIResponsesAnswerer._build_input(_make_request(contexts), contexts)
 
     assert "page: 3" in result
     assert "pages:" not in result
@@ -378,14 +402,91 @@ def test_build_input_includes_single_page_info() -> None:
 
 def test_build_input_includes_page_range_info() -> None:
     contexts = [_make_pdf_chunk("a", 0.9, 2, 5)]
-    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+    result = OpenAIResponsesAnswerer._build_input(_make_request(contexts), contexts)
 
     assert "pages: 2-5" in result
 
 
 def test_build_input_omits_page_info_when_absent() -> None:
     contexts = [_make_chunk("a", 0.9)]
-    result = OpenAIResponsesAnswerer._build_input("问题", contexts)
+    result = OpenAIResponsesAnswerer._build_input(_make_request(contexts), contexts)
 
     assert "page:" not in result
     assert "pages:" not in result
+
+
+def test_answer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-low", "chunk-high"],
+        chunk_roles={"chunk-low": "thesis", "chunk-high": "support"},
+        answer_constraints=["Do not omit qualifiers."],
+        plan_steps=["State the thesis first.", "Then add supporting detail."],
+    )
+
+    result = answerer.answer(
+        _make_request([low, high], mode="discorag", blueprint=blueprint)
+    )
+
+    assert result.contexts == [low, high]
+    assert result.metadata["answer_mode"] == "discorag"
+    assert result.metadata["blueprint_applied"] is True
+
+
+def test_answer_prompt_includes_blueprint_section_when_present() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    contexts = [_make_chunk("a", 0.9), _make_chunk("b", 0.4)]
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-b", "chunk-a"],
+        chunk_roles={"chunk-b": "thesis", "chunk-a": "qualifier"},
+        answer_constraints=["Mention the qualifier."],
+        plan_steps=["Open with the thesis.", "Add the qualifier second."],
+    )
+
+    answerer.answer(_make_request(contexts, mode="discorag", blueprint=blueprint))
+
+    call_input = client.responses.calls[0]["input"]
+    assert "Blueprint:" in call_input
+    assert "ordered_chunk_ids: chunk-b, chunk-a" in call_input
+    assert "chunk_roles: chunk-b=thesis; chunk-a=qualifier" in call_input
+    assert "answer_constraints: Mention the qualifier." in call_input
+    assert "plan_steps: Open with the thesis. | Add the qualifier second." in call_input
+
+
+def test_answer_discorag_mode_without_blueprint_falls_back_to_score_order() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+
+    result = answerer.answer(_make_request([low, high], mode="discorag"))
+
+    assert result.contexts == [high, low]
+    assert result.metadata["answer_mode"] == "discorag"
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "missing_blueprint"
+
+
+def test_answer_invalid_blueprint_falls_back_to_score_order() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-missing"],
+        chunk_roles={"chunk-missing": "thesis"},
+        answer_constraints=["Keep the answer grounded."],
+        plan_steps=["Use the missing chunk first."],
+    )
+
+    result = answerer.answer(
+        _make_request([low, high], mode="discorag", blueprint=blueprint)
+    )
+
+    assert result.contexts == [high, low]
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
