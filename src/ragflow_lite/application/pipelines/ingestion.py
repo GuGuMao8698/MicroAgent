@@ -160,6 +160,18 @@ class _ChunkCacheValue:
     metadata: dict[str, Any]
 
 
+def _parsed_cache_fields(cached: Any) -> tuple[str, dict[str, Any]] | None:
+    if isinstance(cached, ParsedDocument | _ParsedDocumentCacheValue):
+        return cached.raw_text, dict(cached.metadata)
+    return None
+
+
+def _chunk_cache_fields(cached: Any) -> tuple[str, int, dict[str, Any]] | None:
+    if isinstance(cached, Chunk | _ChunkCacheValue):
+        return cached.text, cached.index, dict(cached.metadata)
+    return None
+
+
 class IngestionPipeline:
     """同步执行最小文档 ingestion 流程，同时支持异步任务接口。"""
 
@@ -548,8 +560,7 @@ class IngestionPipeline:
         return snapshot
 
     def _parse_cache_key(self, raw_bytes: bytes, file_type: str) -> str:
-        parser_fingerprint = "composite"
-        return f"parse:{parser_fingerprint}:{_sha256_hex(raw_bytes)}:{file_type}"
+        return f"parse:composite:{_sha256_hex(raw_bytes)}:{file_type}"
 
     def _chunk_cache_key(self, normalized_document: ParsedDocument) -> str:
         chunker = self.chunker
@@ -655,19 +666,14 @@ class IngestionPipeline:
         asset: DocumentAsset,
         cached: Any,
     ) -> ParsedDocument:
-        if isinstance(cached, ParsedDocument):
+        payload = _parsed_cache_fields(cached)
+        if payload is not None:
+            raw_text, metadata = payload
             return ParsedDocument(
                 document_id=asset.document_id,
                 file_type=asset.file_type,
-                raw_text=cached.raw_text,
-                metadata=dict(cached.metadata),
-            )
-        if isinstance(cached, _ParsedDocumentCacheValue):
-            return ParsedDocument(
-                document_id=asset.document_id,
-                file_type=asset.file_type,
-                raw_text=cached.raw_text,
-                metadata=dict(cached.metadata),
+                raw_text=raw_text,
+                metadata=metadata,
             )
         raise ProcessingError("Unexpected parse cache payload.")
 
@@ -683,29 +689,20 @@ class IngestionPipeline:
 
         if isinstance(cached, list):
             for entry in cached:
-                if isinstance(entry, Chunk):
-                    restored.append(
-                        Chunk(
-                            chunk_id=f"chunk_{document_id}_{entry.index}",
-                            document_id=document_id,
-                            text=entry.text,
-                            index=entry.index,
-                            metadata=dict(entry.metadata),
-                        )
-                    )
+                payload = _chunk_cache_fields(entry)
+                if payload is None:
                     continue
 
-                if isinstance(entry, _ChunkCacheValue):
-                    restored.append(
-                        Chunk(
-                            chunk_id=f"chunk_{document_id}_{entry.index}",
-                            document_id=document_id,
-                            text=entry.text,
-                            index=entry.index,
-                            metadata=dict(entry.metadata),
-                        )
+                text, index, metadata = payload
+                restored.append(
+                    Chunk(
+                        chunk_id=f"chunk_{document_id}_{index}",
+                        document_id=document_id,
+                        text=text,
+                        index=index,
+                        metadata=metadata,
                     )
-                    continue
+                )
 
         if restored:
             return restored

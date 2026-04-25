@@ -1297,35 +1297,40 @@ class TestChunkCacheFingerprint:
             metadata={"page_spans": [{"start": 0, "end": 22, "page_number": 1}]},
         )
 
-    def test_cache_key_differs_by_chunker_type(self) -> None:
+    @pytest.mark.parametrize(
+        ("left_chunker", "right_chunker", "expected_same"),
+        [
+            pytest.param(
+                FixedWindowChunker(500, 50),
+                RecursiveCharacterChunker(500, 50),
+                False,
+                id="differs-by-chunker-type",
+            ),
+            pytest.param(
+                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n"]),
+                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n", "。"]),
+                False,
+                id="differs-by-separators",
+            ),
+            pytest.param(
+                RecursiveCharacterChunker(500, 50),
+                RecursiveCharacterChunker(500, 50),
+                True,
+                id="stable-with-same-config",
+            ),
+        ],
+    )
+    def test_cache_key_fingerprint(
+        self,
+        left_chunker: Any,
+        right_chunker: Any,
+        expected_same: bool,
+    ) -> None:
         doc = self._make_document()
-        key_fixed = self._make_pipeline(FixedWindowChunker(500, 50))._chunk_cache_key(
-            doc
-        )
-        key_recursive = self._make_pipeline(
-            RecursiveCharacterChunker(500, 50),
-        )._chunk_cache_key(doc)
+        left_key = self._make_pipeline(left_chunker)._chunk_cache_key(doc)
+        right_key = self._make_pipeline(right_chunker)._chunk_cache_key(doc)
 
-        assert key_fixed != key_recursive
-
-    def test_cache_key_differs_by_separators(self) -> None:
-        doc = self._make_document()
-        key_a = self._make_pipeline(
-            RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n"]),
-        )._chunk_cache_key(doc)
-        key_b = self._make_pipeline(
-            RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n", "。"]),
-        )._chunk_cache_key(doc)
-
-        assert key_a != key_b
-
-    def test_cache_key_stable_with_same_config(self) -> None:
-        doc = self._make_document()
-        key1 = self._make_pipeline(
-            RecursiveCharacterChunker(500, 50),
-        )._chunk_cache_key(doc)
-        key2 = self._make_pipeline(
-            RecursiveCharacterChunker(500, 50),
-        )._chunk_cache_key(doc)
-
-        assert key1 == key2
+        if expected_same:
+            assert left_key == right_key
+        else:
+            assert left_key != right_key
