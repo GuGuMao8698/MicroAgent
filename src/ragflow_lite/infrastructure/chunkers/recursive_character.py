@@ -202,18 +202,20 @@ class RecursiveCharacterChunker:
         merged = _merge_pieces(pieces, self.chunk_size, self.chunk_overlap)
 
         chunks: list[Chunk] = []
-        for idx, (chunk_text, start_offset, end_offset) in enumerate(merged):
+        chunk_index = 0
+        for chunk_text, start_offset, end_offset in merged:
             stripped = chunk_text.strip()
             if not stripped:
                 continue
             chunks.append(
                 Chunk(
-                    chunk_id=f"chunk_{document.document_id}_{idx}",
+                    chunk_id=f"chunk_{document.document_id}_{chunk_index}",
                     document_id=document.document_id,
                     text=stripped,
-                    index=idx,
+                    index=chunk_index,
                     metadata=_chunk_metadata(document, start_offset, end_offset),
                 )
             )
+            chunk_index += 1
 
         return chunks

@@ -387,3 +387,31 @@ class TestEdgeCases:
         assert "page_texts" not in chunks[0].metadata
         assert chunks[0].metadata["source"] == "upload"
         assert chunks[0].metadata["page_start"] == 1
+
+    def test_indices_sequential_when_whitespace_chunks_skipped(self) -> None:
+        """When merged chunks that are purely whitespace are skipped, remaining
+        chunks must have sequential indices (0, 1, 2, ...) with no gaps."""
+        # Text starts with separators so that "\n\n" pieces form their own
+        # merged chunks which strip to empty.
+        chunker = RecursiveCharacterChunker(
+            chunk_size=3, chunk_overlap=0, separators=["\n\n"]
+        )
+        doc = ParsedDocument(
+            document_id="gap1",
+            file_type="txt",
+            raw_text="\n\nAAA\n\nBBB",
+            metadata={},
+        )
+        chunks = chunker.chunk(doc)
+        # Whitespace-only chunks are dropped; the remaining chunks must have
+        # sequential indices and correctly formatted chunk_ids.
+        assert len(chunks) >= 1
+        for i, chunk in enumerate(chunks):
+            assert chunk.index == i, f"Expected sequential index {i}, got {chunk.index}"
+            assert chunk.chunk_id == f"chunk_gap1_{i}", (
+                f"Expected chunk_id chunk_gap1_{i}, got {chunk.chunk_id}"
+            )
+        # Verify that actual text content is preserved.
+        texts = [c.text for c in chunks]
+        assert "AAA" in " ".join(texts)
+        assert "BBB" in " ".join(texts)
