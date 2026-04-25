@@ -31,6 +31,10 @@ from ragflow_lite.domain.models import (
     IngestionTaskSnapshot,
     ParsedDocument,
 )
+from ragflow_lite.infrastructure.chunkers import (
+    FixedWindowChunker,
+    RecursiveCharacterChunker,
+)
 from ragflow_lite.infrastructure.ingestion.memory import InMemoryTaskStore
 from ragflow_lite.shared.observability import (
     bind_request_context,
@@ -1268,3 +1272,65 @@ def _build_metrics_state_with_registry(registry) -> Any:
             registry=registry,
         ),
     )
+
+
+class TestChunkCacheFingerprint:
+    """Tests for _chunk_cache_key() fingerprinting behavior."""
+
+    @staticmethod
+    def _make_pipeline(chunker: Any) -> IngestionPipeline:
+        return IngestionPipeline(
+            document_store=_FakeDocumentStore(),
+            parser=_FakeParser(),
+            chunker=chunker,
+            embedder=_FakeEmbedder(),
+            vector_index=_FakeVectorIndex(),
+            normalizer=lambda text, filename: text,
+        )
+
+    @staticmethod
+    def _make_document(text: str = "Some text for testing") -> ParsedDocument:
+        return ParsedDocument(
+            document_id="doc_abc",
+            file_type="txt",
+            raw_text=text,
+            metadata={"page_spans": [{"start": 0, "end": 22, "page_number": 1}]},
+        )
+
+    @pytest.mark.parametrize(
+        ("left_chunker", "right_chunker", "expected_same"),
+        [
+            pytest.param(
+                FixedWindowChunker(500, 50),
+                RecursiveCharacterChunker(500, 50),
+                False,
+                id="differs-by-chunker-type",
+            ),
+            pytest.param(
+                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n"]),
+                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n", "。"]),
+                False,
+                id="differs-by-separators",
+            ),
+            pytest.param(
+                RecursiveCharacterChunker(500, 50),
+                RecursiveCharacterChunker(500, 50),
+                True,
+                id="stable-with-same-config",
+            ),
+        ],
+    )
+    def test_cache_key_fingerprint(
+        self,
+        left_chunker: Any,
+        right_chunker: Any,
+        expected_same: bool,
+    ) -> None:
+        doc = self._make_document()
+        left_key = self._make_pipeline(left_chunker)._chunk_cache_key(doc)
+        right_key = self._make_pipeline(right_chunker)._chunk_cache_key(doc)
+
+        if expected_same:
+            assert left_key == right_key
+        else:
+            assert left_key != right_key
