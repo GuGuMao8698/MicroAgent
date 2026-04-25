@@ -6,10 +6,15 @@
 
 # 技术栈
 
-- `RecursiveCharacterTextSplitter`：用于实现递归回退式分块，最小实现只吸收“段落 -> 换行 -> 标点 -> 字符”这一类分隔策略，不引入自动调参循环或额外启发式评分公式。
+- `RecursiveCharacterChunker`（`src/ragflow_lite/infrastructure/chunkers/recursive_character.py`）：内置递归回退式分块器，按优先级依次尝试分隔符，从段落、换行到中文标点再到字符级切分。不依赖外部库，不引入自动调参循环或额外启发式评分公式。
 
-# 参考项目
-- `/home/xia/ragflow-lite/auto_tune_rag/src/core/chunk_optimizer.py`：参考递归分块方向与参数形态，只吸收适合当前项目的最小实现部分
+# 默认分隔符
+
+```python
+[“\n\n”, “\n”, “。”, “！”, “？”, “.”, “!”, “?”, “ “, “”]
+```
+
+按优先级依次尝试：段落 -> 换行 -> 中文句末标点 -> 英文句末标点 -> 空格 -> 字符级回退。
 
 # 范围与非目标
 
@@ -17,9 +22,16 @@
 
 # 核心契约
 
-分块基线必须从原始文档稳定地产出一组有序 chunk。最小可配置项只有 `chunk_size`、`chunk_overlap` 和 `separators`；其中 `separators` 采用递归回退策略，优先保留段落、换行和中文常见标点边界，必要时再回退到字符级切分。相同输入文档与相同参数必须产生相同 chunk 序列，不允许在主链路中依赖运行时随机性或自动调参结果。
+分块基线必须从原始文档稳定地产出一组有序 chunk。最小可配置项只有 `chunk_size`、`chunk_overlap` 和 `separators`（均为 `RecursiveCharacterChunker` 构造参数）；其中 `separators` 采用递归回退策略，优先保留段落、换行和中文常见标点边界，必要时再回退到字符级切分。相同输入文档与相同参数必须产生相同 chunk 序列，不允许在主链路中依赖运行时随机性或自动调参结果。
 
-每个 chunk 必须携带最小来源元数据，至少包含原始文档标识、chunk 顺序以及可回溯到原文的位置信息。分块步骤只负责把文档切成稳定的原子文本单元，不负责判断这些 chunk 是否适合检索、不负责生成摘要父节点，也不负责多路候选合并。分块质量诊断可以存在，但它的角色只能是离线评估、日志指标或测试辅助，不能变成 ingestion 成败的额外阻塞条件。
+每个 chunk 必须携带最小来源元数据。当前实现中的元数据字段包括：
+
+- `chunk_id`：格式为 `chunk_{document_id}_{index}`，保证全局唯一且可溯源
+- `index`：chunk 在文档内的顺序编号
+- `start_offset` / `end_offset`：chunk 文本在原文中的字符偏移区间（左闭右开）
+- `page_start` / `page_end`（仅 PDF）：chunk 覆盖的起止页码，基于 parser 提供的 `page_spans` 计算
+
+分块步骤只负责把文档切成稳定的原子文本单元，不负责判断这些 chunk 是否适合检索、不负责生成摘要父节点，也不负责多路候选合并。分块质量诊断可以存在，但它的角色只能是离线评估、日志指标或测试辅助，不能变成 ingestion 成败的额外阻塞条件。
 
 # 验收口径
 
@@ -27,4 +39,11 @@
 
 # 依赖与边界
 
-本文件属于 ingestion 侧能力，服务于后续 embedding、索引落库和层级摘要构建。`RAPTOR` 只能消费这里产出的稳定 chunk，而不能反向重定义分块形状。该基线不承担 query-time 的扩展检索、去重、分数组合或内部重排职责；异步 ingestion 只是其承载环境，不改变本文件只对“如何产出稳定 chunk”负责的边界。
+本文件属于 ingestion 侧能力，服务于后续 embedding、索引落库和层级摘要构建。`RecursiveCharacterChunker` 已通过 `providers.py` 注册为默认生产分块器，`_chunk_cache_key()` 已更新为通用指纹。`RAPTOR` 只能消费这里产出的稳定 chunk，而不能反向重定义分块形状。该基线不承担 query-time 的扩展检索、去重、分数组合或内部重排职责；异步 ingestion 只是其承载环境，不改变本文件只对”如何产出稳定 chunk”负责的边界。
+
+# 测试覆盖
+
+当前共有 43 个测试覆盖分块器：
+
+- 36 个算法测试：覆盖递归分隔、合并与重叠、边界条件、空输入与单 chunk、中文/英文/Markdown 场景、页码计算等
+- 7 个契约测试：覆盖 `Chunker` 协议合规性、`providers.py` 注册、与 `IngestionPipeline` 的集成
