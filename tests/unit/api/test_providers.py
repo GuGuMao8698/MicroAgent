@@ -169,7 +169,7 @@ def test_infrastructure_exports_remain_hybrid_only() -> None:
         "ArkMultimodalTextEmbedder",
         "BackgroundTaskRunner",
         "CompositeParser",
-        "FixedWindowChunker",
+        "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",
         "InlineTaskRunner",
