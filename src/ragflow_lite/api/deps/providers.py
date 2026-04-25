@@ -27,13 +27,13 @@ from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     BackgroundTaskRunner,
     CompositeParser,
-    FixedWindowChunker,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
     InMemoryStageCache,
     InMemoryTaskStore,
     LocalDocumentStore,
     OpenAIResponsesAnswerer,
+    RecursiveCharacterChunker,
 )
 
 
@@ -85,7 +85,7 @@ def build_services(settings: Settings) -> AppServices:
 
     document_store = LocalDocumentStore(settings.uploads_dir, settings.temp_dir)
     parser = CompositeParser()
-    chunker = FixedWindowChunker(
+    chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )

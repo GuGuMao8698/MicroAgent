@@ -13,7 +13,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from ragflow_lite.application.services.text_normalization import (
@@ -552,12 +552,15 @@ class IngestionPipeline:
         return f"parse:{parser_fingerprint}:{_sha256_hex(raw_bytes)}:{file_type}"
 
     def _chunk_cache_key(self, normalized_document: ParsedDocument) -> str:
-        from ragflow_lite.infrastructure.chunkers.fixed_window import FixedWindowChunker
-
-        fw_chunker = cast(FixedWindowChunker, self.chunker)
-        chunker_fingerprint = (
-            f"fixed_window:{fw_chunker.chunk_size}:{fw_chunker.chunk_overlap}"
-        )
+        chunker = self.chunker
+        parts = [
+            type(chunker).__name__,
+            str(chunker.chunk_size),
+            str(chunker.chunk_overlap),
+        ]
+        if hasattr(chunker, "separators"):
+            parts.append(str(tuple(chunker.separators)))
+        chunker_fingerprint = ":".join(parts)
         relevant_metadata = json.dumps(
             normalized_document.metadata.get("page_spans", []),
             sort_keys=True,

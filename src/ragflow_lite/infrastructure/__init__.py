@@ -1,7 +1,9 @@
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
-from ragflow_lite.infrastructure.chunkers.fixed_window import FixedWindowChunker
+from ragflow_lite.infrastructure.chunkers.recursive_character import (
+    RecursiveCharacterChunker,
+)
 from ragflow_lite.infrastructure.embedders.ark_embedder import (
     ArkMultimodalTextEmbedder,
 )
@@ -27,7 +29,7 @@ __all__ = [
     "ArkMultimodalTextEmbedder",
     "BackgroundTaskRunner",
     "CompositeParser",
-    "FixedWindowChunker",
+    "RecursiveCharacterChunker",
     "InfinityDenseVectorIndex",
     "InfinityHybridRetriever",
     "InlineTaskRunner",
