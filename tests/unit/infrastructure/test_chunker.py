@@ -123,7 +123,7 @@ def test_recursive_chunker_splits_on_paragraphs_first() -> None:
     document = ParsedDocument(
         document_id="doc_para",
         file_type="txt",
-        raw_text="First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.",
+        raw_text="Short para one.\n\nPara two is short.\n\nThird para here.",
         metadata={},
     )
 
@@ -132,13 +132,10 @@ def test_recursive_chunker_splits_on_paragraphs_first() -> None:
     # The chunker should split on \n\n first, producing chunks that
     # respect paragraph boundaries.
     assert len(chunks) >= 2, f"Expected multiple chunks, got {len(chunks)}"
-    # Each chunk's text should contain content from at most one paragraph
-    # (i.e. no chunk should contain text from two different \n\n-separated blocks).
+    # Paragraph-level splitting means no chunk should contain \n\n
+    assert all("\n\n" not in chunk.text for chunk in chunks)
     for chunk in chunks:
-        # After stripping, paragraphs are joined by \n\n — if a chunk contains
-        # \n\n it crossed a paragraph boundary, which is fine only if the
-        # paragraph itself fits within chunk_size.
-        # The key invariant: the chunker tried \n\n before finer separators.
+        # Each chunk's text is stripped (no leading/trailing whitespace).
         assert chunk.text == chunk.text.strip()
 
 
