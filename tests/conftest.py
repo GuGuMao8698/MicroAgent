@@ -627,6 +627,24 @@ def app_settings(tmp_path: Path) -> Settings:
     return settings
 
 
+def _install_fake_evidence_extractor_client(app) -> None:
+    """Replace the evidence extractor's OpenAI client with a fake."""
+    from types import SimpleNamespace
+
+    pipeline = app.state.services.ingestion_pipeline
+    extractor = getattr(pipeline, "evidence_extractor", None)
+    if extractor is None:
+        return
+
+    class _FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                output_text='{"entities":[],"relations":[]}',
+            )
+
+    extractor.client = SimpleNamespace(responses=_FakeResponses())
+
+
 @pytest.fixture
 def app(app_settings: Settings):
     return create_app(app_settings)
@@ -635,6 +653,10 @@ def app(app_settings: Settings):
 @pytest.fixture
 def client(app):
     from fastapi.testclient import TestClient
+
+    # Install a fake OpenAI client on the evidence extractor so ingestion
+    # tests don't hit the real API.
+    _install_fake_evidence_extractor_client(app)
 
     with TestClient(app) as test_client:
         yield test_client
