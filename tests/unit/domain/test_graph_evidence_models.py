@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from ragflow_lite.domain.models import (
     STEP_GRAPH_EVIDENCE,
     EntityEvidence,
     GraphEvidenceBatch,
     GraphEvidenceWriteResult,
     RelationEvidence,
+)
+from ragflow_lite.domain.ports.interfaces import (
+    EvidenceExtractor,
+    GraphEvidenceStore,
 )
 
 
@@ -50,3 +56,8 @@ def test_graph_evidence_models_preserve_source_chunks() -> None:
     assert batch.relations[0].metadata["source_id"] == "chunk_doc_alpha_0"
     assert result.entity_count == 1
     assert result.relation_count == 1
+
+
+def test_graph_evidence_ports_are_protocols() -> None:
+    assert issubclass(EvidenceExtractor, Protocol)
+    assert issubclass(GraphEvidenceStore, Protocol)
