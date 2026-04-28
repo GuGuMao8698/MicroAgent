@@ -114,6 +114,52 @@ class IngestionResult:
 
 
 # ---------------------------------------------------------------------------
+# Graph evidence models (MiniRAG)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class EntityEvidence:
+    entity_id: str
+    document_id: str
+    name: str
+    entity_type: str
+    description: str
+    source_chunk_ids: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RelationEvidence:
+    relation_id: str
+    document_id: str
+    source_entity_id: str
+    target_entity_id: str
+    source_entity_name: str
+    target_entity_name: str
+    description: str
+    keywords: list[str]
+    weight: float
+    source_chunk_ids: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphEvidenceBatch:
+    document_id: str
+    entities: list[EntityEvidence]
+    relations: list[RelationEvidence]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphEvidenceWriteResult:
+    document_id: str
+    entity_count: int
+    relation_count: int
+
+
+# ---------------------------------------------------------------------------
 # Async ingestion task snapshot
 # ---------------------------------------------------------------------------
 
@@ -127,6 +173,7 @@ TASK_FAILED = "failed"
 STEP_PARSING = "parsing"
 STEP_NORMALIZING = "normalizing"
 STEP_CHUNKING = "chunking"
+STEP_GRAPH_EVIDENCE = "graph_evidence"
 STEP_EMBEDDING = "embedding"
 STEP_INDEXING = "indexing"
 STEP_BINDING = "binding"
