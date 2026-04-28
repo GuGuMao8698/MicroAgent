@@ -561,6 +561,8 @@ class IngestionPipeline:
         )
 
     def _extract_graph_evidence(self, chunks: list[Chunk]) -> GraphEvidenceBatch | None:
+        if not chunks:
+            return None
         if self.evidence_extractor is None or self.graph_store is None:
             return None
         return self.evidence_extractor.extract(chunks)

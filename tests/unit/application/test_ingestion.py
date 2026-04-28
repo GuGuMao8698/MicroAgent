@@ -1408,12 +1408,27 @@ def test_ingest_persists_graph_evidence_after_chunking() -> None:
     assert graph_store.upserts[0].entities[0].source_chunk_ids
 
 
+def test_ingest_skips_graph_evidence_when_chunker_returns_no_chunks() -> None:
+    extractor = _FakeEvidenceExtractor()
+    graph_store = _FakeGraphEvidenceStore()
+    pipeline = _build_pipeline()
+    pipeline.evidence_extractor = extractor
+    pipeline.graph_store = graph_store
+
+    result = pipeline.ingest("test.txt", b"hello")
+
+    assert result.status == "indexed"
+    assert extractor.calls == 0
+    assert graph_store.upserts == []
+
+
 def test_graph_evidence_failure_rolls_back_document_and_vector_index() -> None:
     vector_index = _FakeVectorIndex()
     document_store = _FakeDocumentStore()
     pipeline = _build_pipeline(
         vector_index=vector_index,
         document_store=document_store,
+        chunker=_ProducingChunker(),
     )
     pipeline.evidence_extractor = _FakeEvidenceExtractor()
     pipeline.graph_store = _FailingGraphEvidenceStore()
