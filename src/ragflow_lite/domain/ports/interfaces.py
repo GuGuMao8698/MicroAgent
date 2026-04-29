@@ -12,10 +12,12 @@ from ragflow_lite.domain.models import (
     EmbeddedChunk,
     GraphEvidenceBatch,
     GraphEvidenceWriteResult,
+    GroundedQuery,
     IndexedDocument,
     IngestionTaskSnapshot,
     ParsedDocument,
     RetrievedChunk,
+    TopologyRetrievalResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -137,6 +139,18 @@ class VectorIndex(Protocol):
     def delete_document(self, document_id: str) -> None: ...
 
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]: ...
+
+
+class QueryGrounder(Protocol):
+    def ground(self, query: str) -> GroundedQuery: ...
+
+
+class ChunkLookup(Protocol):
+    def get_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]: ...
+
+
+class TopologyContextRetriever(Protocol):
+    def retrieve_context(self, query: str, top_k: int) -> TopologyRetrievalResult: ...
 
 
 class Retriever(Protocol):

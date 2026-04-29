@@ -46,3 +46,18 @@ def test_minirag_query_topology_models_preserve_grounding_and_paths() -> None:
     ]
     assert result.paths[0].source_chunk_ids == ["chunk_doc1_0", "chunk_doc1_1"]
     assert result.chunks[0].metadata["retrieval_mode"] == "minirag_topology"
+
+
+from typing import Protocol
+
+from ragflow_lite.domain.ports.interfaces import (
+    ChunkLookup,
+    QueryGrounder,
+    TopologyContextRetriever,
+)
+
+
+def test_minirag_query_ports_are_protocols() -> None:
+    assert issubclass(QueryGrounder, Protocol)
+    assert issubclass(ChunkLookup, Protocol)
+    assert issubclass(TopologyContextRetriever, Protocol)
