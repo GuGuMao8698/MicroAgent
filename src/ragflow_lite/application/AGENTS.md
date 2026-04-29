@@ -11,7 +11,7 @@
 - `DatasetService` 负责 dataset 的 create/list/get/delete-empty，名称做 strip 后非空校验。
 - `QueryService` 继续只依赖 `Retriever` 协议，不感知具体检索实现或 fusion 细节。
 - `IngestionPipeline` / `QueryService` 负责主链路阶段日志和业务指标（如 ingest/query outcome），但只记录安全字段，不记录原始文档内容或完整 query 文本。
-- rollback 保持 best-effort：分别尝试清理 `vector_index`、`document_store` 与 `dataset_binding`，失败时记录 `rollback_failed` 日志但不覆盖原始业务异常。
+- rollback 保持 best-effort：分别尝试清理 `graph_evidence`、`vector_index`、`document_store` 与 `dataset_binding`，失败时记录 `rollback_failed` 日志但不覆盖原始业务异常。
 - `IngestionPipeline.ingest()` 接受可选 `dataset_id`，在同一受控流程里完成索引写入 + dataset 绑定；绑定失败时做 binding 清理。
 - `IngestionPipeline` 同时提供异步 ingestion 方法：`submit(idempotency_key, filename, content, dataset_id)` 只负责幂等预留、保存文档并把任务交给后台 runner，随后立即返回；`process_task(document_id)` 由后台 worker 执行；`get_snapshot(document_id)` 用于轮询任务快照。legacy `ingest()` 保留向后兼容，但不是默认 HTTP 路径。
 - 默认 app wiring 使用进程内 background runner，而不是 inline 执行；异步 pipeline 的 stage cache 仅覆盖 parse / chunk 阶段，embed / index 不缓存。

@@ -10,6 +10,8 @@ from ragflow_lite.domain.models import (
     Dataset,
     DocumentAsset,
     EmbeddedChunk,
+    GraphEvidenceBatch,
+    GraphEvidenceWriteResult,
     IndexedDocument,
     IngestionTaskSnapshot,
     ParsedDocument,
@@ -102,6 +104,21 @@ class Parser(Protocol):
 
 class Chunker(Protocol):
     def chunk(self, document: ParsedDocument) -> list[Chunk]: ...
+
+
+class EvidenceExtractor(Protocol):
+    def extract(self, chunks: list[Chunk]) -> GraphEvidenceBatch: ...
+
+
+class GraphEvidenceStore(Protocol):
+    def upsert_document_evidence(
+        self,
+        batch: GraphEvidenceBatch,
+    ) -> GraphEvidenceWriteResult: ...
+
+    def delete_document(self, document_id: str) -> None: ...
+
+    def get_document_evidence(self, document_id: str) -> GraphEvidenceBatch | None: ...
 
 
 class Embedder(Protocol):

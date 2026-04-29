@@ -14,7 +14,7 @@
 - answerer prompt 的 source of truth 是 `src/ragflow_lite/infrastructure/answerers/` 下的 repo-tracked 模板文件（`answer_with_citations.txt` / `answer_plain.txt`），不再是代码内联常量。优先级：`RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH` > `RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_VARIANT` > packaged default。
 - deepeval 测试通过 autouse fixture 自动设置 `RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_VARIANT=plain` 和 `RAGFLOW_LITE_OPENAI_RENDER_CITATIONS=false`，确保评估关闭 citation。
 - 当前 goldens 契约是 `6` 个 markdown 文档、每个 `10` 个 golden，总计 `60` 个；重新生成时保持这个形状。
-- 默认测试路径使用 fake Infinity、fake Ark、fake/stub OpenAI，保持快速和稳定。
+- 默认测试路径使用 fake Infinity、fake Ark、fake/stub OpenAI，保持快速和稳定。`conftest.py` 的 `client` fixture 自动为 evidence extractor 安装 fake OpenAI client；直接 `create_app()` 创建的 app 需手动调用 `_patch_fake_evidence_extractor(app)` 或在测试内自行安装。
 - 真实 Infinity 回归测试使用 `@pytest.mark.live_infinity`，并只在显式传入 `--run-live-infinity` 时运行。
 - `deepeval` 测试使用 `@pytest.mark.deepeval`，并要求真实 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`。
 - 仓库内 `deepeval` pytest 入口是 `./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval`。

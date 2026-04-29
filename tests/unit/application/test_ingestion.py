@@ -28,8 +28,11 @@ from ragflow_lite.domain.models import (
     Chunk,
     DocumentAsset,
     EmbeddedChunk,
+    EntityEvidence,
+    GraphEvidenceBatch,
     IngestionTaskSnapshot,
     ParsedDocument,
+    RelationEvidence,
 )
 from ragflow_lite.infrastructure.chunkers import (
     FixedWindowChunker,
@@ -166,6 +169,25 @@ class _FakeChunker:
 
 
 @dataclass
+class _ProducingChunker:
+    """Chunker that yields a single chunk so downstream consumers see real chunk_ids."""
+
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+    def chunk(self, document: ParsedDocument) -> list[Chunk]:
+        return [
+            Chunk(
+                chunk_id=f"chunk_{document.document_id}_0",
+                document_id=document.document_id,
+                text=document.raw_text,
+                index=0,
+                metadata={},
+            )
+        ]
+
+
+@dataclass
 class _FakeEmbedder:
     def embed_chunks(self, chunks: list[Any]) -> list[EmbeddedChunk]:
         return []
@@ -189,11 +211,12 @@ def _build_pipeline(
     vector_index: _FakeVectorIndex | None = None,
     document_store: _FakeDocumentStore | None = None,
     normalizer: Any | None = None,
+    chunker: Any | None = None,
 ) -> IngestionPipeline:
     return IngestionPipeline(
         document_store=document_store or _FakeDocumentStore(),
         parser=_FakeParser(),
-        chunker=_FakeChunker(),
+        chunker=chunker or _FakeChunker(),
         embedder=_FakeEmbedder(),
         vector_index=vector_index or _FakeVectorIndex(),
         normalizer=normalizer or (lambda text, filename: text),
@@ -551,6 +574,29 @@ class TestProcessTaskTransitions:
         assert final is not None
         assert final.status == TASK_INDEXED
         assert ds_store.bind_calls == [(doc_id, "ds-001")]
+
+    def test_process_task_persists_graph_evidence(self) -> None:
+        extractor = _FakeEvidenceExtractor()
+        graph_store = _FakeGraphEvidenceStore()
+        pipeline, task_store, _, runner = _build_async_pipeline(
+            chunker=_ProducingChunker(),
+        )
+        pipeline.evidence_extractor = extractor
+        pipeline.graph_store = graph_store
+        snapshot = pipeline.submit(
+            idempotency_key="key-graph",
+            filename="graph.txt",
+            content=b"graph content",
+        )
+
+        pipeline.process_task(snapshot.document_id)
+
+        final = task_store.get(snapshot.document_id)
+        assert final is not None
+        assert final.status == TASK_INDEXED
+        assert extractor.calls == 1
+        assert graph_store.upserts[0].document_id == snapshot.document_id
+        assert graph_store.upserts[0].relations[0].source_chunk_ids
 
 
 # ===========================================================================
@@ -1272,6 +1318,126 @@ def _build_metrics_state_with_registry(registry) -> Any:
             registry=registry,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Fake graph evidence collaborators
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeEvidenceExtractor:
+    calls: int = 0
+
+    def extract(self, chunks: list[Chunk]) -> GraphEvidenceBatch:
+        self.calls += 1
+        document_id = chunks[0].document_id
+        source_chunk_ids = [chunk.chunk_id for chunk in chunks]
+        entity = EntityEvidence(
+            entity_id="entity_minirag",
+            document_id=document_id,
+            name="MiniRAG",
+            entity_type="concept",
+            description="Lightweight graph retrieval.",
+            source_chunk_ids=source_chunk_ids,
+            metadata={"source_id": "|".join(source_chunk_ids)},
+        )
+        relation = RelationEvidence(
+            relation_id="relation_minirag_chunk",
+            document_id=document_id,
+            source_entity_id="entity_minirag",
+            target_entity_id="entity_chunk",
+            source_entity_name="MiniRAG",
+            target_entity_name="chunk",
+            description="MiniRAG links evidence to chunks.",
+            keywords=["provenance"],
+            weight=1.0,
+            source_chunk_ids=source_chunk_ids,
+            metadata={"source_id": "|".join(source_chunk_ids)},
+        )
+        return GraphEvidenceBatch(
+            document_id=document_id,
+            entities=[entity],
+            relations=[relation],
+        )
+
+
+@dataclass
+class _FakeGraphEvidenceStore:
+    upserts: list[GraphEvidenceBatch] = field(default_factory=list)
+    delete_calls: list[str] = field(default_factory=list)
+
+    def upsert_document_evidence(self, batch: GraphEvidenceBatch):
+        self.upserts.append(batch)
+        return None
+
+    def delete_document(self, document_id: str) -> None:
+        self.delete_calls.append(document_id)
+
+    def get_document_evidence(self, document_id: str) -> GraphEvidenceBatch | None:
+        for batch in self.upserts:
+            if batch.document_id == document_id:
+                return batch
+        return None
+
+
+@dataclass
+class _FailingGraphEvidenceStore(_FakeGraphEvidenceStore):
+    def upsert_document_evidence(self, batch: GraphEvidenceBatch):
+        raise RuntimeError("graph store failed")
+
+
+# ---------------------------------------------------------------------------
+# Graph evidence integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_persists_graph_evidence_after_chunking() -> None:
+    extractor = _FakeEvidenceExtractor()
+    graph_store = _FakeGraphEvidenceStore()
+    pipeline = _build_pipeline(chunker=_ProducingChunker())
+    pipeline.evidence_extractor = extractor
+    pipeline.graph_store = graph_store
+
+    result = pipeline.ingest("test.txt", b"hello")
+
+    assert result.status == "indexed"
+    assert extractor.calls == 1
+    assert len(graph_store.upserts) == 1
+    assert graph_store.upserts[0].document_id == result.document_id
+    assert graph_store.upserts[0].entities[0].source_chunk_ids
+
+
+def test_ingest_skips_graph_evidence_when_chunker_returns_no_chunks() -> None:
+    extractor = _FakeEvidenceExtractor()
+    graph_store = _FakeGraphEvidenceStore()
+    pipeline = _build_pipeline()
+    pipeline.evidence_extractor = extractor
+    pipeline.graph_store = graph_store
+
+    result = pipeline.ingest("test.txt", b"hello")
+
+    assert result.status == "indexed"
+    assert extractor.calls == 0
+    assert graph_store.upserts == []
+
+
+def test_graph_evidence_failure_rolls_back_document_and_vector_index() -> None:
+    vector_index = _FakeVectorIndex()
+    document_store = _FakeDocumentStore()
+    pipeline = _build_pipeline(
+        vector_index=vector_index,
+        document_store=document_store,
+        chunker=_ProducingChunker(),
+    )
+    pipeline.evidence_extractor = _FakeEvidenceExtractor()
+    pipeline.graph_store = _FailingGraphEvidenceStore()
+
+    with pytest.raises(ProcessingError, match="Failed to index document"):
+        pipeline.ingest("graph.txt", b"graph content")
+
+    assert vector_index.delete_calls == 1
+    assert document_store.delete_calls == 1
 
 
 class TestChunkCacheFingerprint:

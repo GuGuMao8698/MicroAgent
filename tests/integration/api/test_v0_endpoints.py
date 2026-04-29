@@ -117,6 +117,11 @@ def _install_fake_openai_client(
     fake_openai_client: FakeOpenAIClient,
 ) -> FakeOpenAIClient:
     client.app.state.services.query_service.answerer.client = fake_openai_client
+    extractor = client.app.state.services.ingestion_pipeline.evidence_extractor
+    if extractor is not None:
+        extractor.client = FakeOpenAIClient(
+            output_text='{"entities":[],"relations":[]}',
+        )
     return fake_openai_client
 
 
@@ -125,6 +130,17 @@ def _install_fake_ark_client(client, fake_ark_client: FakeArkClient) -> FakeArkC
     assert services.ingestion_pipeline.embedder is services.retriever.embedder
     services.ingestion_pipeline.embedder.client = fake_ark_client
     return fake_ark_client
+
+
+def _patch_fake_evidence_extractor(app) -> None:
+    """Install a fake OpenAI client on the evidence extractor."""
+    extractor = getattr(
+        app.state.services.ingestion_pipeline, "evidence_extractor", None
+    )
+    if extractor is not None:
+        extractor.client = FakeOpenAIClient(
+            output_text='{"entities":[],"relations":[]}',
+        )
 
 
 def _unique_key() -> str:
@@ -1031,6 +1047,7 @@ def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
     fixture_documents_dir: Path,
 ) -> None:
     first_app = create_app(_build_settings(tmp_path / "app_one", metrics_enabled=True))
+    _patch_fake_evidence_extractor(first_app)
 
     with TestClient(first_app) as first_client:
         _install_fake_ark_client(first_client, FakeArkClient())

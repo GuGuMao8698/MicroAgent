@@ -15,6 +15,8 @@ from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
+    LocalJsonGraphEvidenceStore,
+    OpenAIResponsesEvidenceExtractor,
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.answerers.openai_responses import (
@@ -162,7 +164,20 @@ def test_build_services_uses_infinity_hybrid_retriever(
     assert answerer.base_url == "https://code.rayinai.com/v1"
 
 
-def test_infrastructure_exports_remain_hybrid_only() -> None:
+def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> None:
+    services = build_services(_build_settings(tmp_path))
+
+    assert isinstance(
+        services.ingestion_pipeline.graph_store,
+        LocalJsonGraphEvidenceStore,
+    )
+    assert isinstance(
+        services.ingestion_pipeline.evidence_extractor,
+        OpenAIResponsesEvidenceExtractor,
+    )
+
+
+def test_infrastructure_exports_current_runtime_components() -> None:
     from ragflow_lite import infrastructure
 
     assert infrastructure.__all__ == [
@@ -176,8 +191,10 @@ def test_infrastructure_exports_remain_hybrid_only() -> None:
         "InMemoryStageCache",
         "InMemoryTaskStore",
         "LocalDocumentStore",
+        "LocalJsonGraphEvidenceStore",
         "LocalJsonVectorIndex",
         "OpenAIResponsesAnswerer",
+        "OpenAIResponsesEvidenceExtractor",
     ]
     assert retrievers_module.__all__ == ["InfinityHybridRetriever"]
     assert not hasattr(infrastructure, "VectorRetriever")

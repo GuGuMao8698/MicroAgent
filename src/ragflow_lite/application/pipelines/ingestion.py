@@ -32,6 +32,7 @@ from ragflow_lite.domain.models import (
     STEP_BINDING,
     STEP_CHUNKING,
     STEP_EMBEDDING,
+    STEP_GRAPH_EVIDENCE,
     STEP_INDEXING,
     STEP_NORMALIZING,
     STEP_PARSING,
@@ -42,6 +43,7 @@ from ragflow_lite.domain.models import (
     TASK_QUEUED,
     Chunk,
     DocumentAsset,
+    GraphEvidenceBatch,
     IngestionResult,
     IngestionTaskSnapshot,
     ParsedDocument,
@@ -52,6 +54,8 @@ from ragflow_lite.domain.ports import (
     DatasetStore,
     DocumentStore,
     Embedder,
+    EvidenceExtractor,
+    GraphEvidenceStore,
     IngestionStageCache,
     IngestionTaskRunner,
     IngestionTaskStore,
@@ -187,6 +191,8 @@ class IngestionPipeline:
         task_store: IngestionTaskStore | None = None,
         stage_cache: IngestionStageCache | None = None,
         runner: IngestionTaskRunner | None = None,
+        evidence_extractor: EvidenceExtractor | None = None,
+        graph_store: GraphEvidenceStore | None = None,
     ) -> None:
         self.document_store = document_store
         self.parser = parser
@@ -198,6 +204,8 @@ class IngestionPipeline:
         self.task_store = task_store
         self.stage_cache = stage_cache
         self.runner = runner
+        self.evidence_extractor = evidence_extractor
+        self.graph_store = graph_store
 
     # ------------------------------------------------------------------
     # Legacy synchronous interface
@@ -240,8 +248,11 @@ class IngestionPipeline:
                 asset.filename,
             )
             chunks = self.chunker.chunk(normalized_document)
+            graph_evidence = self._extract_graph_evidence(chunks)
             embedded_chunks = self.embedder.embed_chunks(chunks)
             self.vector_index.index_document(asset, embedded_chunks)
+            if graph_evidence is not None and self.graph_store is not None:
+                self.graph_store.upsert_document_evidence(graph_evidence)
 
             # 在同一受控流程里完成 dataset 绑定
             if dataset_id is not None and self.dataset_store is not None:
@@ -422,6 +433,10 @@ class IngestionPipeline:
             chunk_cache_key = self._chunk_cache_key(normalized_document)
             chunks = self._cached_chunk(chunk_cache_key, normalized_document)
 
+            # Step: graph evidence
+            snapshot = self._update_step(snapshot, STEP_GRAPH_EVIDENCE)
+            graph_evidence = self._extract_graph_evidence(chunks)
+
             # Step: embedding
             snapshot = self._update_step(snapshot, STEP_EMBEDDING)
             embedded_chunks = self.embedder.embed_chunks(chunks)
@@ -429,6 +444,8 @@ class IngestionPipeline:
             # Step: indexing (never cached)
             snapshot = self._update_step(snapshot, STEP_INDEXING)
             self.vector_index.index_document(asset, embedded_chunks)
+            if graph_evidence is not None and self.graph_store is not None:
+                self.graph_store.upsert_document_evidence(graph_evidence)
 
             # Step: binding
             ds_id = snapshot.dataset_id
@@ -542,6 +559,13 @@ class IngestionPipeline:
             storage_path=Path(""),
             size_bytes=0,
         )
+
+    def _extract_graph_evidence(self, chunks: list[Chunk]) -> GraphEvidenceBatch | None:
+        if not chunks:
+            return None
+        if self.evidence_extractor is None or self.graph_store is None:
+            return None
+        return self.evidence_extractor.extract(chunks)
 
     def _update_step(
         self,
@@ -749,6 +773,12 @@ class IngestionPipeline:
             "document_store",
             self.document_store.delete_document,
         )
+        if self.graph_store is not None:
+            self._rollback_step(
+                document_id,
+                "graph_evidence",
+                self.graph_store.delete_document,
+            )
         self._rollback_binding(document_id)
 
     def _rollback_binding(self, document_id: str) -> None:
