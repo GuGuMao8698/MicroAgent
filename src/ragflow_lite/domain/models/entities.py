@@ -159,6 +159,34 @@ class GraphEvidenceWriteResult:
     relation_count: int
 
 
+@dataclass(slots=True)
+class GroundedQuery:
+    query: str
+    answer_type_keywords: list[str]
+    entities_from_query: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class TopologyPath:
+    path_id: str
+    document_id: str
+    entity_ids: list[str]
+    relation_ids: list[str]
+    source_chunk_ids: list[str]
+    score: float
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class TopologyRetrievalResult:
+    query: str
+    grounded_query: GroundedQuery
+    chunks: list[RetrievedChunk]
+    paths: list[TopologyPath]
+    metadata: Metadata = field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Async ingestion task snapshot
 # ---------------------------------------------------------------------------
