@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ragflow_lite.domain.models.entities import (
+from ragflow_lite.domain.models import (
     EvidenceItem,
     EvidencePackage,
     EvidenceProvenance,
@@ -12,14 +12,12 @@ class EvidencePackageBuilder:
     def build(self, result: TopologyRetrievalResult) -> EvidencePackage:
         # Path refs to chunks not in result.chunks are silently ignored;
         # TopologyRetrievalResult guarantees all source_chunk_ids are present.
-        path_ids_by_chunk: dict[str, set[str]] = {}
-        relation_ids_by_chunk: dict[str, set[str]] = {}
+        path_ids_by_chunk: dict[str, list[str]] = {}
+        relation_ids_by_chunk: dict[str, list[str]] = {}
         for path in result.paths:
             for chunk_id in path.source_chunk_ids:
-                path_ids_by_chunk.setdefault(chunk_id, set()).add(path.path_id)
-                relation_ids_by_chunk.setdefault(chunk_id, set()).update(
-                    path.relation_ids
-                )
+                path_ids_by_chunk.setdefault(chunk_id, []).append(path.path_id)
+                relation_ids_by_chunk.setdefault(chunk_id, []).extend(path.relation_ids)
 
         seen: dict[str, int] = {}
         items: list[EvidenceItem] = []
@@ -31,12 +29,14 @@ class EvidencePackageBuilder:
                 if "baseline_retrieval" not in existing.retained_reasons:
                     existing.retained_reasons.append("baseline_retrieval")
                 if cid in path_ids_by_chunk:
-                    existing.topology_path_ids = list(
-                        set(existing.topology_path_ids) | path_ids_by_chunk[cid]
+                    existing.topology_path_ids = _dedupe(
+                        [*existing.topology_path_ids, *path_ids_by_chunk[cid]]
                     )
-                    existing.topology_relation_ids = list(
-                        set(existing.topology_relation_ids)
-                        | relation_ids_by_chunk.get(cid, set())
+                    existing.topology_relation_ids = _dedupe(
+                        [
+                            *existing.topology_relation_ids,
+                            *relation_ids_by_chunk.get(cid, []),
+                        ]
                     )
                 continue
 
@@ -62,8 +62,8 @@ class EvidencePackageBuilder:
             relation_ids: list[str] = []
             if cid in path_ids_by_chunk:
                 reasons.append("topology_path")
-                path_ids = list(path_ids_by_chunk[cid])
-                relation_ids = list(relation_ids_by_chunk.get(cid, set()))
+                path_ids = _dedupe(path_ids_by_chunk[cid])
+                relation_ids = _dedupe(relation_ids_by_chunk.get(cid, []))
             else:
                 reasons.append("baseline_retrieval")
 
@@ -92,3 +92,7 @@ class EvidencePackageBuilder:
             items=items,
             metadata=metadata,
         )
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))

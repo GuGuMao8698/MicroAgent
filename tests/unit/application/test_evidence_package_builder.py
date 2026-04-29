@@ -142,8 +142,8 @@ class TestDeduplication:
         package = EvidencePackageBuilder().build(result)
 
         item = package.items[0]
-        assert set(item.topology_path_ids) == {"p1", "p2"}
-        assert set(item.topology_relation_ids) == {"r1", "r2", "r3"}
+        assert item.topology_path_ids == ["p1", "p2"]
+        assert item.topology_relation_ids == ["r1", "r2", "r3"]
 
 
 class TestBaselineOnly:
@@ -175,8 +175,8 @@ class TestTopologyPathMapping:
 
         item1 = package.items[0]
         assert "topology_path" in item1.retained_reasons
-        assert set(item1.topology_path_ids) == {"p1", "p2"}
-        assert set(item1.topology_relation_ids) == {"r1", "r2"}
+        assert item1.topology_path_ids == ["p1", "p2"]
+        assert item1.topology_relation_ids == ["r1", "r2"]
 
         item2 = package.items[1]
         assert "topology_path" not in item2.retained_reasons
