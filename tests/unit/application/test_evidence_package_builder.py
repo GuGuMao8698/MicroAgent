@@ -3,7 +3,6 @@ from __future__ import annotations
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
-
 from ragflow_lite.domain.models import (
     EvidencePackage,
     GroundedQuery,
@@ -183,7 +182,7 @@ class TestTopologyPathMapping:
         assert "topology_path" not in item2.retained_reasons
         assert "baseline_retrieval" in item2.retained_reasons
 
-    def test_chunk_in_path_and_also_in_chunks_gets_both_reasons(self):
+    def test_chunk_in_path_does_not_get_baseline_reason(self):
         chunks = [_chunk("c1", text="overlap")]
         paths = [_path("p1", source_chunk_ids=["c1"])]
         result = _result(chunks, paths)

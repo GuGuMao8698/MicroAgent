@@ -10,6 +10,8 @@ from ragflow_lite.domain.models.entities import (
 
 class EvidencePackageBuilder:
     def build(self, result: TopologyRetrievalResult) -> EvidencePackage:
+        # Path refs to chunks not in result.chunks are silently ignored;
+        # TopologyRetrievalResult guarantees all source_chunk_ids are present.
         path_ids_by_chunk: dict[str, set[str]] = {}
         relation_ids_by_chunk: dict[str, set[str]] = {}
         for path in result.paths:
