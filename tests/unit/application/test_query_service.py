@@ -147,3 +147,30 @@ def test_query_logs_trace_id_request_id_and_error_type(
     assert failed_record.outcome == "failed"
     assert failed_record.error_type == "ProcessingError"
     assert "secret query" not in str(failed_record.__dict__)
+
+
+def test_query_preserves_minirag_topology_context_metadata() -> None:
+    chunk = RetrievedChunk(
+        chunk_id="chunk_doc1_0",
+        document_id="doc1",
+        text="MiniRAG topology context.",
+        score=0.9,
+        metadata={
+            "retrieval_mode": "minirag_topology",
+            "grounded_entities": ["MiniRAG"],
+            "topology_path_ids": ["path_1"],
+        },
+    )
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeRetriever(results=[chunk]),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG work?", top_k=3)
+
+    assert result.contexts[0].metadata["retrieval_mode"] == "minirag_topology"
+    assert answerer.last_request == AnswerRequest(
+        query="How does MiniRAG work?",
+        contexts=[chunk],
+    )
