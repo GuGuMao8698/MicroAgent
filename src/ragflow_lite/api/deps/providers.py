@@ -32,7 +32,9 @@ from ragflow_lite.infrastructure import (
     InMemoryStageCache,
     InMemoryTaskStore,
     LocalDocumentStore,
+    LocalJsonGraphEvidenceStore,
     OpenAIResponsesAnswerer,
+    OpenAIResponsesEvidenceExtractor,
     RecursiveCharacterChunker,
 )
 
@@ -105,6 +107,16 @@ def build_services(settings: Settings) -> AppServices:
         verbosity=openai_runtime_config.verbosity,
         render_citations=openai_runtime_config.render_citations,
     )
+    graph_store = LocalJsonGraphEvidenceStore(
+        settings.local_index_dir / "graph_evidence"
+    )
+    evidence_extractor = OpenAIResponsesEvidenceExtractor(
+        api_key=openai_runtime_config.api_key,
+        base_url=openai_runtime_config.base_url,
+        model=openai_runtime_config.model,
+        reasoning_effort=openai_runtime_config.reasoning_effort,
+        store=openai_runtime_config.store,
+    )
     retriever = _build_retriever(embedder, vector_index)
 
     task_store = InMemoryTaskStore()
@@ -122,6 +134,8 @@ def build_services(settings: Settings) -> AppServices:
         task_store=task_store,
         stage_cache=stage_cache,
         runner=runner,
+        evidence_extractor=evidence_extractor,
+        graph_store=graph_store,
     )
 
     runner.set_handler(pipeline.process_task)

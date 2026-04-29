@@ -7,6 +7,10 @@ from ragflow_lite.infrastructure.chunkers.recursive_character import (
 from ragflow_lite.infrastructure.embedders.ark_embedder import (
     ArkMultimodalTextEmbedder,
 )
+from ragflow_lite.infrastructure.evidence import (
+    LocalJsonGraphEvidenceStore,
+    OpenAIResponsesEvidenceExtractor,
+)
 from ragflow_lite.infrastructure.ingestion.memory import (
     BackgroundTaskRunner,
     InlineTaskRunner,
@@ -36,6 +40,8 @@ __all__ = [
     "InMemoryStageCache",
     "InMemoryTaskStore",
     "LocalDocumentStore",
+    "LocalJsonGraphEvidenceStore",
     "LocalJsonVectorIndex",
     "OpenAIResponsesAnswerer",
+    "OpenAIResponsesEvidenceExtractor",
 ]
