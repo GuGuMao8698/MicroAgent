@@ -195,6 +195,39 @@ class InfinityDenseVectorIndex:
         results.sort(key=lambda c: c.score, reverse=True)
         return results[:top_k]
 
+    def get_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
+        """按 chunk_id 批量查找 chunk，不存在的 ID 静默跳过。"""
+        if not chunk_ids:
+            return []
+        unique_chunk_ids = list(dict.fromkeys(chunk_ids))
+        escaped_ids = [chunk_id.replace("'", "''") for chunk_id in unique_chunk_ids]
+        filter_expr = " OR ".join(
+            f"chunk_id = '{chunk_id}'" for chunk_id in escaped_ids
+        )
+        chunk_table = self._db.get_table(self._chunk_table)
+        rows = self._table_rows(
+            chunk_table,
+            self._chunk_output_columns("_score", include_embedding=False),
+            filter_expr=filter_expr,
+        )
+        chunks_by_id: dict[str, RetrievedChunk] = {}
+        for row in rows:
+            metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+            metadata["filename"] = row.get("filename")
+            metadata["file_type"] = row.get("file_type")
+            chunks_by_id[row["chunk_id"]] = RetrievedChunk(
+                chunk_id=row["chunk_id"],
+                document_id=row["document_id"],
+                text=row["text"],
+                score=0.0,
+                metadata=metadata,
+            )
+        return [
+            chunks_by_id[chunk_id]
+            for chunk_id in unique_chunk_ids
+            if chunk_id in chunks_by_id
+        ]
+
     # ------------------------------------------------------------------
     # 表管理
     # ------------------------------------------------------------------

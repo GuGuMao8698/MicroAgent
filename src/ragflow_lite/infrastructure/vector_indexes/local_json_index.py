@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 class LocalJsonVectorIndex:
     """使用 JSON 文件保存文档级向量索引。"""
 
-    def __init__(self, index_dir: Path, embedding_signature: EmbeddingSignature) -> None:
+    def __init__(
+        self, index_dir: Path, embedding_signature: EmbeddingSignature
+    ) -> None:
         self.index_dir = index_dir
         self.embedding_signature = dict(embedding_signature)
 
@@ -119,6 +121,37 @@ class LocalJsonVectorIndex:
         # 先聚合所有文档的候选片段，再按全局分数截断 top_k。
         scored_chunks.sort(key=lambda chunk: chunk.score, reverse=True)
         return scored_chunks[:top_k]
+
+    def get_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
+        """按 chunk_id 批量查找 chunk，不存在的 ID 静默跳过。"""
+        requested = set(chunk_ids)
+        if not requested:
+            return []
+
+        chunks_by_id: dict[str, RetrievedChunk] = {}
+        for path in sorted(self.index_dir.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self._validate_embedding_signature(path, data.get("embedding_signature"))
+            document = data.get("document", {})
+            for chunk_data in data.get("chunks", []):
+                chunk_id = chunk_data["chunk_id"]
+                if chunk_id not in requested:
+                    continue
+                chunks_by_id[chunk_id] = RetrievedChunk(
+                    chunk_id=chunk_id,
+                    document_id=chunk_data["document_id"],
+                    text=chunk_data["text"],
+                    score=0.0,
+                    metadata={
+                        **chunk_data.get("metadata", {}),
+                        "filename": document.get("filename"),
+                        "file_type": document.get("file_type"),
+                    },
+                )
+
+        return [
+            chunks_by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in chunks_by_id
+        ]
 
     def _path_for(self, document_id: str) -> Path:
         """返回某个文档对应的索引文件路径。"""
