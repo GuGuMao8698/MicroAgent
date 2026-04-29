@@ -10,6 +10,9 @@
 - 当前 embedding 维度契约是 `2048`。
 - 外部回答器实现放在 `infrastructure/answerers`，当前默认回答器是 OpenAI Responses answerer。
 - 检索器实现放在 `infrastructure/retrievers`，当前生产 retriever 是 `InfinityHybridRetriever`；通过 `embed_query(raw query)` + sparse-query 分析 -> `search_hybrid()` 调用 Infinity 原生 `weighted_sum` fusion，不承担 rerank 或 citation 组装。
+- query grounding 实现放在 `infrastructure/retrievers/openai_query_grounder.py`（`OpenAIResponsesQueryGrounder`），通过 OpenAI Responses 兼容客户端产出 `answer_type_keywords` 和 `entities_from_query`。
+- `LocalJsonVectorIndex` 和 `InfinityDenseVectorIndex` 均已实现 `get_chunks(chunk_ids)` 方法，供拓扑检索回收 chunk 文本。
+- `infrastructure/evidence` 承接 ingestion 侧的图证据提取（`OpenAIResponsesEvidenceExtractor`）和持久化（`LocalJsonGraphEvidenceStore`）。
 - sparse-query 分析只服务全文分支，是 retriever 内部实现细节；dense embedding 仍使用原始 query。
 - hybrid sparse 匹配使用 `filename` 与 `text` 两个字段；诊断型 `search_text()` 保持单字段 `text` 语义。
 - hybrid 检索内部可以扩大候选后再裁回 `top_k`，但这些调优仍是内部策略；不要把已收口的 V2 检索细节提升为公共配置，也不要引入 rerank、tag API 或额外主路径。
