@@ -17,6 +17,7 @@ from ragflow_lite.application import (
     QueryService,
     normalize_text,
 )
+from ragflow_lite.application.services import MiniRAGTopologyRetriever
 from ragflow_lite.config import Settings
 from ragflow_lite.domain.ports.interfaces import (
     IngestionStageCache,
@@ -37,6 +38,7 @@ from ragflow_lite.infrastructure import (
     OpenAIResponsesEvidenceExtractor,
     RecursiveCharacterChunker,
 )
+from ragflow_lite.infrastructure.retrievers import OpenAIResponsesQueryGrounder
 
 
 @dataclass(slots=True)
@@ -117,7 +119,20 @@ def build_services(settings: Settings) -> AppServices:
         reasoning_effort=openai_runtime_config.reasoning_effort,
         store=openai_runtime_config.store,
     )
-    retriever = _build_retriever(embedder, vector_index)
+    base_retriever = _build_retriever(embedder, vector_index)
+    query_grounder = OpenAIResponsesQueryGrounder(
+        api_key=openai_runtime_config.api_key,
+        base_url=openai_runtime_config.base_url,
+        model=openai_runtime_config.model,
+        reasoning_effort=openai_runtime_config.reasoning_effort,
+        store=openai_runtime_config.store,
+    )
+    retriever = MiniRAGTopologyRetriever(
+        base_retriever=base_retriever,
+        query_grounder=query_grounder,
+        graph_store=graph_store,
+        chunk_lookup=vector_index,
+    )
 
     task_store = InMemoryTaskStore()
     stage_cache = InMemoryStageCache()

@@ -6,6 +6,7 @@ import pytest
 
 from ragflow_lite.api.deps.providers import build_services
 from ragflow_lite.app import create_app
+from ragflow_lite.application.services import MiniRAGTopologyRetriever
 from ragflow_lite.config import (
     ArkEmbeddingRuntimeConfig,
     OpenAIAnsweringRuntimeConfig,
@@ -22,6 +23,7 @@ from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
+from ragflow_lite.infrastructure.retrievers import OpenAIResponsesQueryGrounder
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -152,10 +154,15 @@ def test_build_services_uses_infinity_hybrid_retriever(
 ) -> None:
     services = build_services(_build_settings(tmp_path))
 
-    assert isinstance(services.retriever, InfinityHybridRetriever)
+    assert isinstance(services.query_service.retriever, MiniRAGTopologyRetriever)
+    assert isinstance(
+        services.query_service.retriever.base_retriever, InfinityHybridRetriever
+    )
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
-    assert services.ingestion_pipeline.embedder is services.retriever.embedder
-    assert services.query_service.retriever is services.retriever
+    assert (
+        services.ingestion_pipeline.embedder
+        is services.query_service.retriever.base_retriever.embedder
+    )
     assert isinstance(
         services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
     )
@@ -196,11 +203,29 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "OpenAIResponsesAnswerer",
         "OpenAIResponsesEvidenceExtractor",
     ]
-    assert retrievers_module.__all__ == ["InfinityHybridRetriever"]
+    assert retrievers_module.__all__ == [
+        "InfinityHybridRetriever",
+        "OpenAIResponsesQueryGrounder",
+    ]
     assert not hasattr(infrastructure, "VectorRetriever")
     assert not hasattr(infrastructure, "InfinityFullTextRetriever")
     assert not hasattr(retrievers_module, "VectorRetriever")
     assert not hasattr(retrievers_module, "InfinityFullTextRetriever")
+
+
+def test_build_services_wires_minirag_topology_retriever(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+
+    services = build_services(settings)
+
+    assert isinstance(services.query_service.retriever, MiniRAGTopologyRetriever)
+    assert isinstance(
+        services.query_service.retriever.query_grounder,
+        OpenAIResponsesQueryGrounder,
+    )
+    assert services.query_service.retriever.graph_store is (
+        services.ingestion_pipeline.graph_store
+    )
 
 
 def test_build_services_embedder_dimensions_match_settings(
