@@ -1331,7 +1331,7 @@ class _FakeEvidenceExtractor:
 
     def extract(self, chunks: list[Chunk]) -> GraphEvidenceBatch:
         self.calls += 1
-        document_id = chunks[0].document_id if chunks else "doc_empty"
+        document_id = chunks[0].document_id
         source_chunk_ids = [chunk.chunk_id for chunk in chunks]
         entity = EntityEvidence(
             entity_id="entity_minirag",
