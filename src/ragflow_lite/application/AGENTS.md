@@ -4,7 +4,7 @@
 这个目录负责业务编排层，承接 ingestion/query 两条主流程和跨模块协调。
 
 ## Do Here
-- 在这里组织 `IngestionPipeline`、`QueryService`、`DocumentService`、`DatasetService`、`MiniRAGTopologyRetriever`、`Retriever` 和文本归一化。
+- 在这里组织 `IngestionPipeline`、`QueryService`、`DocumentService`、`DatasetService`、`MiniRAGTopologyRetriever`、`EvidencePackageBuilder`、`Retriever` 和文本归一化。
 - 通过抽象 port 协调 parser、chunker、embedder、index、retriever、answerer、document catalog、dataset store。
 - `IngestionPipeline` 负责把 parser 提供的逐页文本对齐到归一化后的 `page_spans`，并透传 / 持久化 `parser_strategy` metadata；不在这里做 citation 格式化或 parser 选择。
 - `DocumentService` 透传 `DocumentCatalog` 的 list/get 语义，支持按 `dataset_id` 过滤和文档重绑/解绑；过滤时先验证 dataset 存在。
