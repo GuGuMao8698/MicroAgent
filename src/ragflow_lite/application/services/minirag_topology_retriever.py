@@ -43,28 +43,25 @@ class MiniRAGTopologyRetriever:
         return self.retrieve_context(query, top_k).chunks
 
     def retrieve_context(self, query: str, top_k: int) -> TopologyRetrievalResult:
+        self._query = query
         candidate_k = max(top_k, top_k * self.candidate_multiplier)
         baseline_chunks = self.base_retriever.retrieve(query, candidate_k)
-        grounded_query = self.query_grounder.ground(query)
+        self._grounded_query = self.query_grounder.ground(query)
 
-        if not baseline_chunks or _is_empty_grounding(grounded_query):
-            return TopologyRetrievalResult(
-                query=query,
-                grounded_query=grounded_query,
+        if not baseline_chunks or _is_empty_grounding(self._grounded_query):
+            return self._make_result(
                 chunks=baseline_chunks[:top_k],
                 paths=[],
-                metadata={"candidate_count": len(baseline_chunks)},
+                candidate_count=len(baseline_chunks),
             )
 
         batches = self._load_candidate_batches(baseline_chunks)
-        paths = self._build_paths(batches, grounded_query)
+        paths = self._build_paths(batches, self._grounded_query)
         if not paths:
-            return TopologyRetrievalResult(
-                query=query,
-                grounded_query=grounded_query,
+            return self._make_result(
                 chunks=baseline_chunks[:top_k],
                 paths=[],
-                metadata={"candidate_count": len(baseline_chunks)},
+                candidate_count=len(baseline_chunks),
             )
 
         recovered_chunks = self.chunk_lookup.get_chunks(
@@ -74,15 +71,28 @@ class MiniRAGTopologyRetriever:
             recovered_chunks=recovered_chunks,
             baseline_chunks=baseline_chunks,
             paths=paths,
-            grounded_query=grounded_query,
+            grounded_query=self._grounded_query,
             top_k=top_k,
         )
-        return TopologyRetrievalResult(
-            query=query,
-            grounded_query=grounded_query,
+        return self._make_result(
             chunks=chunks,
             paths=paths,
-            metadata={"candidate_count": len(baseline_chunks)},
+            candidate_count=len(baseline_chunks),
+        )
+
+    def _make_result(
+        self,
+        *,
+        chunks: list[RetrievedChunk],
+        paths: list[TopologyPath],
+        candidate_count: int,
+    ) -> TopologyRetrievalResult:
+        return TopologyRetrievalResult(
+            query=self._query,
+            grounded_query=self._grounded_query,
+            chunks=chunks,
+            paths=paths,
+            metadata={"candidate_count": candidate_count},
         )
 
     def _load_candidate_batches(
@@ -207,12 +217,16 @@ def _expand_paths(
                 source_chunk_ids = _dedupe(
                     [
                         *relation.source_chunk_ids,
-                        *entity_by_id.get(
-                            relation.source_entity_id, _empty_entity()
-                        ).source_chunk_ids,
-                        *entity_by_id.get(
-                            relation.target_entity_id, _empty_entity()
-                        ).source_chunk_ids,
+                        *(
+                            entity_by_id[relation.source_entity_id].source_chunk_ids
+                            if relation.source_entity_id in entity_by_id
+                            else []
+                        ),
+                        *(
+                            entity_by_id[relation.target_entity_id].source_chunk_ids
+                            if relation.target_entity_id in entity_by_id
+                            else []
+                        ),
                     ]
                 )
                 paths.append(
@@ -303,14 +317,3 @@ def _normalize(value: str) -> str:
 def _path_id(document_id: str, relation_id: str) -> str:
     digest = hashlib.sha256(f"{document_id}:{relation_id}".encode()).hexdigest()
     return f"path_{digest[:16]}"
-
-
-def _empty_entity() -> EntityEvidence:
-    return EntityEvidence(
-        entity_id="",
-        document_id="",
-        name="",
-        entity_type="",
-        description="",
-        source_chunk_ids=[],
-    )
