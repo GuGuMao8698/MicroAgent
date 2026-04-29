@@ -168,6 +168,38 @@ class GroundedQuery:
 
 
 @dataclass(slots=True)
+class EvidenceProvenance:
+    document_id: str
+    filename: str | None = None
+    file_type: str | None = None
+    chunk_index: int | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class EvidenceItem:
+    canonical_chunk_id: str
+    text: str
+    score: float
+    order: int
+    provenance: EvidenceProvenance
+    retained_reasons: list[str] = field(default_factory=list)
+    grounded_entities: list[str] = field(default_factory=list)
+    answer_type_keywords: list[str] = field(default_factory=list)
+    topology_path_ids: list[str] = field(default_factory=list)
+    topology_relation_ids: list[str] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class EvidencePackage:
+    query: str
+    grounded_query: GroundedQuery
+    items: list[EvidenceItem] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class TopologyPath:
     path_id: str
     document_id: str
