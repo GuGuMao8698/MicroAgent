@@ -19,9 +19,9 @@ from eval_support import (  # noqa: E402
 )
 
 _JUDGE_MODEL_ENV = {
-    "ARK_API_KEY": "judge-real",
-    "DEEPEVAL_MODEL": "ep-20260423004926-v99zw",
-    "DEEPEVAL_BASE_URL": "https://ark.cn-beijing.volces.com/api/v3",
+    "DEEPSEEK_API_KEY": "judge-real",
+    "DEEPEVAL_MODEL": "deepseek-v4-flash",
+    "DEEPEVAL_BASE_URL": "https://api.deepseek.com",
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
@@ -211,6 +211,6 @@ def test_markdown_fixture_validation_rejects_non_markdown_cases() -> None:
 def test_build_deepeval_judge_model_uses_explicit_openai_compatible_endpoint() -> None:
     judge_model = _build_judge_model()
 
-    assert judge_model.name == "ep-20260423004926-v99zw"
-    assert judge_model.base_url == "https://ark.cn-beijing.volces.com/api/v3"
-    assert judge_model.generation_kwargs == {"reasoning_effort": "medium"}
+    assert judge_model.name == "deepseek-v4-flash"
+    assert judge_model.base_url == "https://api.deepseek.com"
+    assert judge_model.generation_kwargs == {"reasoning_effort": "high"}

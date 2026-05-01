@@ -14,10 +14,10 @@ def test_live_infinity_disabled_without_marker_or_option() -> None:
 
 
 def test_validate_deepeval_env_rejects_placeholder_values() -> None:
-    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
         validate_deepeval_env(
             {
-                "OPENAI_API_KEY": "test-openai-api-key",
+                "DEEPSEEK_API_KEY": "test-deepseek-api-key",
                 "ARK_API_KEY": "ark-real",
                 "ARK_EMBEDDING_MODEL": "ep-real",
             }

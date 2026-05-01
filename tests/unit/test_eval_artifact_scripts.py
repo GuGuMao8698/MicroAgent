@@ -14,7 +14,7 @@ pytest.importorskip("deepeval")
 from deepeval.dataset import Golden  # noqa: E402
 from deepeval.metrics.utils import initialize_model  # noqa: E402
 from evals.cleanup_infinity import select_eval_cleanup_tables  # noqa: E402
-from evals.eval_models import ArkResponsesDeepEvalModel  # noqa: E402
+from evals.eval_models import DeepSeekChatDeepEvalModel  # noqa: E402
 from evals.generate_goldens import (
     DEFAULT_GOLDENS_PATH,
     ArkContextConstructionEmbeddingModel,
@@ -381,9 +381,9 @@ def test_generate_goldens_artifact_sanitizes_staged_doc_name_for_context_constru
 def test_build_context_construction_config_wraps_ark_embedder() -> None:
     critic_model = build_synthesizer_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
     config = build_context_construction_config(
         api_key="ark-key",
@@ -396,7 +396,7 @@ def test_build_context_construction_config_wraps_ark_embedder() -> None:
     assert config.embedder.name == "ep-embedding"
     assert config.embedder.get_model_name() == "ep-embedding (Ark)"
     assert config.critic_model is critic_model
-    assert config.critic_model.get_model_name() == "ep-20260423004926-v99zw"
+    assert config.critic_model.get_model_name() == "deepseek-v4-flash"
 
 
 def test_build_context_construction_config_keeps_native_gpt_model_for_deepeval() -> (
@@ -404,9 +404,9 @@ def test_build_context_construction_config_keeps_native_gpt_model_for_deepeval()
 ):
     critic_model = build_synthesizer_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
     config = build_context_construction_config(
@@ -426,28 +426,28 @@ def test_build_synthesizer_model_passes_reasoning_effort_generation_kwargs(
 ) -> None:
     captured: dict[str, object] = {}
 
-    class FakeArkResponsesDeepEvalModel:
+    class FakeDeepSeekChatDeepEvalModel:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "evals.generate_goldens.ArkResponsesDeepEvalModel",
-        FakeArkResponsesDeepEvalModel,
+        "evals.generate_goldens.DeepSeekChatDeepEvalModel",
+        FakeDeepSeekChatDeepEvalModel,
     )
 
     synthesizer_model = build_synthesizer_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
-    assert synthesizer_model.__class__ is FakeArkResponsesDeepEvalModel
+    assert synthesizer_model.__class__ is FakeDeepSeekChatDeepEvalModel
     assert captured == {
-        "model": "ep-20260423004926-v99zw",
+        "model": "deepseek-v4-flash",
         "api_key": "test-key",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "reasoning_effort": "medium",
+        "base_url": "https://api.deepseek.com",
+        "reasoning_effort": "high",
     }
 
 
@@ -459,7 +459,7 @@ def test_generate_goldens_artifact_passes_native_synthesizer_model_through(
     document_path.write_text("# doc\n", encoding="utf-8")
     captured: dict[str, object] = {}
 
-    class FakeArkResponsesDeepEvalModel:
+    class FakeDeepSeekChatDeepEvalModel:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
@@ -490,16 +490,16 @@ def test_generate_goldens_artifact_passes_native_synthesizer_model_through(
             ]
 
     monkeypatch.setattr(
-        "evals.generate_goldens.ArkResponsesDeepEvalModel",
-        FakeArkResponsesDeepEvalModel,
+        "evals.generate_goldens.DeepSeekChatDeepEvalModel",
+        FakeDeepSeekChatDeepEvalModel,
     )
     monkeypatch.setattr("evals.generate_goldens.Synthesizer", FakeSynthesizer)
 
     synthesizer_model = build_synthesizer_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
     generate_goldens_artifact(
@@ -511,86 +511,201 @@ def test_generate_goldens_artifact_passes_native_synthesizer_model_through(
     assert captured["model"] is synthesizer_model
 
 
-def test_ark_responses_deepeval_model_uses_responses_parse_for_schema(
+def test_deepseek_deepeval_model_sends_chat_completion_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
 
-    class ParsedResponse(BaseModel):
-        answer: str
+    class FakeMessage:
+        content = "plain response"
 
-    class FakeResponses:
-        def parse(self, **kwargs):
-            captured["parse_kwargs"] = kwargs
-            return type(
-                "Response",
-                (),
-                {"output_parsed": ParsedResponse(answer="structured")},
-            )()
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["create_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeChatCompletions()
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             captured["openai_kwargs"] = kwargs
-            self.responses = FakeResponses()
-
-    class FakeAsyncOpenAI:
-        def __init__(self, **kwargs):
-            captured["async_openai_kwargs"] = kwargs
-            self.responses = object()
+            self.chat = FakeChat()
 
     monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
-    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeOpenAI)
 
-    model = ArkResponsesDeepEvalModel(
-        api_key="ark-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+    model = DeepSeekChatDeepEvalModel(
+        api_key="deepseek-key",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
-    result = model.generate("hello", schema=ParsedResponse)
+    result = model.generate("hello")
 
-    assert result == ParsedResponse(answer="structured")
+    assert result == "plain response"
     assert captured["openai_kwargs"] == {
-        "api_key": "ark-key",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-    }
-    assert captured["parse_kwargs"] == {
-        "model": "ep-20260423004926-v99zw",
-        "input": "hello",
-        "reasoning": {"effort": "medium"},
-        "extra_body": {"thinking": {"type": "enabled"}},
+        "api_key": "deepseek-key",
+        "base_url": "https://api.deepseek.com",
         "timeout": 300.0,
-        "text_format": ParsedResponse,
+    }
+    assert captured["create_kwargs"] == {
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": "high",
+        "extra_body": {"thinking": {"type": "enabled"}},
     }
 
 
-def test_ark_responses_deepeval_model_async_create_returns_output_text(
+def test_deepseek_deepeval_model_validates_schema_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeResponses:
-        async def create(self, **kwargs):
-            return type("Response", (), {"output_text": "plain"})()
+    captured: dict[str, object] = {}
+
+    class Result(BaseModel):
+        answer: str
+
+    class FakeMessage:
+        content = '{"answer": "ok"}'
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["create_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeChatCompletions()
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
-            self.responses = object()
-
-    class FakeAsyncOpenAI:
-        def __init__(self, **kwargs):
-            self.responses = FakeResponses()
+            self.chat = FakeChat()
 
     monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
-    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeOpenAI)
 
-    model = ArkResponsesDeepEvalModel(
-        api_key="ark-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+    model = DeepSeekChatDeepEvalModel(
+        api_key="deepseek-key",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
-    assert asyncio.run(model.a_generate("hello")) == "plain"
+    result = model.generate("Score the answer.", schema=Result)
+
+    assert result == Result(answer="ok")
+    request = captured["create_kwargs"]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["max_tokens"] == 2048
+    prompt = request["messages"][0]["content"]
+    assert "Score the answer." in prompt
+    assert "Return only one JSON object" in prompt
+    assert "json" in prompt.lower()
+    assert '"answer"' in prompt
+
+
+def test_deepseek_deepeval_plain_generation_does_not_request_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeMessage:
+        content = "plain response"
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeChatCompletions:
+        def create(self, **kwargs):
+            captured["create_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeChatCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeOpenAI)
+
+    model = DeepSeekChatDeepEvalModel(
+        api_key="deepseek-key",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
+    )
+
+    assert model.generate("hello") == "plain response"
+    assert "response_format" not in captured["create_kwargs"]
+    assert "max_tokens" not in captured["create_kwargs"]
+
+
+def test_deepseek_deepeval_model_validates_async_schema_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Result(BaseModel):
+        answer: str
+
+    class FakeMessage:
+        content = '{"answer": "async ok"}'
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeChatCompletions:
+        async def create(self, **kwargs):
+            captured["create_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeChatCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr("evals.eval_models.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("evals.eval_models.AsyncOpenAI", FakeOpenAI)
+
+    model = DeepSeekChatDeepEvalModel(
+        api_key="deepseek-key",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
+    )
+
+    result = asyncio.run(model.a_generate("Score async.", schema=Result))
+
+    assert result == Result(answer="async ok")
+    request = captured["create_kwargs"]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["max_tokens"] == 2048
+    prompt = request["messages"][0]["content"]
+    assert "Score async." in prompt
+    assert "Return only one JSON object" in prompt
+    assert '"answer"' in prompt
 
 
 def test_emit_context_construction_debug_summary_logs_effective_models(
@@ -598,9 +713,9 @@ def test_emit_context_construction_debug_summary_logs_effective_models(
 ) -> None:
     synthesizer_model = build_synthesizer_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
     context_config = build_context_construction_config(
         api_key="ark-key",
@@ -618,8 +733,8 @@ def test_emit_context_construction_debug_summary_logs_effective_models(
             context_construction_config=context_config,
         )
 
-    assert "synthesizer_model=ep-20260423004926-v99zw" in caplog.text
-    assert "context_critic_model=ep-20260423004926-v99zw" in caplog.text
+    assert "synthesizer_model=deepseek-v4-flash" in caplog.text
+    assert "context_critic_model=deepseek-v4-flash" in caplog.text
     assert "context_embedder=ep-embedding (Ark)" in caplog.text
 
 
@@ -812,32 +927,32 @@ def test_build_eval_model_uses_explicit_openai_compatible_endpoint(
 ) -> None:
     captured: dict[str, object] = {}
 
-    class FakeArkResponsesDeepEvalModel:
+    class FakeDeepSeekChatDeepEvalModel:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "evals.optimize_prompt.ArkResponsesDeepEvalModel",
-        FakeArkResponsesDeepEvalModel,
+        "evals.optimize_prompt.DeepSeekChatDeepEvalModel",
+        FakeDeepSeekChatDeepEvalModel,
     )
 
     model = build_eval_model(
         api_key="test-key",
-        model="ep-20260423004926-v99zw",
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        reasoning_effort="medium",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="high",
     )
 
-    assert model.__class__ is FakeArkResponsesDeepEvalModel
+    assert model.__class__ is FakeDeepSeekChatDeepEvalModel
     assert captured == {
-        "model": "ep-20260423004926-v99zw",
+        "model": "deepseek-v4-flash",
         "api_key": "test-key",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "reasoning_effort": "medium",
+        "base_url": "https://api.deepseek.com",
+        "reasoning_effort": "high",
     }
 
 
-def test_main_defaults_optimizer_to_doubao_medium_on_ark(
+def test_main_defaults_optimizer_to_deepseek_high(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -862,7 +977,7 @@ def test_main_defaults_optimizer_to_doubao_medium_on_ark(
             captured["goldens"] = goldens
             return type("OptimizedPrompt", (), {"text_template": "optimized"})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -918,13 +1033,13 @@ def test_main_defaults_optimizer_to_doubao_medium_on_ark(
         "api_key": "test-key",
         "model": DEFAULT_MODEL,
         "base_url": DEFAULT_BASE_URL,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "high",
     }
     assert calls["optimizer_model_kwargs"] == {
         "api_key": "test-key",
-        "model": "ep-20260423004926-v99zw",
+        "model": "deepseek-v4-flash",
         "base_url": DEFAULT_BASE_URL,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "high",
     }
     assert calls["build_optimizer_kwargs"] == {
         "judge_model": judge_model,
@@ -935,9 +1050,7 @@ def test_main_defaults_optimizer_to_doubao_medium_on_ark(
         "api_key": "test-key",
         "base_url": DEFAULT_BASE_URL,
         "model": DEFAULT_MODEL,
-        "reasoning_effort": "medium",
-        "verbosity": "medium",
-        "store": False,
+        "reasoning_effort": "high",
     }
     assert calls["build_prompt_kwargs"] == {
         "text_template": "packaged-plain-template",
@@ -946,7 +1059,7 @@ def test_main_defaults_optimizer_to_doubao_medium_on_ark(
     assert output_path.read_text(encoding="utf-8") == "optimized"
 
 
-def test_generate_goldens_main_uses_ark_defaults_without_openai_key(
+def test_generate_goldens_main_uses_deepseek_llm_and_ark_embedding_defaults(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -958,6 +1071,7 @@ def test_generate_goldens_main_uses_ark_defaults_without_openai_key(
     calls: dict[str, object] = {}
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
     monkeypatch.setenv("ARK_API_KEY", "ark-key")
     monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-embedding")
     monkeypatch.setattr(
@@ -1003,10 +1117,10 @@ def test_generate_goldens_main_uses_ark_defaults_without_openai_key(
     gg_main()
 
     assert calls["synth_kwargs"] == {
-        "api_key": "ark-key",
-        "model": "ep-20260423004926-v99zw",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "reasoning_effort": "medium",
+        "api_key": "deepseek-key",
+        "model": "deepseek-v4-flash",
+        "base_url": "https://api.deepseek.com",
+        "reasoning_effort": "high",
     }
     assert calls["context_kwargs"] == {
         "api_key": "ark-key",
@@ -1140,7 +1254,7 @@ def test_main_noop_exits_nonzero_without_allow_noop(
             # Return same text as input -> no-op
             return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1201,7 +1315,7 @@ def test_main_noop_with_allow_noop_exits_zero(
         def optimize(self, *, prompt, goldens):
             return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1267,7 +1381,7 @@ def test_main_noop_writes_report_when_requested(
         def optimize(self, *, prompt, goldens):
             return type("OptimizedPrompt", (), {"text_template": input_prompt_text})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1351,7 +1465,7 @@ def test_main_writes_report_json_on_success(
         def optimize(self, *, prompt, goldens):
             return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1434,7 +1548,7 @@ def test_main_input_prompt_path_overrides_default(
         def optimize(self, *, prompt, goldens):
             return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1508,7 +1622,7 @@ def test_main_prompt_variant_citations(
         def optimize(self, *, prompt, goldens):
             return type("OptimizedPrompt", (), {"text_template": "optimized-text"})()
 
-    monkeypatch.setenv("ARK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(
         sys,
         "argv",

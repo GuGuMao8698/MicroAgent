@@ -6,20 +6,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
-from evals.eval_models import ArkResponsesDeepEvalModel
+from evals.eval_models import DeepSeekChatDeepEvalModel
 
 if TYPE_CHECKING:
     from deepeval.models import DeepEvalBaseLLM
     from deepeval.test_case import LLMTestCase
 
 _PLACEHOLDER_ENV_VALUES = {
-    "test-openai-api-key",
+    "test-deepseek-api-key",
     "test-ark-api-key",
     "ep-test-model",
 }
-_DEFAULT_DEEPEVAL_MODEL = "ep-20260423004926-v99zw"
-_DEFAULT_DEEPEVAL_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-_DEFAULT_DEEPEVAL_REASONING_EFFORT = "medium"
+_DEFAULT_DEEPEVAL_MODEL = "deepseek-v4-flash"
+_DEFAULT_DEEPEVAL_BASE_URL = "https://api.deepseek.com"
+_DEFAULT_DEEPEVAL_REASONING_EFFORT = "high"
 _LEADING_JSON_PREFIX_RE = re.compile(r"^\s*json\s*:\s*", re.IGNORECASE)
 _CITE_TOKEN_RE = re.compile(r"<cite:\d+>")
 _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
@@ -148,7 +148,7 @@ def is_live_infinity_enabled(
 
 
 def validate_deepeval_env(env: Mapping[str, str | None]) -> None:
-    required = ("OPENAI_API_KEY", "ARK_API_KEY", "ARK_EMBEDDING_MODEL")
+    required = ("DEEPSEEK_API_KEY", "ARK_API_KEY", "ARK_EMBEDDING_MODEL")
     missing_or_placeholder = [
         name
         for name in required
@@ -163,11 +163,11 @@ def validate_deepeval_env(env: Mapping[str, str | None]) -> None:
 
 def build_deepeval_judge_model(
     env: Mapping[str, str | None],
-) -> ArkResponsesDeepEvalModel:
-    api_key = env.get("ARK_API_KEY")
+) -> DeepSeekChatDeepEvalModel:
+    api_key = env.get("DEEPSEEK_API_KEY")
     if api_key is None or api_key.strip() in _PLACEHOLDER_ENV_VALUES:
         raise RuntimeError(
-            "deepeval judge model requires a real ARK_API_KEY-compatible credential."
+            "deepeval judge model requires a real DEEPSEEK_API_KEY-compatible credential."
         )
 
     model_name = env.get("DEEPEVAL_MODEL") or _DEFAULT_DEEPEVAL_MODEL
@@ -175,7 +175,7 @@ def build_deepeval_judge_model(
     reasoning_effort = (
         env.get("DEEPEVAL_REASONING_EFFORT") or _DEFAULT_DEEPEVAL_REASONING_EFFORT
     )
-    return ArkResponsesDeepEvalModel(
+    return DeepSeekChatDeepEvalModel(
         model=model_name,
         api_key=api_key,
         base_url=base_url,

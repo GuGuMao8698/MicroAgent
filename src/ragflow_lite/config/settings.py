@@ -64,16 +64,14 @@ class ArkEmbeddingRuntimeConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class OpenAIAnsweringRuntimeConfig:
-    """OpenAI answering runtime configuration validated at startup."""
+class DeepSeekRuntimeConfig:
+    """DeepSeek non-embedding runtime configuration validated at startup."""
 
     api_key: str
     base_url: str
     model: str
     reasoning_effort: str
     prompt_path: str | None
-    store: bool
-    verbosity: str
     render_citations: bool
 
 
@@ -99,19 +97,18 @@ class Settings:
     metrics_enabled: bool = field(
         default_factory=lambda: _read_bool_env("RAGFLOW_LITE_METRICS_ENABLED", False)
     )
-    openai_api_key: str | None = field(
-        default_factory=lambda: _read_optional_env("OPENAI_API_KEY")
+    deepseek_api_key: str | None = field(
+        default_factory=lambda: _read_optional_env("DEEPSEEK_API_KEY")
     )
-    openai_base_url: str = "https://code.rayinai.com/v1"
-    openai_answer_model: str = "gpt-5.4-mini"
-    openai_reasoning_effort: str = "medium"
-    openai_answer_prompt_path: str | None = field(
-        default_factory=lambda: _read_optional_env(
-            "RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_reasoning_effort: str = "high"
+    answer_prompt_path: str | None = field(
+        default_factory=lambda: (
+            _read_optional_env("RAGFLOW_LITE_ANSWER_PROMPT_PATH")
+            or _read_optional_env("RAGFLOW_LITE_OPENAI_ANSWER_PROMPT_PATH")
         )
     )
-    openai_store: bool = False
-    openai_text_verbosity: str = "medium"
     openai_render_citations: bool = field(
         default_factory=lambda: _read_bool_env(
             "RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", True
@@ -164,10 +161,10 @@ class Settings:
 
     def require_runtime_provider_configs(
         self,
-    ) -> tuple[ArkEmbeddingRuntimeConfig, OpenAIAnsweringRuntimeConfig]:
+    ) -> tuple[ArkEmbeddingRuntimeConfig, DeepSeekRuntimeConfig]:
         """校验并返回当前 V0 运行时依赖的 provider 配置。"""
         required_settings = (
-            ("OPENAI_API_KEY", self.openai_api_key),
+            ("DEEPSEEK_API_KEY", self.deepseek_api_key),
             ("ARK_API_KEY", self.ark_api_key),
             ("ARK_EMBEDDING_MODEL", self.ark_embedding_model),
         )
@@ -179,13 +176,7 @@ class Settings:
                 "Set the missing environment variables before starting the app."
             )
 
-        openai_api_key = self.openai_api_key
-        ark_api_key = self.ark_api_key
-        ark_embedding_model = self.ark_embedding_model
-        if openai_api_key is None or ark_api_key is None or ark_embedding_model is None:
-            raise RuntimeError("Missing required runtime configuration.")
-
-        prompt_path = self.openai_answer_prompt_path
+        prompt_path = self.answer_prompt_path
         if prompt_path is not None:
             prompt_file = Path(prompt_path).expanduser()
             if not prompt_file.is_absolute():
@@ -194,18 +185,16 @@ class Settings:
 
         return (
             ArkEmbeddingRuntimeConfig(
-                api_key=ark_api_key,
-                model=ark_embedding_model,
+                api_key=self.ark_api_key,
+                model=self.ark_embedding_model,
                 dimensions=self.ark_embedding_dimensions,
             ),
-            OpenAIAnsweringRuntimeConfig(
-                api_key=openai_api_key,
-                base_url=self.openai_base_url,
-                model=self.openai_answer_model,
-                reasoning_effort=self.openai_reasoning_effort,
+            DeepSeekRuntimeConfig(
+                api_key=self.deepseek_api_key,
+                base_url=self.deepseek_base_url,
+                model=self.deepseek_model,
+                reasoning_effort=self.deepseek_reasoning_effort,
                 prompt_path=prompt_path,
-                store=self.openai_store,
-                verbosity=self.openai_text_verbosity,
                 render_citations=self.openai_render_citations,
             ),
         )

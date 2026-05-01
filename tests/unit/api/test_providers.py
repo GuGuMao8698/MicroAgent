@@ -9,21 +9,19 @@ from ragflow_lite.app import create_app
 from ragflow_lite.application.services import MiniRAGTopologyRetriever
 from ragflow_lite.config import (
     ArkEmbeddingRuntimeConfig,
-    OpenAIAnsweringRuntimeConfig,
+    DeepSeekRuntimeConfig,
     Settings,
 )
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
+    DeepSeekChatAnswerer,
+    DeepSeekChatEvidenceExtractor,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
     LocalJsonGraphEvidenceStore,
-    OpenAIResponsesEvidenceExtractor,
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
-from ragflow_lite.infrastructure.answerers.openai_responses import (
-    OpenAIResponsesAnswerer,
-)
-from ragflow_lite.infrastructure.retrievers import OpenAIResponsesQueryGrounder
+from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -41,14 +39,14 @@ def test_settings_reject_missing_required_runtime_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("ARK_API_KEY", raising=False)
     monkeypatch.delenv("ARK_EMBEDDING_MODEL", raising=False)
     settings = _build_settings(tmp_path)
 
     with pytest.raises(
         RuntimeError,
-        match="OPENAI_API_KEY, ARK_API_KEY, ARK_EMBEDDING_MODEL",
+        match="DEEPSEEK_API_KEY, ARK_API_KEY, ARK_EMBEDDING_MODEL",
     ):
         settings.require_runtime_provider_configs()
 
@@ -56,7 +54,7 @@ def test_settings_reject_missing_required_runtime_configuration(
 def test_settings_group_runtime_provider_configuration(
     tmp_path: Path,
 ) -> None:
-    ark_config, openai_config = _build_settings(
+    ark_config, deepseek_config = _build_settings(
         tmp_path
     ).require_runtime_provider_configs()
 
@@ -65,14 +63,12 @@ def test_settings_group_runtime_provider_configuration(
         model="ep-test-model",
         dimensions=2048,
     )
-    assert openai_config == OpenAIAnsweringRuntimeConfig(
-        api_key="test-openai-api-key",
-        base_url="https://code.rayinai.com/v1",
-        model="gpt-5.4-mini",
-        reasoning_effort="medium",
+    assert deepseek_config == DeepSeekRuntimeConfig(
+        api_key="test-deepseek-api-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
         prompt_path=None,
-        store=False,
-        verbosity="medium",
         render_citations=True,
     )
 
@@ -86,9 +82,9 @@ def test_settings_reads_optional_answerer_prompt_path(
         "/tmp/optimized_answerer_prompt.txt",
     )
 
-    _, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
+    _, deepseek_config = _build_settings(tmp_path).require_runtime_provider_configs()
 
-    assert openai_config.prompt_path == "/tmp/optimized_answerer_prompt.txt"
+    assert deepseek_config.prompt_path == "/tmp/optimized_answerer_prompt.txt"
 
 
 def test_settings_reads_optional_render_citations_env(
@@ -97,9 +93,9 @@ def test_settings_reads_optional_render_citations_env(
 ) -> None:
     monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
 
-    _, openai_config = _build_settings(tmp_path).require_runtime_provider_configs()
+    _, deepseek_config = _build_settings(tmp_path).require_runtime_provider_configs()
 
-    assert openai_config.render_citations is False
+    assert deepseek_config.render_citations is False
 
 
 def test_build_services_resolves_relative_answerer_prompt_path_from_project_root(
@@ -121,7 +117,7 @@ def test_build_services_resolves_relative_answerer_prompt_path_from_project_root
     services = build_services(_build_settings(tmp_path))
 
     answerer = services.query_service.answerer
-    assert isinstance(answerer, OpenAIResponsesAnswerer)
+    assert isinstance(answerer, DeepSeekChatAnswerer)
     assert answerer.instructions == "Runtime override instructions."
 
 
@@ -134,7 +130,7 @@ def test_build_services_threads_render_citations_flag(
     services = build_services(_build_settings(tmp_path))
 
     answerer = services.query_service.answerer
-    assert isinstance(answerer, OpenAIResponsesAnswerer)
+    assert isinstance(answerer, DeepSeekChatAnswerer)
     assert answerer.render_citations is False
 
 
@@ -167,8 +163,9 @@ def test_build_services_uses_infinity_hybrid_retriever(
         services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
     )
     answerer = services.query_service.answerer
-    assert isinstance(answerer, OpenAIResponsesAnswerer)
-    assert answerer.base_url == "https://code.rayinai.com/v1"
+    assert isinstance(answerer, DeepSeekChatAnswerer)
+    assert answerer.model == "deepseek-v4-flash"
+    assert answerer.reasoning_effort == "high"
 
 
 def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> None:
@@ -180,7 +177,7 @@ def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> Non
     )
     assert isinstance(
         services.ingestion_pipeline.evidence_extractor,
-        OpenAIResponsesEvidenceExtractor,
+        DeepSeekChatEvidenceExtractor,
     )
 
 
@@ -191,6 +188,8 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "ArkMultimodalTextEmbedder",
         "BackgroundTaskRunner",
         "CompositeParser",
+        "DeepSeekChatAnswerer",
+        "DeepSeekChatEvidenceExtractor",
         "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",
@@ -204,6 +203,7 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "OpenAIResponsesEvidenceExtractor",
     ]
     assert retrievers_module.__all__ == [
+        "DeepSeekChatQueryGrounder",
         "InfinityHybridRetriever",
         "OpenAIResponsesQueryGrounder",
     ]
@@ -221,7 +221,7 @@ def test_build_services_wires_minirag_topology_retriever(tmp_path: Path) -> None
     assert isinstance(services.query_service.retriever, MiniRAGTopologyRetriever)
     assert isinstance(
         services.query_service.retriever.query_grounder,
-        OpenAIResponsesQueryGrounder,
+        DeepSeekChatQueryGrounder,
     )
     assert services.query_service.retriever.graph_store is (
         services.ingestion_pipeline.graph_store

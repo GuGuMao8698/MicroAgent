@@ -28,17 +28,17 @@ from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     BackgroundTaskRunner,
     CompositeParser,
+    DeepSeekChatAnswerer,
+    DeepSeekChatEvidenceExtractor,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
     InMemoryStageCache,
     InMemoryTaskStore,
     LocalDocumentStore,
     LocalJsonGraphEvidenceStore,
-    OpenAIResponsesAnswerer,
-    OpenAIResponsesEvidenceExtractor,
     RecursiveCharacterChunker,
 )
-from ragflow_lite.infrastructure.retrievers import OpenAIResponsesQueryGrounder
+from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
 
 @dataclass(slots=True)
@@ -83,7 +83,7 @@ def build_services(settings: Settings) -> AppServices:
     这里显式完成"配置 -> 具体实现 -> 业务流程"的连接，便于后续替换
     parser、embedder 或 index，而不需要改动路由层。
     """
-    ark_runtime_config, openai_runtime_config = (
+    ark_runtime_config, deepseek_runtime_config = (
         settings.require_runtime_provider_configs()
     )
 
@@ -99,33 +99,29 @@ def build_services(settings: Settings) -> AppServices:
         dimensions=ark_runtime_config.dimensions,
     )
     vector_index = _build_vector_index(settings, embedder)
-    answerer = OpenAIResponsesAnswerer(
-        api_key=openai_runtime_config.api_key,
-        base_url=openai_runtime_config.base_url,
-        model=openai_runtime_config.model,
-        reasoning_effort=openai_runtime_config.reasoning_effort,
-        instructions_path=openai_runtime_config.prompt_path,
-        store=openai_runtime_config.store,
-        verbosity=openai_runtime_config.verbosity,
-        render_citations=openai_runtime_config.render_citations,
+    answerer = DeepSeekChatAnswerer(
+        api_key=deepseek_runtime_config.api_key,
+        base_url=deepseek_runtime_config.base_url,
+        model=deepseek_runtime_config.model,
+        reasoning_effort=deepseek_runtime_config.reasoning_effort,
+        instructions_path=deepseek_runtime_config.prompt_path,
+        render_citations=deepseek_runtime_config.render_citations,
     )
     graph_store = LocalJsonGraphEvidenceStore(
         settings.local_index_dir / "graph_evidence"
     )
-    evidence_extractor = OpenAIResponsesEvidenceExtractor(
-        api_key=openai_runtime_config.api_key,
-        base_url=openai_runtime_config.base_url,
-        model=openai_runtime_config.model,
-        reasoning_effort=openai_runtime_config.reasoning_effort,
-        store=openai_runtime_config.store,
+    evidence_extractor = DeepSeekChatEvidenceExtractor(
+        api_key=deepseek_runtime_config.api_key,
+        base_url=deepseek_runtime_config.base_url,
+        model=deepseek_runtime_config.model,
+        reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
     base_retriever = _build_retriever(embedder, vector_index)
-    query_grounder = OpenAIResponsesQueryGrounder(
-        api_key=openai_runtime_config.api_key,
-        base_url=openai_runtime_config.base_url,
-        model=openai_runtime_config.model,
-        reasoning_effort=openai_runtime_config.reasoning_effort,
-        store=openai_runtime_config.store,
+    query_grounder = DeepSeekChatQueryGrounder(
+        api_key=deepseek_runtime_config.api_key,
+        base_url=deepseek_runtime_config.base_url,
+        model=deepseek_runtime_config.model,
+        reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
     retriever = MiniRAGTopologyRetriever(
         base_retriever=base_retriever,

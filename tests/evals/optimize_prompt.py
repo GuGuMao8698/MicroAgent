@@ -21,11 +21,11 @@ from deepeval.models import DeepEvalBaseLLM
 from deepeval.optimizer import PromptOptimizer
 from deepeval.optimizer.algorithms import GEPA
 from deepeval.prompt import Prompt
-from eval_models import ArkResponsesDeepEvalModel
+from eval_models import DeepSeekChatDeepEvalModel  # noqa: F401
 
 from ragflow_lite.domain.models import AnswerRequest, RetrievedChunk
-from ragflow_lite.infrastructure.answerers.openai_responses import (
-    OpenAIResponsesAnswerer,
+from ragflow_lite.infrastructure.answerers.deepseek_chat import (
+    DeepSeekChatAnswerer,  # noqa: F401
     _load_packaged_template,
 )
 
@@ -36,11 +36,11 @@ DEFAULT_GOLDENS_PATH = (
 DEFAULT_OUTPUT_PROMPT_PATH = (
     PROJECT_ROOT / "tests" / "fixtures" / "evals" / "optimized_answerer_prompt.txt"
 )
-DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-DEFAULT_MODEL = "ep-20260423004926-v99zw"
-DEFAULT_JUDGE_REASONING_EFFORT = "medium"
-DEFAULT_OPTIMIZER_MODEL = "ep-20260423004926-v99zw"
-DEFAULT_OPTIMIZER_REASONING_EFFORT = "medium"
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_JUDGE_REASONING_EFFORT = "high"
+DEFAULT_OPTIMIZER_MODEL = "deepseek-v4-flash"
+DEFAULT_OPTIMIZER_REASONING_EFFORT = "high"
 DEFAULT_ITERATIONS = 5
 DEFAULT_PARETO_SIZE = 3
 DEFAULT_MINIBATCH_SIZE = 5
@@ -108,8 +108,8 @@ def build_eval_model(
     model: str,
     base_url: str,
     reasoning_effort: str,
-) -> ArkResponsesDeepEvalModel:
-    return ArkResponsesDeepEvalModel(
+) -> DeepSeekChatDeepEvalModel:
+    return DeepSeekChatDeepEvalModel(
         model=model,
         api_key=api_key,
         base_url=base_url,
@@ -173,8 +173,6 @@ def build_model_callback(
     base_url: str,
     model: str,
     reasoning_effort: str,
-    verbosity: str,
-    store: bool,
 ) -> Callable[[Prompt, Golden], str]:
     def _callback(prompt: Prompt, golden: Golden) -> str:
         contexts = _contexts_from_golden(golden)
@@ -184,13 +182,12 @@ def build_model_callback(
             expected_output=golden.expected_output or "",
             source_file=golden.source_file or "",
         )
-        answerer = OpenAIResponsesAnswerer(
+        answerer = DeepSeekChatAnswerer(
             api_key=api_key,
             base_url=base_url,
             model=model,
             reasoning_effort=reasoning_effort,
-            store=store,
-            verbosity=verbosity,
+            render_citations=False,
             instructions=instructions,
         )
         return answerer.answer(
@@ -241,14 +238,12 @@ def main() -> None:
         "--answer-reasoning-effort",
         "--reasoning-effort",
         dest="answer_reasoning_effort",
-        default="medium",
+        default=DEFAULT_JUDGE_REASONING_EFFORT,
     )
     parser.add_argument(
         "--optimizer-reasoning-effort",
         default=DEFAULT_OPTIMIZER_REASONING_EFFORT,
     )
-    parser.add_argument("--verbosity", default="medium")
-
     # New CLI arguments
     parser.add_argument(
         "--input-prompt-path",
@@ -302,9 +297,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    api_key = os.getenv("ARK_API_KEY")
+    api_key = os.getenv("DEEPSEEK_API_KEY")
     if api_key is None or not api_key.strip():
-        raise RuntimeError("ARK_API_KEY is required for prompt optimization.")
+        raise RuntimeError("DEEPSEEK_API_KEY is required for prompt optimization.")
 
     # Determine input prompt text
     if args.input_prompt_path is not None:
@@ -343,8 +338,6 @@ def main() -> None:
             base_url=args.base_url,
             model=args.answer_model,
             reasoning_effort=args.answer_reasoning_effort,
-            verbosity=args.verbosity,
-            store=False,
         ),
     )
     optimized_prompt = optimizer.optimize(
