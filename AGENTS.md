@@ -1,6 +1,6 @@
 **本文档MUST NOT EDIT/WRITE**
 # Project Overview
-`ragflow-lite` 是一个借鉴 `RAGFlow` 的个人 RAG 项目.
+`ragflow-lite` 是一个结合了`MiniRAG`和`DiscoRAG`的个人项目.
 
 ## Current Stage
 - 当前处于 `V3` 阶段: [阶段计划/索引页/V3.md](阶段计划/索引页/V3.md)
