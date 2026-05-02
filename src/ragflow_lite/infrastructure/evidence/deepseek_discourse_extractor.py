@@ -194,7 +194,6 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             self._load_unit(item, raw_unit, order)
             for order, raw_unit in enumerate(raw_units)
         ]
-        unit_ids = {unit.unit_id for unit in units}
         relations = [
             self._load_relation(item, units, raw_relation)
             for raw_relation in raw_relations
@@ -203,11 +202,6 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         supporting_unit_ids = _unit_ids_from_indexes(
             raw, "supporting_unit_indexes", units
         )
-
-        if not set(main_unit_ids).issubset(unit_ids):
-            raise ProcessingError("Discourse main unit references unknown unit.")
-        if not set(supporting_unit_ids).issubset(unit_ids):
-            raise ProcessingError("Discourse supporting unit references unknown unit.")
 
         return ChunkDiscourseStructure(
             canonical_chunk_id=item.canonical_chunk_id,
