@@ -174,3 +174,21 @@ def test_query_preserves_minirag_topology_context_metadata() -> None:
         query="How does MiniRAG work?",
         contexts=[chunk],
     )
+
+
+def test_query_service_standard_path_does_not_attach_discorag_blueprint() -> None:
+    chunks = [_chunk("a")]
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeRetriever(results=chunks),
+        answerer=answerer,
+    )
+
+    service.query("q", top_k=5)
+
+    assert answerer.last_request == AnswerRequest(
+        query="q",
+        contexts=chunks,
+    )
+    assert answerer.last_request.mode == "standard"
+    assert answerer.last_request.blueprint is None
