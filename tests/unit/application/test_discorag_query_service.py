@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from ragflow_lite.application.services.discorag_query_service import (
     DiscoRAGQueryService,
 )
-
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
@@ -141,3 +140,9 @@ def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
 
     assert result.contexts == answerer.last_request.contexts
     assert result.metadata == {"ok": True}
+
+
+def test_discorag_query_service_is_exported_from_application_services() -> None:
+    from ragflow_lite.application.services import DiscoRAGQueryService as Exported
+
+    assert Exported is DiscoRAGQueryService

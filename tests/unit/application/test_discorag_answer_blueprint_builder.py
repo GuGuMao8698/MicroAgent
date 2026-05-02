@@ -209,3 +209,11 @@ def test_build_rejects_structure_role_ids_not_present_in_units() -> None:
 
     with pytest.raises(ProcessingError, match="unknown unit ids"):
         DiscoRAGAnswerBlueprintBuilder().build(package)
+
+
+def test_blueprint_builder_is_exported_from_application_services() -> None:
+    from ragflow_lite.application.services import (
+        DiscoRAGAnswerBlueprintBuilder as Exported,
+    )
+
+    assert Exported is DiscoRAGAnswerBlueprintBuilder
