@@ -367,3 +367,40 @@ def test_deepseek_discourse_extractor_rejects_boolean_weight() -> None:
 
     with pytest.raises(ProcessingError, match="weight"):
         extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_normalizes_label_whitespace() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {
+                    "text": "MiniRAG first retrieves chunks.",
+                    "role": "  Main   Claim  ",
+                },
+                {
+                    "text": "Graph paths then explain why they matter.",
+                    "role": "  Supporting   Detail  ",
+                },
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": "  Supports   By  ",
+                    "weight": 0.75,
+                }
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    package = extractor.extract(_package())
+
+    structure = package.structures[0]
+    assert [unit.role for unit in structure.units] == [
+        "Main Claim",
+        "Supporting Detail",
+    ]
+    assert structure.relations[0].relation_type == "Supports By"

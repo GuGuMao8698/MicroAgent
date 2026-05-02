@@ -251,7 +251,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             canonical_chunk_id=item.canonical_chunk_id,
             text=text.strip(),
             order=order,
-            role=role.strip(),
+            role=_normalize_label(role),
             start_char=start_char,
             end_char=end_char,
         )
@@ -270,7 +270,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             raise ProcessingError("Discourse relation source index is invalid.")
         if not 0 <= target_index < len(units):
             raise ProcessingError("Discourse relation target index is invalid.")
-        relation_type = _required_text(raw, "relation_type")
+        relation_type = _normalize_label(_required_text(raw, "relation_type"))
         weight = _weight(raw)
         source = units[source_index]
         target = units[target_index]
@@ -281,12 +281,12 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 item.canonical_chunk_id,
                 source.unit_id,
                 target.unit_id,
-                relation_type.strip().lower(),
+                relation_type.lower(),
             ),
             canonical_chunk_id=item.canonical_chunk_id,
             source_unit_id=source.unit_id,
             target_unit_id=target.unit_id,
-            relation_type=relation_type.strip(),
+            relation_type=relation_type,
             weight=weight,
         )
 
@@ -352,6 +352,10 @@ def _weight(raw: dict[str, Any]) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProcessingError("Discourse relation weight must be numeric.")
     return float(value)
+
+
+def _normalize_label(value: str) -> str:
+    return " ".join(value.strip().split())
 
 
 def _normalize_text(value: str) -> str:
