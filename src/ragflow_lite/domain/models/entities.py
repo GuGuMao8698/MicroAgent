@@ -200,6 +200,48 @@ class EvidencePackage:
 
 
 @dataclass(slots=True)
+class DiscourseUnit:
+    unit_id: str
+    canonical_chunk_id: str
+    text: str
+    order: int
+    role: str
+    start_char: int | None = None
+    end_char: int | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class IntraChunkDiscourseRelation:
+    relation_id: str
+    canonical_chunk_id: str
+    source_unit_id: str
+    target_unit_id: str
+    relation_type: str
+    weight: float
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ChunkDiscourseStructure:
+    canonical_chunk_id: str
+    document_id: str
+    units: list[DiscourseUnit] = field(default_factory=list)
+    relations: list[IntraChunkDiscourseRelation] = field(default_factory=list)
+    main_unit_ids: list[str] = field(default_factory=list)
+    supporting_unit_ids: list[str] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class IntraChunkDiscoursePackage:
+    query: str
+    evidence_package: EvidencePackage
+    structures: list[ChunkDiscourseStructure] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class TopologyPath:
     path_id: str
     document_id: str
