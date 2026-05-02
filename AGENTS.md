@@ -1,4 +1,3 @@
-**本文档MUST NOT EDIT/WRITE**
 # Project Overview
 `ragflow-lite` 是一个结合了`MiniRAG`和`DiscoRAG`的个人项目.
 
