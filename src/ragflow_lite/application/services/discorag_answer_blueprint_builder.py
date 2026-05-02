@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 
 from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
@@ -147,7 +148,7 @@ class DiscoRAGAnswerBlueprintBuilder:
             "Do not add claims that are not grounded in the provided contexts.",
         ]
 
-    def _unique_ids(self, values) -> list[str]:
+    def _unique_ids(self, values: Iterable[str]) -> list[str]:
         seen: set[str] = set()
         unique: list[str] = []
         for value in values:

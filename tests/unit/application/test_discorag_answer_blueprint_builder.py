@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from ragflow_lite.application.services.discorag_answer_blueprint_builder import (
     DiscoRAGAnswerBlueprintBuilder,
 )
-
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     ChunkDiscourseStructure,
     DiscourseUnit,
@@ -162,3 +164,48 @@ def test_build_generates_constraints_and_plan_steps() -> None:
     assert "main" in steps
     assert "mechanism" in steps
     assert "grounded" in steps
+
+
+def test_build_empty_package_returns_empty_blueprint() -> None:
+    package = _package(items=[])
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package)
+
+    assert blueprint.ordered_chunk_ids == []
+    assert blueprint.chunk_roles == {}
+    assert blueprint.answer_constraints == []
+    assert blueprint.plan_steps == []
+    assert blueprint.metadata["status"] == "empty"
+    assert blueprint.metadata["evidence_count"] == 0
+
+
+def test_build_rejects_duplicate_evidence_chunk_ids() -> None:
+    package = _package(
+        items=[
+            _evidence_item("chunk_dup", order=0),
+            _evidence_item("chunk_dup", order=1),
+        ]
+    )
+
+    with pytest.raises(ProcessingError, match="Duplicate evidence chunk id"):
+        DiscoRAGAnswerBlueprintBuilder().build(package)
+
+
+def test_build_rejects_unknown_discourse_structure_chunk_id() -> None:
+    package = _package(structures=[_structure("chunk_unknown", main=True)])
+
+    with pytest.raises(ProcessingError, match="Unknown discourse structure chunk id"):
+        DiscoRAGAnswerBlueprintBuilder().build(package)
+
+
+def test_build_rejects_structure_role_ids_not_present_in_units() -> None:
+    structure = ChunkDiscourseStructure(
+        canonical_chunk_id="chunk_a",
+        document_id="doc_alpha",
+        units=[],
+        main_unit_ids=["missing_unit"],
+    )
+    package = _package(structures=[structure])
+
+    with pytest.raises(ProcessingError, match="unknown unit ids"):
+        DiscoRAGAnswerBlueprintBuilder().build(package)
