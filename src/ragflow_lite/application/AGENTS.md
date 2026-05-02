@@ -4,12 +4,13 @@
 这个目录负责业务编排层，承接 ingestion/query 两条主流程和跨模块协调。
 
 ## Do Here
-- 在这里组织 `IngestionPipeline`、`QueryService`、`DocumentService`、`DatasetService`、`MiniRAGTopologyRetriever`、`EvidencePackageBuilder`、`Retriever` 和文本归一化。
+- 在这里组织 `IngestionPipeline`、`QueryService`、`DocumentService`、`DatasetService`、`MiniRAGTopologyRetriever`、`EvidencePackageBuilder`、`DiscoRAGAnswerBlueprintBuilder`、`DiscoRAGQueryService`、`Retriever` 和文本归一化。
 - 通过抽象 port 协调 parser、chunker、embedder、index、retriever、answerer、document catalog、dataset store。
 - `IngestionPipeline` 负责把 parser 提供的逐页文本对齐到归一化后的 `page_spans`，并透传 / 持久化 `parser_strategy` metadata；不在这里做 citation 格式化或 parser 选择。
 - `DocumentService` 透传 `DocumentCatalog` 的 list/get 语义，支持按 `dataset_id` 过滤和文档重绑/解绑；过滤时先验证 dataset 存在。
 - `DatasetService` 负责 dataset 的 create/list/get/delete-empty，名称做 strip 后非空校验。
 - `QueryService` 继续只依赖 `Retriever` 协议，不感知具体检索实现或 fusion 细节。
+- `DiscoRAGAnswerBlueprintBuilder` 确定性地将 `IntraChunkDiscoursePackage` 转为 `AnswerBlueprint`，不做 LLM 调用；`DiscoRAGQueryService` 串联拓扑检索、证据打包、语篇提取、蓝图构建和 answerer，与标准 `QueryService` 并行存在。
 - `IngestionPipeline` / `QueryService` 负责主链路阶段日志和业务指标（如 ingest/query outcome），但只记录安全字段，不记录原始文档内容或完整 query 文本。
 - rollback 保持 best-effort：分别尝试清理 `graph_evidence`、`vector_index`、`document_store` 与 `dataset_binding`，失败时记录 `rollback_failed` 日志但不覆盖原始业务异常。
 - `IngestionPipeline.ingest()` 接受可选 `dataset_id`，在同一受控流程里完成索引写入 + dataset 绑定；绑定失败时做 binding 清理。
