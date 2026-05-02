@@ -315,7 +315,7 @@ def _required_text(raw: dict[str, Any], key: str) -> str:
 
 def _required_int(raw: dict[str, Any], key: str) -> int:
     value = raw.get(key)
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise ProcessingError(f"Discourse field '{key}' must be an integer.")
     return value
 
@@ -324,7 +324,7 @@ def _optional_int(raw: dict[str, Any], key: str) -> int | None:
     value = raw.get(key)
     if value is None:
         return None
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise ProcessingError(f"Discourse field '{key}' must be an integer.")
     return value
 
@@ -339,7 +339,7 @@ def _unit_ids_from_indexes(
         raise ProcessingError(f"Discourse field '{key}' must be a list.")
     unit_ids: list[str] = []
     for item in value:
-        if not isinstance(item, int) or not 0 <= item < len(units):
+        if type(item) is not int or not 0 <= item < len(units):
             raise ProcessingError(f"Discourse field '{key}' contains invalid index.")
         unit_id = units[item].unit_id
         if unit_id not in unit_ids:
@@ -349,7 +349,7 @@ def _unit_ids_from_indexes(
 
 def _weight(raw: dict[str, Any]) -> float:
     value = raw.get("weight", 1.0)
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProcessingError("Discourse relation weight must be numeric.")
     return float(value)
 

@@ -82,6 +82,14 @@ def _package_with_two_items() -> EvidencePackage:
     return package
 
 
+def _extractor_for_chunk_output(
+    chunk_output: dict,
+) -> DeepSeekChatIntraChunkDiscourseExtractor:
+    return DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient(json.dumps({"chunks": [chunk_output]})),
+    )
+
+
 def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
     client = _FakeDeepSeekClient(
         json.dumps(
@@ -263,4 +271,99 @@ def test_deepseek_discourse_extractor_rejects_invalid_relation_reference() -> No
     )
 
     with pytest.raises(ProcessingError, match="target index is invalid"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_boolean_span_fields() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {
+                    "text": "MiniRAG first retrieves chunks.",
+                    "role": "main",
+                    "start_char": False,
+                    "end_char": 30,
+                }
+            ],
+            "relations": [],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [],
+        }
+    )
+
+    with pytest.raises(ProcessingError, match="start_char"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_boolean_relation_index() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "MiniRAG first retrieves chunks.", "role": "main"},
+                {
+                    "text": "Graph paths then explain why they matter.",
+                    "role": "support",
+                },
+            ],
+            "relations": [
+                {
+                    "source_unit_index": True,
+                    "target_unit_index": 0,
+                    "relation_type": "supports",
+                    "weight": 1.0,
+                }
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    with pytest.raises(ProcessingError, match="source_unit_index"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_boolean_unit_index_lists() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "MiniRAG first retrieves chunks.", "role": "main"},
+            ],
+            "relations": [],
+            "main_unit_indexes": [True],
+            "supporting_unit_indexes": [],
+        }
+    )
+
+    with pytest.raises(ProcessingError, match="main_unit_indexes"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_boolean_weight() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "MiniRAG first retrieves chunks.", "role": "main"},
+                {
+                    "text": "Graph paths then explain why they matter.",
+                    "role": "support",
+                },
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": "supports",
+                    "weight": False,
+                }
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    with pytest.raises(ProcessingError, match="weight"):
         extractor.extract(_package())
