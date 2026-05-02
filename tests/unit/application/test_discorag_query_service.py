@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pytest
+
 from ragflow_lite.application.services.discorag_query_service import (
     DiscoRAGQueryService,
 )
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     AnswerBlueprint,
     AnswerRequest,
@@ -87,6 +90,16 @@ class RecordingBlueprintBuilder:
 
 
 @dataclass
+class FailingBlueprintBuilder:
+    error: ProcessingError = field(
+        default_factory=lambda: ProcessingError("corrupt discourse plan")
+    )
+
+    def build(self, package: IntraChunkDiscoursePackage) -> AnswerBlueprint:
+        raise self.error
+
+
+@dataclass
 class RecordingAnswerer:
     last_request: AnswerRequest | None = None
 
@@ -140,6 +153,24 @@ def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
 
     assert result.contexts == answerer.last_request.contexts
     assert result.metadata == {"ok": True}
+
+
+def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
+    answerer = RecordingAnswerer()
+    error = ProcessingError("corrupt discourse plan")
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        blueprint_builder=FailingBlueprintBuilder(error=error),
+        answerer=answerer,
+    )
+
+    with pytest.raises(ProcessingError) as exc_info:
+        service.query("q", top_k=1)
+
+    assert exc_info.value is error
+    assert answerer.last_request is None
 
 
 def test_discorag_query_service_is_exported_from_application_services() -> None:
