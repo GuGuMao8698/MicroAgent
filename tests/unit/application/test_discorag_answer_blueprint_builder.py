@@ -191,6 +191,21 @@ def test_build_rejects_duplicate_evidence_chunk_ids() -> None:
         DiscoRAGAnswerBlueprintBuilder().build(package)
 
 
+def test_build_rejects_duplicate_discourse_structure_chunk_ids() -> None:
+    package = _package(
+        structures=[
+            _structure("chunk_a", main=True),
+            _structure("chunk_a", support=True),
+        ]
+    )
+
+    with pytest.raises(
+        ProcessingError,
+        match="Duplicate discourse structure chunk id",
+    ):
+        DiscoRAGAnswerBlueprintBuilder().build(package)
+
+
 def test_build_rejects_unknown_discourse_structure_chunk_id() -> None:
     package = _package(structures=[_structure("chunk_unknown", main=True)])
 

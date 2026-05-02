@@ -90,6 +90,11 @@ class DiscoRAGAnswerBlueprintBuilder:
                 raise ProcessingError(
                     f"Unknown discourse structure chunk id: {structure.canonical_chunk_id}"
                 )
+            if structure.canonical_chunk_id in structure_by_chunk_id:
+                raise ProcessingError(
+                    "Duplicate discourse structure chunk id: "
+                    f"{structure.canonical_chunk_id}"
+                )
             self._validate_structure_role_ids(structure)
             structure_by_chunk_id[structure.canonical_chunk_id] = structure
         return structure_by_chunk_id
