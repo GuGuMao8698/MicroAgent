@@ -608,7 +608,7 @@ def test_deepseek_deepeval_model_validates_schema_output(
     assert result == Result(answer="ok")
     request = captured["create_kwargs"]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     prompt = request["messages"][0]["content"]
     assert "Score the answer." in prompt
     assert "Return only one JSON object" in prompt
@@ -701,7 +701,7 @@ def test_deepseek_deepeval_model_validates_async_schema_output(
     assert result == Result(answer="async ok")
     request = captured["create_kwargs"]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     prompt = request["messages"][0]["content"]
     assert "Score async." in prompt
     assert "Return only one JSON object" in prompt

@@ -97,7 +97,7 @@ def test_deepseek_chat_json_mode_injects_required_json_instruction() -> None:
 
     request = completions.requests[0]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     system_message = request["messages"][0]["content"]
     assert "json" in system_message.lower()
     assert "Return only one JSON object" in system_message

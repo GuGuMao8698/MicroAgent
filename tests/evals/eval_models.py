@@ -9,7 +9,7 @@ from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
 
 _LLM_CALL_TIMEOUT = float(os.environ.get("RAGFLOW_LITE_DEEPEVAL_LLM_TIMEOUT", "300"))
-_DEFAULT_JSON_MAX_TOKENS = 2048
+_DEFAULT_JSON_MAX_TOKENS = 262144
 _SCHEMA_JSON_INSTRUCTION = (
     "Return only one JSON object that conforms to this JSON schema. "
     "Do not include markdown or prose outside the JSON."

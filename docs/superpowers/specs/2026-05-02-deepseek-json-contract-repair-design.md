@@ -25,7 +25,7 @@ The relevant JSON Output contract is:
 - Send `response_format={"type": "json_object"}` for JSON Output calls.
 - Ensure the system or user prompt includes the word `json`.
 - Include an example output shape or schema in the prompt.
-- Set a bounded `max_tokens` to reduce truncation risk.
+- Set a 256K `max_tokens` value to reduce truncation risk for long JSON outputs.
 - Treat empty `content` as an expected provider failure mode and raise a clear local error.
 
 This project already uses `deepseek-v4-flash`, `reasoning_effort="high"`, and `extra_body={"thinking": {"type": "enabled"}}`; this repair keeps those defaults.
@@ -35,7 +35,7 @@ This project already uses `deepseek-v4-flash`, `reasoning_effort="high"`, and `e
 In scope:
 
 - A centralized DeepSeek JSON prompt guard in `DeepSeekChatCompletionsClient.complete_json(...)`.
-- A `max_tokens` option for DeepSeek Chat Completions calls, with a sane default for JSON calls.
+- A `max_tokens` option for DeepSeek Chat Completions calls, with a 256K default for JSON calls.
 - A local schema prompt builder for `DeepSeekChatDeepEvalModel.generate(..., schema=...)` and `a_generate(..., schema=...)`.
 - Local Pydantic validation for DeepSeek deepeval schema outputs.
 - Optional JSON text normalization only for small provider wrappers, such as fenced ```json blocks, if tests make the policy explicit.
@@ -83,7 +83,7 @@ Retry behavior belongs in `DeepSeekChatCompletionsClient`, not in each runtime a
 - Ensures at least one message contains the lowercase token `json`.
 - Adds a concise JSON Output instruction when the caller instructions do not already satisfy the token requirement.
 - Preserves caller-provided domain examples instead of replacing them.
-- Sends a bounded `max_tokens` default.
+- Sends `max_tokens=262144` by default.
 - Raises `ProcessingError("DeepSeek returned no content.")` for empty provider content.
 
 ### Deepeval DeepSeek Adapter
@@ -101,7 +101,7 @@ Schema generation:
   - A schema/example derived from `schema.model_json_schema()`.
   - The word `json`.
 - Sends `response_format={"type": "json_object"}`.
-- Sends a bounded `max_tokens` default.
+- Sends `max_tokens=262144` by default.
 - Validates the returned content with `schema.model_validate_json(...)`.
 - Raises a clear `RuntimeError` when content is empty or validation fails.
 
@@ -126,7 +126,7 @@ Tests must prove behavior at the adapter boundary, not only happy-path downstrea
 
 Required tests:
 
-- `complete_json(...)` sends `response_format={"type": "json_object"}` and `max_tokens`.
+- `complete_json(...)` sends `response_format={"type": "json_object"}` and `max_tokens=262144`.
 - `complete_json(...)` injects a DeepSeek JSON instruction when caller instructions do not contain `json`.
 - `complete_json(...)` does not duplicate the instruction when caller instructions already contain `json` and an example.
 - Runtime JSON callers still include domain examples for query grounding and evidence extraction.
@@ -175,4 +175,3 @@ The second risk is adding a schema prompt that conflicts with deepeval's own pro
 The third risk is retrying errors that should fail fast. Only retry recognizable transient provider exceptions or 5xx status failures.
 
 The fourth risk is test brittleness around Pydantic JSON schema text. Tests should assert stable substrings and request fields rather than exact full prompt bodies.
-

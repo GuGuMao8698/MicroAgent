@@ -5,7 +5,7 @@ from typing import Any
 
 from ragflow_lite.domain.errors import ProcessingError
 
-_DEFAULT_JSON_MAX_TOKENS = 2048
+_DEFAULT_JSON_MAX_TOKENS = 262144
 _MAX_DEEPSEEK_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 0.5
 _DEEPSEEK_JSON_INSTRUCTION = (

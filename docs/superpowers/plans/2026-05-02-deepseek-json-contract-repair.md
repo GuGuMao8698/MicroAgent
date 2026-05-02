@@ -50,7 +50,7 @@ def test_deepseek_chat_json_mode_injects_required_json_instruction() -> None:
 
     request = completions.requests[0]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     system_message = request["messages"][0]["content"]
     assert "json" in system_message.lower()
     assert "Return only one JSON object" in system_message
@@ -93,7 +93,7 @@ Expected: the new tests fail because `max_tokens` and JSON instruction injection
 In `src/ragflow_lite/infrastructure/llms/deepseek_chat.py`, add constants near the top:
 
 ```python
-_DEFAULT_JSON_MAX_TOKENS = 2048
+_DEFAULT_JSON_MAX_TOKENS = 262144
 _DEEPSEEK_JSON_INSTRUCTION = (
     "Return only one JSON object. Do not include markdown or prose outside the JSON."
 )
@@ -417,7 +417,7 @@ def test_deepseek_deepeval_model_validates_schema_output(
     assert result == Result(answer="ok")
     request = captured["create_kwargs"]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     prompt = request["messages"][0]["content"]
     assert "Score the answer." in prompt
     assert "Return only one JSON object" in prompt
@@ -520,7 +520,7 @@ def test_deepseek_deepeval_model_validates_async_schema_output(
     assert result == Result(answer="async ok")
     request = captured["create_kwargs"]
     assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 262144
     prompt = request["messages"][0]["content"]
     assert "Score async." in prompt
     assert "Return only one JSON object" in prompt
@@ -542,7 +542,7 @@ Expected: schema prompt tests fail because schema mode only forwards the raw pro
 In `tests/evals/eval_models.py`, add constants near `_LLM_CALL_TIMEOUT`:
 
 ```python
-_DEFAULT_JSON_MAX_TOKENS = 2048
+_DEFAULT_JSON_MAX_TOKENS = 262144
 _SCHEMA_JSON_INSTRUCTION = (
     "Return only one JSON object that conforms to this JSON schema. "
     "Do not include markdown or prose outside the JSON."
@@ -664,4 +664,3 @@ Report:
 - Any tests not run.
 - Whether live DeepSeek/deepeval validation was skipped.
 - Any remaining pre-existing branch failures.
-
