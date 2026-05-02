@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     EvidenceItem,
     EvidencePackage,
@@ -54,6 +57,29 @@ def _package() -> EvidencePackage:
         items=[item],
         metadata={"evidence_count": 1},
     )
+
+
+def _package_with_two_items() -> EvidencePackage:
+    package = _package()
+    second = EvidenceItem(
+        canonical_chunk_id="chunk_doc_alpha_1",
+        text="A second chunk should not be sent when max_chunks is one.",
+        score=0.4,
+        order=1,
+        provenance=EvidenceProvenance(
+            document_id="doc_alpha",
+            filename="alpha.md",
+            file_type="markdown",
+            chunk_index=1,
+        ),
+        retained_reasons=["baseline_retrieval"],
+        grounded_entities=["MiniRAG"],
+        answer_type_keywords=["mechanism"],
+        metadata={},
+    )
+    package.items.append(second)
+    package.metadata["evidence_count"] = 2
+    return package
 
 
 def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
@@ -123,3 +149,118 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
     assert "JSON object" in client.calls[0]["instructions"]
     assert "canonical_chunk_id: chunk_doc_alpha_0" in client.calls[0]["input_text"]
     assert "MiniRAG first retrieves chunks" in client.calls[0]["input_text"]
+
+
+def test_deepseek_discourse_extractor_respects_max_chunks() -> None:
+    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_chunks=1,
+    )
+
+    package = extractor.extract(_package_with_two_items())
+
+    assert package.metadata["selected_evidence_count"] == 1
+    assert "canonical_chunk_id: chunk_doc_alpha_0" in client.calls[0]["input_text"]
+    assert "canonical_chunk_id: chunk_doc_alpha_1" not in client.calls[0]["input_text"]
+
+
+def test_deepseek_discourse_extractor_disabled_path_skips_model_call() -> None:
+    client = _FakeDeepSeekClient("not json")
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        enabled=False,
+    )
+
+    package = extractor.extract(_package())
+
+    assert package.structures == []
+    assert package.metadata["status"] == "disabled"
+    assert client.calls == []
+
+
+def test_deepseek_discourse_extractor_empty_package_skips_model_call() -> None:
+    evidence_package = _package()
+    evidence_package.items = []
+    client = _FakeDeepSeekClient("not json")
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(client=client)
+
+    package = extractor.extract(evidence_package)
+
+    assert package.structures == []
+    assert package.metadata["status"] == "empty"
+    assert client.calls == []
+
+
+def test_deepseek_discourse_extractor_rejects_invalid_json() -> None:
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient("not json"),
+    )
+
+    with pytest.raises(ProcessingError, match="invalid JSON"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_invalid_span() -> None:
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient(
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [
+                                {
+                                    "text": "bad span",
+                                    "role": "main",
+                                    "start_char": 100,
+                                    "end_char": 120,
+                                }
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ProcessingError, match="span is outside chunk text"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_invalid_relation_reference() -> None:
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient(
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [
+                                {
+                                    "text": "MiniRAG first retrieves chunks.",
+                                    "role": "main",
+                                }
+                            ],
+                            "relations": [
+                                {
+                                    "source_unit_index": 0,
+                                    "target_unit_index": 9,
+                                    "relation_type": "supports",
+                                    "weight": 1.0,
+                                }
+                            ],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ProcessingError, match="target index is invalid"):
+        extractor.extract(_package())
