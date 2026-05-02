@@ -399,7 +399,7 @@ def test_build_context_construction_config_wraps_ark_embedder() -> None:
     assert config.critic_model.get_model_name() == "deepseek-v4-flash"
 
 
-def test_build_context_construction_config_keeps_native_gpt_model_for_deepeval() -> (
+def test_build_context_construction_config_keeps_custom_critic_model_for_deepeval() -> (
     None
 ):
     critic_model = build_synthesizer_model(
@@ -418,7 +418,7 @@ def test_build_context_construction_config_keeps_native_gpt_model_for_deepeval()
     initialized_model, using_native_model = initialize_model(config.critic_model)
 
     assert initialized_model is config.critic_model
-    assert using_native_model is True
+    assert using_native_model is False
 
 
 def test_build_synthesizer_model_passes_reasoning_effort_generation_kwargs(
