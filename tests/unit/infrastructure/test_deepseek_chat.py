@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from ragflow_lite.domain.errors import ProcessingError
+from ragflow_lite.domain.models import AnswerBlueprint, AnswerRequest, RetrievedChunk
+from ragflow_lite.infrastructure.answerers.deepseek_chat import DeepSeekChatAnswerer
 from ragflow_lite.infrastructure.llms import DeepSeekChatCompletionsClient
 
 
@@ -36,6 +38,26 @@ class _FakeChat:
 class _FakeClient:
     def __init__(self, completions: _FakeCompletions) -> None:
         self.chat = _FakeChat(completions)
+
+
+class _FakeAnswerClient:
+    def __init__(self, output: str = "回答") -> None:
+        self.output = output
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, instructions: str, input_text: str) -> str:
+        self.calls.append((instructions, input_text))
+        return self.output
+
+
+def _make_chunk(suffix: str, score: float) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=f"chunk-{suffix}",
+        document_id=f"doc-{suffix}",
+        text=f"片段 {suffix}",
+        score=score,
+        metadata={"filename": f"{suffix}.txt", "file_type": "txt"},
+    )
 
 
 def test_deepseek_chat_sends_high_thinking_request() -> None:
@@ -189,3 +211,91 @@ def test_deepseek_chat_does_not_retry_non_retryable_status_error(
 
     assert len(completions.requests) == 1
     assert sleeps == []
+
+
+def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
+    client = _FakeAnswerClient("回答")
+    answerer = DeepSeekChatAnswerer(
+        client=client,
+        instructions="System instructions.",
+    )
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-low", "chunk-high"],
+        chunk_roles={"chunk-low": "thesis", "chunk-high": "support"},
+        answer_constraints=["Do not omit qualifiers."],
+        plan_steps=["State the thesis first.", "Then add supporting detail."],
+    )
+
+    result = answerer.answer(
+        AnswerRequest(
+            query="问题",
+            contexts=[low, high],
+            mode="discorag",
+            blueprint=blueprint,
+        )
+    )
+
+    assert result.contexts == [low, high]
+    assert result.metadata["answer_mode"] == "discorag"
+    assert result.metadata["blueprint_applied"] is True
+
+    call_input = client.calls[0][1]
+    assert "Blueprint:" in call_input
+    assert "ordered_chunk_ids: chunk-low, chunk-high" in call_input
+    assert "chunk_roles: chunk-low=thesis; chunk-high=support" in call_input
+    assert "answer_constraints: Do not omit qualifiers." in call_input
+    assert "plan_steps: State the thesis first. | Then add supporting detail." in (
+        call_input
+    )
+
+
+def test_deepseek_answerer_discorag_mode_without_blueprint_marks_fallback() -> None:
+    client = _FakeAnswerClient("回答")
+    answerer = DeepSeekChatAnswerer(
+        client=client,
+        instructions="System instructions.",
+    )
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+
+    result = answerer.answer(
+        AnswerRequest(query="问题", contexts=[low, high], mode="discorag")
+    )
+
+    assert result.contexts == [high, low]
+    assert result.metadata["answer_mode"] == "discorag"
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "missing_blueprint"
+    assert "Blueprint:" not in client.calls[0][1]
+
+
+def test_deepseek_answerer_invalid_blueprint_falls_back_to_score_order() -> None:
+    client = _FakeAnswerClient("回答")
+    answerer = DeepSeekChatAnswerer(
+        client=client,
+        instructions="System instructions.",
+    )
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-missing"],
+        chunk_roles={"chunk-missing": "thesis"},
+        answer_constraints=["Keep the answer grounded."],
+        plan_steps=["Use the missing chunk first."],
+    )
+
+    result = answerer.answer(
+        AnswerRequest(
+            query="问题",
+            contexts=[low, high],
+            mode="discorag",
+            blueprint=blueprint,
+        )
+    )
+
+    assert result.contexts == [high, low]
+    assert result.metadata["answer_mode"] == "discorag"
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
