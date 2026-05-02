@@ -10,7 +10,7 @@
 - 保持基础 inline citation、文档目录读取和 grounded answer 主链路可用，但把实现细节放回各自子层，不在源码根重复项目阶段说明。
 - 仅允许把 cross-cutting observability helper 放进 `shared`，例如 logging formatter、request/trace context、Prometheus helper；不要把业务流程和 HTTP 逻辑塞进 `shared`。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
-- `infrastructure/evidence` 承接 ingestion 侧的图证据提取与持久化（`OpenAIResponsesEvidenceExtractor` + `LocalJsonGraphEvidenceStore`），作为 chunk→vector 之间的补充管线。DeepSeek 迁移进行中，`DeepSeekChatEvidenceExtractor` 待接入。
+- `infrastructure/evidence` 承接 ingestion 侧的图证据提取与持久化（`OpenAIResponsesEvidenceExtractor` + `LocalJsonGraphEvidenceStore`），作为 chunk→vector 之间的补充管线。DeepSeek 迁移进行中，`DeepSeekChatEvidenceExtractor` 待接入。query-time 块内语篇结构提取由 `DeepSeekChatIntraChunkDiscourseExtractor` 承接。
 - query-time 图检索已落地：`QueryGrounder`、`ChunkLookup`、`DeepSeekChatQueryGrounder`、`MiniRAGTopologyRetriever` 拓扑检索器和 provider wiring 均已实现。
 
 ## Avoid Here

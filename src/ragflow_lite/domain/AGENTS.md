@@ -4,8 +4,8 @@
 这个目录负责稳定的业务边界，承载核心对象、抽象接口和领域错误。
 
 ## Do Here
-- 在 `models` 放 `DocumentAsset`、`ParsedDocument`、`Chunk`、`EmbeddedChunk`、`RetrievedChunk`、`AnswerResult`、`IngestionResult`、`IndexedDocument`、`Dataset`、`IngestionTaskSnapshot`、`EntityEvidence`、`RelationEvidence`、`GraphEvidenceBatch`、`GraphEvidenceWriteResult`、`GroundedQuery`、`EvidenceProvenance`、`EvidenceItem`、`EvidencePackage`、`TopologyPath`、`TopologyRetrievalResult`。
-- 在 `ports` 放 `Parser`、`Chunker`、`Embedder`、`VectorIndex`、`Retriever`、`Answerer`、`DocumentStore`、`DocumentCatalog`、`DatasetStore`、`IngestionTaskStore`、`IngestionStageCache`、`IngestionTaskRunner`、`EvidenceExtractor`、`GraphEvidenceStore`、`QueryGrounder`、`ChunkLookup`、`TopologyContextRetriever`。
+- 在 `models` 放 `DocumentAsset`、`ParsedDocument`、`Chunk`、`EmbeddedChunk`、`RetrievedChunk`、`AnswerResult`、`IngestionResult`、`IndexedDocument`、`Dataset`、`IngestionTaskSnapshot`、`EntityEvidence`、`RelationEvidence`、`GraphEvidenceBatch`、`GraphEvidenceWriteResult`、`GroundedQuery`、`EvidenceProvenance`、`EvidenceItem`、`EvidencePackage`、`DiscourseUnit`、`IntraChunkDiscourseRelation`、`ChunkDiscourseStructure`、`IntraChunkDiscoursePackage`、`TopologyPath`、`TopologyRetrievalResult`。
+- 在 `ports` 放 `Parser`、`Chunker`、`Embedder`、`VectorIndex`、`Retriever`、`Answerer`、`DocumentStore`、`DocumentCatalog`、`DatasetStore`、`IngestionTaskStore`、`IngestionStageCache`、`IngestionTaskRunner`、`EvidenceExtractor`、`GraphEvidenceStore`、`QueryGrounder`、`ChunkLookup`、`TopologyContextRetriever`、`IntraChunkDiscourseExtractor`。
 - 在 `errors` 放领域级异常和统一错误语义（含 `DocumentNotFoundError`、`DatasetNotFoundError`、`DatasetAlreadyExistsError`、`DatasetNotEmptyError`、`IdempotencyKeyMissingError`）。
 - 新增模型或 port 时，优先表达稳定业务边界和错误语义，不要为了容纳具体基础设施实现而扩张接口。
 
