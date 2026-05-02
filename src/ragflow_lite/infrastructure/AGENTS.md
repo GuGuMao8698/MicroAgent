@@ -8,11 +8,11 @@
 - 默认向量索引主路径是 `InfinityDenseVectorIndex`，承接 dense vector search、hybrid retrieval、`DocumentCatalog` 文档目录读路径和 `DatasetStore` dataset 管理与绑定。
 - `LocalJsonVectorIndex` 仍保留但不再作为默认主路径。
 - 当前 embedding 维度契约是 `2048`。
-- 外部回答器实现放在 `infrastructure/answerers`，当前默认回答器是 OpenAI Responses answerer。
+- 外部回答器实现放在 `infrastructure/answerers`，当前有 `DeepSeekChatAnswerer`（DeepSeek Chat Completions）和 `OpenAIResponsesAnswerer`（legacy）。
 - 检索器实现放在 `infrastructure/retrievers`，当前生产 retriever 是 `InfinityHybridRetriever`；通过 `embed_query(raw query)` + sparse-query 分析 -> `search_hybrid()` 调用 Infinity 原生 `weighted_sum` fusion，不承担 rerank 或 citation 组装。
-- query grounding 实现放在 `infrastructure/retrievers/openai_query_grounder.py`（`OpenAIResponsesQueryGrounder`），通过 OpenAI Responses 兼容客户端产出 `answer_type_keywords` 和 `entities_from_query`。
+- query grounding 实现放在 `infrastructure/retrievers/`：`DeepSeekChatQueryGrounder` 通过 DeepSeek Chat Completions 产出 `answer_type_keywords` 和 `entities_from_query`；`OpenAIResponsesQueryGrounder` 保留为 legacy。
 - `LocalJsonVectorIndex` 和 `InfinityDenseVectorIndex` 均已实现 `get_chunks(chunk_ids)` 方法，供拓扑检索回收 chunk 文本。
-- `infrastructure/evidence` 承接 ingestion 侧的图证据提取（`OpenAIResponsesEvidenceExtractor`）和持久化（`LocalJsonGraphEvidenceStore`）。
+- `infrastructure/evidence` 承接 ingestion 侧的图证据提取（当前 `OpenAIResponsesEvidenceExtractor`，DeepSeek 迁移进行中）和持久化（`LocalJsonGraphEvidenceStore`）。
 - sparse-query 分析只服务全文分支，是 retriever 内部实现细节；dense embedding 仍使用原始 query。
 - hybrid sparse 匹配使用 `filename` 与 `text` 两个字段；诊断型 `search_text()` 保持单字段 `text` 语义。
 - hybrid 检索内部可以扩大候选后再裁回 `top_k`，但这些调优仍是内部策略；不要把已收口的 V2 检索细节提升为公共配置，也不要引入 rerank、tag API 或额外主路径。
@@ -26,5 +26,5 @@
 - 不要在这里定义业务流程和用例编排。
 - 不要反向决定 `domain` 的边界。
 - 不要因为当前只有一个 provider 就提前抽象多 provider 框架，也不要把 provider-specific 配置或密钥处理散落到无关模块。
-- 不要提前接入 OCR/layout/table/DeepDoc 级 PDF 栈、rerank、多 provider 扩展，也不要在 Ark 之外扩散新的 embedding provider 运行时路径。
+- 不要提前接入 OCR/layout/table/DeepDoc 级 PDF 栈、rerank、多 provider 扩展，也不要在 Ark 之外扩散新的 embedding provider 运行时路径。非 embedding LLM 已迁移至 DeepSeek Chat Completions（`infrastructure/llms/`）。
 - 不要把 provider request/response payload、原始文本或高基数字段写进日志。

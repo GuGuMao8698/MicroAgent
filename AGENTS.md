@@ -7,7 +7,7 @@
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。
-- 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `OPENAI_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
+- 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `DEEPSEEK_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
 
 # cx — Semantic Code Navigation
 

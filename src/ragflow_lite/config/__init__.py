@@ -1,11 +1,11 @@
 from ragflow_lite.config.settings import (
     ArkEmbeddingRuntimeConfig,
-    OpenAIAnsweringRuntimeConfig,
+    DeepSeekRuntimeConfig,
     Settings,
 )
 
 __all__ = [
     "ArkEmbeddingRuntimeConfig",
-    "OpenAIAnsweringRuntimeConfig",
+    "DeepSeekRuntimeConfig",
     "Settings",
 ]

@@ -17,7 +17,7 @@ from deepeval.dataset import Golden
 from deepeval.models import DeepEvalBaseEmbeddingModel
 from deepeval.synthesizer import Synthesizer
 from deepeval.synthesizer.config import ContextConstructionConfig
-from eval_models import ArkResponsesDeepEvalModel
+from eval_models import DeepSeekChatDeepEvalModel  # noqa: F401
 from volcenginesdkarkruntime import Ark
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -27,9 +27,9 @@ DEFAULT_GOLDENS_PATH = (
     PROJECT_ROOT / "tests" / "fixtures" / "evals" / "synthetic_goldens.json"
 )
 DEFAULT_GOLDENS_PER_DOCUMENT = 10
-DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-DEFAULT_MODEL = "ep-20260423004926-v99zw"
-DEFAULT_REASONING_EFFORT = "medium"
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_REASONING_EFFORT = "high"
 DEBUG_CONTEXT_ENV_VAR = "RAGFLOW_LITE_DEEPEVAL_CONTEXT_DEBUG"
 DEFAULT_SYNTHESIZER_MAX_CONCURRENT = 30
 
@@ -413,11 +413,11 @@ def generate_goldens_artifact(
 def build_synthesizer_model(
     *,
     api_key: str,
-    model: str,
-    base_url: str,
-    reasoning_effort: str,
-) -> ArkResponsesDeepEvalModel:
-    return ArkResponsesDeepEvalModel(
+    model: str = DEFAULT_MODEL,
+    base_url: str = DEFAULT_BASE_URL,
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+) -> DeepSeekChatDeepEvalModel:
+    return DeepSeekChatDeepEvalModel(
         model=model,
         api_key=api_key,
         base_url=base_url,
@@ -480,6 +480,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+    if deepseek_api_key is None or not deepseek_api_key.strip():
+        raise RuntimeError("DEEPSEEK_API_KEY is required for goldens generation.")
     ark_api_key = os.getenv("ARK_API_KEY")
     if ark_api_key is None or not ark_api_key.strip():
         raise RuntimeError("ARK_API_KEY is required for goldens generation.")
@@ -490,7 +493,7 @@ def main() -> None:
         )
 
     synthesizer_model = build_synthesizer_model(
-        api_key=ark_api_key,
+        api_key=deepseek_api_key,
         model=args.model,
         base_url=args.base_url,
         reasoning_effort=args.reasoning_effort,

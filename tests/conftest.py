@@ -22,6 +22,7 @@ if str(EVALS_PATH) not in sys.path:
 
 from eval_support import is_live_infinity_enabled, validate_deepeval_env
 
+os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-api-key")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
 os.environ.setdefault("ARK_EMBEDDING_MODEL", "ep-test-model")

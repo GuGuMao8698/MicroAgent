@@ -1,3 +1,6 @@
+from ragflow_lite.infrastructure.answerers.deepseek_chat import (
+    DeepSeekChatAnswerer,
+)
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
@@ -8,6 +11,7 @@ from ragflow_lite.infrastructure.embedders.ark_embedder import (
     ArkMultimodalTextEmbedder,
 )
 from ragflow_lite.infrastructure.evidence import (
+    DeepSeekChatEvidenceExtractor,
     LocalJsonGraphEvidenceStore,
     OpenAIResponsesEvidenceExtractor,
 )
@@ -33,6 +37,8 @@ __all__ = [
     "ArkMultimodalTextEmbedder",
     "BackgroundTaskRunner",
     "CompositeParser",
+    "DeepSeekChatAnswerer",
+    "DeepSeekChatEvidenceExtractor",
     "RecursiveCharacterChunker",
     "InfinityDenseVectorIndex",
     "InfinityHybridRetriever",
