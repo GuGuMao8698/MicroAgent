@@ -116,10 +116,11 @@ class DiscoRAGAnswerBlueprintBuilder:
         structure_by_chunk_id: dict[str, ChunkDiscourseStructure],
     ) -> str:
         structure = structure_by_chunk_id.get(item.canonical_chunk_id)
-        if structure is not None and structure.main_unit_ids:
-            return "main"
-        if structure is not None and structure.supporting_unit_ids:
-            return "support"
+        if structure is not None:
+            if structure.main_unit_ids:
+                return "main"
+            if structure.supporting_unit_ids:
+                return "support"
         if item.topology_path_ids or item.topology_relation_ids:
             return "context"
         return "detail"
