@@ -147,3 +147,12 @@ def test_intra_chunk_discourse_relation_default_metadata() -> None:
         weight=1.0,
     )
     assert relation.metadata == {}
+
+
+from typing import Protocol
+
+from ragflow_lite.domain.ports import IntraChunkDiscourseExtractor
+
+
+def test_intra_chunk_discourse_extractor_is_protocol() -> None:
+    assert issubclass(IntraChunkDiscourseExtractor, Protocol)

@@ -112,6 +112,13 @@ class EvidenceExtractor(Protocol):
     def extract(self, chunks: list[Chunk]) -> GraphEvidenceBatch: ...
 
 
+class IntraChunkDiscourseExtractor(Protocol):
+    def extract(
+        self,
+        evidence_package: EvidencePackage,
+    ) -> IntraChunkDiscoursePackage: ...
+
+
 class GraphEvidenceStore(Protocol):
     def upsert_document_evidence(
         self,
