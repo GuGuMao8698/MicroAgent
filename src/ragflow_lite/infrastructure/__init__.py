@@ -12,6 +12,7 @@ from ragflow_lite.infrastructure.embedders.ark_embedder import (
 )
 from ragflow_lite.infrastructure.evidence import (
     DeepSeekChatEvidenceExtractor,
+    DeepSeekChatIntraChunkDiscourseExtractor,
     LocalJsonGraphEvidenceStore,
     OpenAIResponsesEvidenceExtractor,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "CompositeParser",
     "DeepSeekChatAnswerer",
     "DeepSeekChatEvidenceExtractor",
+    "DeepSeekChatIntraChunkDiscourseExtractor",
     "RecursiveCharacterChunker",
     "InfinityDenseVectorIndex",
     "InfinityHybridRetriever",
