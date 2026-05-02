@@ -12,7 +12,7 @@
 - 检索器实现放在 `infrastructure/retrievers`，当前生产 retriever 是 `InfinityHybridRetriever`；通过 `embed_query(raw query)` + sparse-query 分析 -> `search_hybrid()` 调用 Infinity 原生 `weighted_sum` fusion，不承担 rerank 或 citation 组装。
 - query grounding 实现放在 `infrastructure/retrievers/`：`DeepSeekChatQueryGrounder` 通过 DeepSeek Chat Completions 产出 `answer_type_keywords` 和 `entities_from_query`；`OpenAIResponsesQueryGrounder` 保留为 legacy。
 - `LocalJsonVectorIndex` 和 `InfinityDenseVectorIndex` 均已实现 `get_chunks(chunk_ids)` 方法，供拓扑检索回收 chunk 文本。
-- `infrastructure/evidence` 承接 ingestion 侧的图证据提取（当前 `OpenAIResponsesEvidenceExtractor`，DeepSeek 迁移进行中）和持久化（`LocalJsonGraphEvidenceStore`）；query-time 块内语篇结构提取由 `DeepSeekChatIntraChunkDiscourseExtractor` 承接。
+- `infrastructure/evidence` 承接 evidence 相关具体实现：ingestion 侧 graph evidence extractor/store，以及 query-time intra-chunk discourse extractor。保持 provider 调用、持久化和验证逻辑各自收敛，不把阶段状态写成长期说明。
 - sparse-query 分析只服务全文分支，是 retriever 内部实现细节；dense embedding 仍使用原始 query。
 - hybrid sparse 匹配使用 `filename` 与 `text` 两个字段；诊断型 `search_text()` 保持单字段 `text` 语义。
 - hybrid 检索内部可以扩大候选后再裁回 `top_k`，但这些调优仍是内部策略；不要把已收口的 V2 检索细节提升为公共配置，也不要引入 rerank、tag API 或额外主路径。
