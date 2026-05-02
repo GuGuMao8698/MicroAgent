@@ -199,6 +199,9 @@ class EvidencePackage:
     metadata: Metadata = field(default_factory=dict)
 
 
+# --- DiscoRAG intra-chunk discourse structure models ---
+
+
 @dataclass(slots=True)
 class DiscourseUnit:
     unit_id: str
