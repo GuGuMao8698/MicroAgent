@@ -56,7 +56,7 @@ class DiscoRAGAnswerBlueprintBuilder:
         return AnswerBlueprint(
             ordered_chunk_ids=ordered_chunk_ids,
             chunk_roles=chunk_roles,
-            answer_constraints=self._constraints(chunk_roles),
+            answer_constraints=self._constraints(chunk_roles, package.structures),
             plan_steps=self._plan_steps(package, chunk_roles),
             metadata={
                 "planner": "discorag_answer_blueprint_builder",
@@ -124,7 +124,11 @@ class DiscoRAGAnswerBlueprintBuilder:
             return "context"
         return "detail"
 
-    def _constraints(self, chunk_roles: dict[str, str]) -> list[str]:
+    def _constraints(
+        self,
+        chunk_roles: dict[str, str],
+        structures: list[ChunkDiscourseStructure],
+    ) -> list[str]:
         constraints = [
             "Follow ordered_chunk_ids when presenting evidence.",
             "Preserve citation grounding and provenance for each claim.",
@@ -133,7 +137,29 @@ class DiscoRAGAnswerBlueprintBuilder:
             constraints.append(
                 "Use support and context chunks as supporting evidence, not standalone conclusions."
             )
+        if self._has_contrast_like_relation(structures):
+            constraints.append(
+                "Mention contrast or conflict cautiously when discourse relations support it."
+            )
         return constraints
+
+    def _has_contrast_like_relation(
+        self,
+        structures: list[ChunkDiscourseStructure],
+    ) -> bool:
+        contrast_like = {
+            "contrast",
+            "contrasts",
+            "conflict",
+            "conflicts",
+            "contradiction",
+            "contradicts",
+        }
+        return any(
+            " ".join(relation.relation_type.split()).lower() in contrast_like
+            for structure in structures
+            for relation in structure.relations
+        )
 
     def _plan_steps(
         self,

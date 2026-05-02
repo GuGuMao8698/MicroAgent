@@ -14,6 +14,7 @@ from ragflow_lite.domain.models import (
     EvidenceProvenance,
     GroundedQuery,
     IntraChunkDiscoursePackage,
+    IntraChunkDiscourseRelation,
 )
 
 
@@ -105,6 +106,17 @@ def _structure(
     )
 
 
+def _relation(chunk_id: str, relation_type: str) -> IntraChunkDiscourseRelation:
+    return IntraChunkDiscourseRelation(
+        relation_id=f"{chunk_id}_rel_0",
+        canonical_chunk_id=chunk_id,
+        source_unit_id=f"{chunk_id}_unit_0",
+        target_unit_id=f"{chunk_id}_unit_1",
+        relation_type=relation_type,
+        weight=1.0,
+    )
+
+
 def test_build_preserves_evidence_order_and_assigns_roles() -> None:
     package = _package(
         structures=[
@@ -164,6 +176,50 @@ def test_build_generates_constraints_and_plan_steps() -> None:
     assert "main" in steps
     assert "mechanism" in steps
     assert "grounded" in steps
+
+
+def test_build_adds_constraint_for_contrast_like_relations() -> None:
+    units = [
+        _unit("chunk_a_unit_0", "chunk_a", "main"),
+        _unit("chunk_a_unit_1", "chunk_a", "support"),
+    ]
+    structure = ChunkDiscourseStructure(
+        canonical_chunk_id="chunk_a",
+        document_id="doc_alpha",
+        units=units,
+        relations=[_relation("chunk_a", "Conflict")],
+        main_unit_ids=[units[0].unit_id],
+        supporting_unit_ids=[units[1].unit_id],
+    )
+    package = _package(structures=[structure])
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package)
+
+    constraints = " ".join(blueprint.answer_constraints).lower()
+    assert "contrast" in constraints
+    assert "conflict" in constraints
+
+
+def test_build_does_not_add_contrast_constraint_for_non_contrast_relations() -> None:
+    units = [
+        _unit("chunk_a_unit_0", "chunk_a", "main"),
+        _unit("chunk_a_unit_1", "chunk_a", "support"),
+    ]
+    structure = ChunkDiscourseStructure(
+        canonical_chunk_id="chunk_a",
+        document_id="doc_alpha",
+        units=units,
+        relations=[_relation("chunk_a", "supports")],
+        main_unit_ids=[units[0].unit_id],
+        supporting_unit_ids=[units[1].unit_id],
+    )
+    package = _package(structures=[structure])
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package)
+
+    constraints = " ".join(blueprint.answer_constraints).lower()
+    assert "contrast" not in constraints
+    assert "conflict" not in constraints
 
 
 def test_build_empty_package_returns_empty_blueprint() -> None:
