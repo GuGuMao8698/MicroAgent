@@ -17,17 +17,12 @@ _CONTENT_TYPES = {
 pytestmark = pytest.mark.live_infinity
 
 
-class FakeResponsesAPI:
+class FakeDeepSeekAnswerClient:
     def __init__(self, output_text: str) -> None:
         self.output_text = output_text
 
-    def create(self, **kwargs: Any) -> Any:
-        return type("FakeResponse", (), {"output_text": self.output_text})()
-
-
-class FakeOpenAIClient:
-    def __init__(self, output_text: str) -> None:
-        self.responses = FakeResponsesAPI(output_text=output_text)
+    def complete(self, instructions: str, input_text: str) -> str:
+        return self.output_text
 
 
 class FakeArkMultimodalEmbeddingsAPI:
@@ -67,15 +62,18 @@ def _vector_for_text(text: str, dimensions: int | None) -> list[float]:
     return vector
 
 
-def _install_fake_openai_client(client: Any, output_text: str) -> None:
-    client.app.state.services.query_service.answerer.client = FakeOpenAIClient(
+def _install_fake_answerer_client(client: Any, output_text: str) -> None:
+    client.app.state.services.query_service.answerer.client = FakeDeepSeekAnswerClient(
         output_text=output_text
     )
 
 
 def _install_fake_ark_client(client: Any) -> None:
     services = client.app.state.services
-    assert services.ingestion_pipeline.embedder is services.retriever.embedder
+    assert (
+        services.ingestion_pipeline.embedder
+        is services.retriever.base_retriever.embedder
+    )
     services.ingestion_pipeline.embedder.client = FakeArkClient()
 
 
@@ -133,7 +131,7 @@ def test_real_infinity_handles_upload_and_query(
     assert vector_index._client.__class__.__name__ != "FakeInfinityClient"
 
     _install_fake_ark_client(client)
-    _install_fake_openai_client(
+    _install_fake_answerer_client(
         client,
         "项目支持 txt 和 md 文件格式<cite:1>。",
     )

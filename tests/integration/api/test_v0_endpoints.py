@@ -127,7 +127,10 @@ def _install_fake_openai_client(
 
 def _install_fake_ark_client(client, fake_ark_client: FakeArkClient) -> FakeArkClient:
     services = client.app.state.services
-    assert services.ingestion_pipeline.embedder is services.retriever.embedder
+    assert (
+        services.ingestion_pipeline.embedder
+        is services.retriever.base_retriever.embedder
+    )
     services.ingestion_pipeline.embedder.client = fake_ark_client
     return fake_ark_client
 
@@ -841,6 +844,58 @@ def test_upload_two_page_pdf_then_query_returns_page_range(
     _assert_pdf_context_page_metadata(payload["contexts"])
     openai_input = _openai_input(fake_openai_client)
     assert "pages: 1-2" in openai_input
+
+
+# ---------------------------------------------------------------------------
+# Query mode dispatch
+# ---------------------------------------------------------------------------
+
+
+class _RecordingQueryRouter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    def query(self, query: str, top_k: int, *, mode: str = "standard"):
+        from ragflow_lite.domain.models import AnswerResult
+
+        self.calls.append((query, top_k, mode))
+        return AnswerResult(
+            answer=f"{mode} answer", contexts=[], metadata={"mode": mode}
+        )
+
+
+def test_query_endpoint_defaults_to_standard_mode(client) -> None:
+    recording_router = _RecordingQueryRouter()
+    client.app.state.services.query_router = recording_router
+
+    response = client.post("/api/v0/queries", json={"query": "What is MiniRAG?"})
+
+    assert response.status_code == 200
+    assert response.json()["metadata"] == {"mode": "standard"}
+    assert recording_router.calls[-1] == ("What is MiniRAG?", 4, "standard")
+
+
+def test_query_endpoint_accepts_discorag_mode(client) -> None:
+    recording_router = _RecordingQueryRouter()
+    client.app.state.services.query_router = recording_router
+
+    response = client.post(
+        "/api/v0/queries",
+        json={"query": "What is MiniRAG?", "top_k": 3, "mode": "discorag"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"] == {"mode": "discorag"}
+    assert recording_router.calls[-1] == ("What is MiniRAG?", 3, "discorag")
+
+
+def test_query_endpoint_rejects_unknown_query_mode(client) -> None:
+    response = client.post(
+        "/api/v0/queries",
+        json={"query": "What is MiniRAG?", "mode": "rerank_only"},
+    )
+
+    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------

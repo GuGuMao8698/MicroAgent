@@ -6,7 +6,13 @@ import pytest
 
 from ragflow_lite.api.deps.providers import build_services
 from ragflow_lite.app import create_app
-from ragflow_lite.application.services import MiniRAGTopologyRetriever
+from ragflow_lite.application.services import (
+    DiscoRAGAnswerBlueprintBuilder,
+    DiscoRAGQueryService,
+    EvidencePackageBuilder,
+    MiniRAGTopologyRetriever,
+    QueryModeRouter,
+)
 from ragflow_lite.config import (
     ArkEmbeddingRuntimeConfig,
     DeepSeekRuntimeConfig,
@@ -16,6 +22,7 @@ from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     DeepSeekChatAnswerer,
     DeepSeekChatEvidenceExtractor,
+    DeepSeekChatIntraChunkDiscourseExtractor,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
     LocalJsonGraphEvidenceStore,
@@ -53,7 +60,12 @@ def test_settings_reject_missing_required_runtime_configuration(
 
 def test_settings_group_runtime_provider_configuration(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
     ark_config, deepseek_config = _build_settings(
         tmp_path
     ).require_runtime_provider_configs()
@@ -190,6 +202,7 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "CompositeParser",
         "DeepSeekChatAnswerer",
         "DeepSeekChatEvidenceExtractor",
+        "DeepSeekChatIntraChunkDiscourseExtractor",
         "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",
@@ -226,6 +239,34 @@ def test_build_services_wires_minirag_topology_retriever(tmp_path: Path) -> None
     assert services.query_service.retriever.graph_store is (
         services.ingestion_pipeline.graph_store
     )
+
+
+def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
+    services = build_services(_build_settings(tmp_path))
+
+    assert isinstance(services.discorag_query_service, DiscoRAGQueryService)
+    assert services.discorag_query_service.retriever is services.retriever
+    assert services.discorag_query_service.answerer is services.query_service.answerer
+    assert isinstance(
+        services.discorag_query_service.evidence_package_builder,
+        EvidencePackageBuilder,
+    )
+    assert isinstance(
+        services.discorag_query_service.discourse_extractor,
+        DeepSeekChatIntraChunkDiscourseExtractor,
+    )
+    assert isinstance(
+        services.discorag_query_service.blueprint_builder,
+        DiscoRAGAnswerBlueprintBuilder,
+    )
+
+
+def test_build_services_wires_query_mode_router(tmp_path: Path) -> None:
+    services = build_services(_build_settings(tmp_path))
+
+    assert isinstance(services.query_router, QueryModeRouter)
+    assert services.query_router.standard_service is services.query_service
+    assert services.query_router.discorag_service is services.discorag_query_service
 
 
 def test_build_services_embedder_dimensions_match_settings(

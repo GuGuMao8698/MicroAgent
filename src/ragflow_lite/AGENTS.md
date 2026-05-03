@@ -11,7 +11,7 @@
 - 仅允许把 cross-cutting observability helper 放进 `shared`，例如 logging formatter、request/trace context、Prometheus helper；不要把业务流程和 HTTP 逻辑塞进 `shared`。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
 - `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取与持久化，以及 query-time 块内语篇结构提取。不要在源码根重复 provider 迁移状态或具体符号清单。
-- query-time 图检索已落地：`QueryGrounder`、`ChunkLookup`、`DeepSeekChatQueryGrounder`、`MiniRAGTopologyRetriever` 拓扑检索器和 provider wiring 均已实现。DiscoRAG 查询路径（确定性蓝图构建 + blueprint-aware answering）已在 application 层落地。
+- query-time 图检索已落地：`QueryGrounder`、`ChunkLookup`、`DeepSeekChatQueryGrounder`、`MiniRAGTopologyRetriever`（无状态，安全共享）拓扑检索器和 provider wiring 均已实现。`QueryModeRouter` 作为 `/queries` 的分发入口，根据请求 `mode` 调度到 `standard`（`QueryService`）或 `discorag`（`DiscoRAGQueryService`）路径。
 
 ## Avoid Here
 - 不要把 OCR/layout/table/DeepDoc、外部 rerank、dataset-aware query filter 等尚未进入默认主链路的能力提前塞进当前实现。当前只允许已落地的基础 dataset 管理 baseline、异步 ingestion pipeline（任务状态、幂等、重试、进度、stage cache）、ingestion 侧图证据提取和 query-time 图检索（含拓扑检索），不允许顺手把 query filter / rerank / topology scoring / 新主路径一起带入。

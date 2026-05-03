@@ -19,7 +19,7 @@ from ragflow_lite.api.deps.providers import (
     get_dataset_service,
     get_document_service,
     get_ingestion_pipeline,
-    get_query_service,
+    get_query_router,
 )
 from ragflow_lite.api.schemas.v0 import (
     CreateDatasetRequest,
@@ -40,8 +40,8 @@ from ragflow_lite.application import (
     DatasetService,
     DocumentService,
     IngestionPipeline,
-    QueryService,
 )
+from ragflow_lite.application.services.query_mode_router import QueryModeRouter
 from ragflow_lite.domain.errors import (
     DatasetAlreadyExistsError,
     DatasetNotEmptyError,
@@ -373,10 +373,10 @@ async def bind_or_unbind_document_dataset(
 async def query_documents(
     request: Request,
     payload: QueryRequest,
-    query_service: QueryService = Depends(get_query_service),
+    query_router: QueryModeRouter = Depends(get_query_router),
 ) -> QueryResponse:
     try:
-        result = query_service.query(payload.query, payload.top_k)
+        result = query_router.query(payload.query, payload.top_k, mode=payload.mode)
         _log_request_event(
             request,
             logging.INFO,

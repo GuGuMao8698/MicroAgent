@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import pytest
 
+from ragflow_lite.application.services import discorag_query_service as discorag_module
 from ragflow_lite.application.services.discorag_query_service import (
     DiscoRAGQueryService,
 )
@@ -21,6 +23,12 @@ from ragflow_lite.domain.models import (
     RetrievedChunk,
     TopologyRetrievalResult,
 )
+from ragflow_lite.shared.observability import (
+    bind_request_context,
+    clear_request_context,
+)
+
+QUERY_LOGGER = "ragflow_lite.application.services.discorag_query_service"
 
 
 def _chunk(chunk_id: str = "chunk_a") -> RetrievedChunk:
@@ -102,12 +110,19 @@ class FailingBlueprintBuilder:
 @dataclass
 class RecordingAnswerer:
     last_request: AnswerRequest | None = None
+    error: Exception | None = None
 
     def answer(self, request: AnswerRequest) -> AnswerResult:
         self.last_request = request
+        if self.error is not None:
+            raise self.error
         return AnswerResult(
             answer="done", contexts=request.contexts, metadata={"ok": True}
         )
+
+
+def _event_names(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [record.event for record in caplog.records]
 
 
 def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
@@ -155,6 +170,28 @@ def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
     assert result.metadata == {"ok": True}
 
 
+def test_discorag_query_service_logs_started_and_succeeded_and_records_metric(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes: list[str] = []
+    monkeypatch.setattr(discorag_module, "record_query_outcome", outcomes.append)
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=RecordingAnswerer(),
+    )
+
+    with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
+        service.query("q", top_k=1)
+
+    assert "query_started" in _event_names(caplog)
+    assert "query_succeeded" in _event_names(caplog)
+    assert outcomes == ["succeeded"]
+
+
 def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
     answerer = RecordingAnswerer()
     error = ProcessingError("corrupt discourse plan")
@@ -171,6 +208,64 @@ def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
 
     assert exc_info.value is error
     assert answerer.last_request is None
+
+
+def test_discorag_query_service_logs_failed_and_records_metric_on_domain_error(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes: list[str] = []
+    monkeypatch.setattr(discorag_module, "record_query_outcome", outcomes.append)
+    error = ProcessingError("corrupt discourse plan")
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        blueprint_builder=FailingBlueprintBuilder(error=error),
+        answerer=RecordingAnswerer(),
+    )
+
+    with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
+        with pytest.raises(ProcessingError) as exc_info:
+            service.query("q", top_k=1)
+
+    assert exc_info.value is error
+    assert "query_started" in _event_names(caplog)
+    assert "query_failed" in _event_names(caplog)
+    assert outcomes == ["failed"]
+
+
+def test_discorag_query_service_logs_safe_failure_fields_on_unexpected_error(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes: list[str] = []
+    monkeypatch.setattr(discorag_module, "record_query_outcome", outcomes.append)
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=RecordingAnswerer(error=RuntimeError("unexpected")),
+    )
+    bind_request_context("trace-query-1")
+
+    try:
+        with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
+            with pytest.raises(RuntimeError, match="unexpected"):
+                service.query("secret query", top_k=5)
+    finally:
+        clear_request_context()
+
+    failed_record = next(
+        record for record in caplog.records if record.event == "query_failed"
+    )
+    assert failed_record.trace_id == "trace-query-1"
+    assert failed_record.request_id
+    assert failed_record.outcome == "failed"
+    assert failed_record.error_type == "RuntimeError"
+    assert "secret query" not in str(failed_record.__dict__)
+    assert outcomes == ["failed"]
 
 
 def test_discorag_query_service_is_exported_from_application_services() -> None:

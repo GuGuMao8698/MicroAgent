@@ -43,22 +43,25 @@ class MiniRAGTopologyRetriever:
         return self.retrieve_context(query, top_k).chunks
 
     def retrieve_context(self, query: str, top_k: int) -> TopologyRetrievalResult:
-        self._query = query
         candidate_k = max(top_k, top_k * self.candidate_multiplier)
         baseline_chunks = self.base_retriever.retrieve(query, candidate_k)
-        self._grounded_query = self.query_grounder.ground(query)
+        grounded_query = self.query_grounder.ground(query)
 
-        if not baseline_chunks or _is_empty_grounding(self._grounded_query):
+        if not baseline_chunks or _is_empty_grounding(grounded_query):
             return self._make_result(
+                query=query,
+                grounded_query=grounded_query,
                 chunks=baseline_chunks[:top_k],
                 paths=[],
                 candidate_count=len(baseline_chunks),
             )
 
         batches = self._load_candidate_batches(baseline_chunks)
-        paths = self._build_paths(batches, self._grounded_query)
+        paths = self._build_paths(batches, grounded_query)
         if not paths:
             return self._make_result(
+                query=query,
+                grounded_query=grounded_query,
                 chunks=baseline_chunks[:top_k],
                 paths=[],
                 candidate_count=len(baseline_chunks),
@@ -71,10 +74,12 @@ class MiniRAGTopologyRetriever:
             recovered_chunks=recovered_chunks,
             baseline_chunks=baseline_chunks,
             paths=paths,
-            grounded_query=self._grounded_query,
+            grounded_query=grounded_query,
             top_k=top_k,
         )
         return self._make_result(
+            query=query,
+            grounded_query=grounded_query,
             chunks=chunks,
             paths=paths,
             candidate_count=len(baseline_chunks),
@@ -83,13 +88,15 @@ class MiniRAGTopologyRetriever:
     def _make_result(
         self,
         *,
+        query: str,
+        grounded_query: GroundedQuery,
         chunks: list[RetrievedChunk],
         paths: list[TopologyPath],
         candidate_count: int,
     ) -> TopologyRetrievalResult:
         return TopologyRetrievalResult(
-            query=self._query,
-            grounded_query=self._grounded_query,
+            query=query,
+            grounded_query=grounded_query,
             chunks=chunks,
             paths=paths,
             metadata={"candidate_count": candidate_count},

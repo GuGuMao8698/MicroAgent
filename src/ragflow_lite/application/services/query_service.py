@@ -7,31 +7,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
+from ragflow_lite.application.services._query_observability import log_query_event
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import AnswerRequest, AnswerResult
 from ragflow_lite.domain.ports import Answerer, Retriever
-from ragflow_lite.shared.observability import log_event, record_query_outcome
+from ragflow_lite.shared.observability import record_query_outcome
 
 logger = logging.getLogger(__name__)
-
-
-def _log_query_event(
-    level: int,
-    event: str,
-    query: str,
-    top_k: int,
-    **fields: Any,
-) -> None:
-    log_event(
-        logger,
-        level,
-        event,
-        top_k=top_k,
-        query_length=len(query),
-        **fields,
-    )
 
 
 class QueryService:
@@ -47,7 +30,14 @@ class QueryService:
 
     def query(self, query: str, top_k: int) -> AnswerResult:
         """针对已索引内容执行检索并生成回答。"""
-        _log_query_event(logging.INFO, "query_started", query, top_k, outcome="started")
+        log_query_event(
+            logger,
+            logging.INFO,
+            "query_started",
+            query,
+            top_k,
+            outcome="started",
+        )
         try:
             contexts = self.retriever.retrieve(query, top_k)
             result = self.answerer.answer(
@@ -56,7 +46,8 @@ class QueryService:
                     contexts=contexts,
                 )
             )
-            _log_query_event(
+            log_query_event(
+                logger,
                 logging.INFO,
                 "query_succeeded",
                 query,
@@ -67,7 +58,8 @@ class QueryService:
             record_query_outcome("succeeded")
             return result
         except RagflowLiteError as exc:
-            _log_query_event(
+            log_query_event(
+                logger,
                 logging.ERROR,
                 "query_failed",
                 query,
@@ -78,7 +70,8 @@ class QueryService:
             record_query_outcome("failed")
             raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
-            _log_query_event(
+            log_query_event(
+                logger,
                 logging.ERROR,
                 "query_failed",
                 query,

@@ -628,22 +628,27 @@ def app_settings(tmp_path: Path) -> Settings:
     return settings
 
 
-def _install_fake_evidence_extractor_client(app) -> None:
-    """Replace the evidence extractor's OpenAI client with a fake."""
-    from types import SimpleNamespace
+class _FakeDeepSeekJsonClient:
+    def __init__(self, output_text: str) -> None:
+        self.output_text = output_text
 
-    pipeline = app.state.services.ingestion_pipeline
-    extractor = getattr(pipeline, "evidence_extractor", None)
-    if extractor is None:
-        return
+    def complete_json(self, *args, **kwargs):
+        return self.output_text
 
-    class _FakeResponses:
-        def create(self, **kwargs):
-            return SimpleNamespace(
-                output_text='{"entities":[],"relations":[]}',
-            )
 
-    extractor.client = SimpleNamespace(responses=_FakeResponses())
+def _install_fake_query_support_clients(app) -> None:
+    """Replace query-time DeepSeek JSON clients with deterministic fakes."""
+    services = app.state.services
+
+    extractor = getattr(services.ingestion_pipeline, "evidence_extractor", None)
+    if extractor is not None:
+        extractor.client = _FakeDeepSeekJsonClient('{"entities":[],"relations":[]}')
+
+    query_grounder = getattr(services.retriever, "query_grounder", None)
+    if query_grounder is not None:
+        query_grounder.client = _FakeDeepSeekJsonClient(
+            '{"answer_type_keywords":[],"entities_from_query":[]}'
+        )
 
 
 @pytest.fixture
@@ -655,9 +660,9 @@ def app(app_settings: Settings):
 def client(app):
     from fastapi.testclient import TestClient
 
-    # Install a fake OpenAI client on the evidence extractor so ingestion
-    # tests don't hit the real API.
-    _install_fake_evidence_extractor_client(app)
+    # Install fake DeepSeek JSON clients so integration tests only exercise
+    # the intended storage/retrieval layer unless they opt into model calls.
+    _install_fake_query_support_clients(app)
 
     with TestClient(app) as test_client:
         yield test_client

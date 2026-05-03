@@ -150,3 +150,41 @@ def test_topology_retriever_falls_back_when_graph_evidence_missing() -> None:
 
     assert chunks == [base_chunk]
     assert "retrieval_mode" not in chunks[0].metadata
+
+
+def test_sequential_queries_do_not_leak_per_request_state() -> None:
+    """Two sequential retrieve calls must not interfere with each other."""
+    grounder_query_a = GroundedQuery(
+        query="find alpha",
+        entities_from_query=["EntityAlpha"],
+        answer_type_keywords=["definition"],
+    )
+    grounder_query_b = GroundedQuery(
+        query="find beta",
+        entities_from_query=["EntityBeta"],
+        answer_type_keywords=["comparison"],
+    )
+
+    class _VariableGrounder:
+        def ground(self, query: str) -> GroundedQuery:
+            if "alpha" in query:
+                return grounder_query_a
+            return grounder_query_b
+
+    retriever = MiniRAGTopologyRetriever(
+        base_retriever=_FakeBaseRetriever(
+            [_chunk("c1", "alpha text", document_id="doc1")]
+        ),
+        query_grounder=_VariableGrounder(),
+        graph_store=_FakeGraphStore(None),
+        chunk_lookup=_FakeChunkLookup([]),
+    )
+
+    result_a = retriever.retrieve_context("find alpha", top_k=4)
+    result_b = retriever.retrieve_context("find beta", top_k=4)
+
+    # Each result should reflect only its own query grounding.
+    assert result_a.grounded_query is grounder_query_a
+    assert result_b.grounded_query is grounder_query_b
+    assert result_a.query == "find alpha"
+    assert result_b.query == "find beta"

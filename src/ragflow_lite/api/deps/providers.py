@@ -17,7 +17,13 @@ from ragflow_lite.application import (
     QueryService,
     normalize_text,
 )
-from ragflow_lite.application.services import MiniRAGTopologyRetriever
+from ragflow_lite.application.services import (
+    DiscoRAGAnswerBlueprintBuilder,
+    DiscoRAGQueryService,
+    EvidencePackageBuilder,
+    MiniRAGTopologyRetriever,
+    QueryModeRouter,
+)
 from ragflow_lite.config import Settings
 from ragflow_lite.domain.ports.interfaces import (
     IngestionStageCache,
@@ -30,6 +36,7 @@ from ragflow_lite.infrastructure import (
     CompositeParser,
     DeepSeekChatAnswerer,
     DeepSeekChatEvidenceExtractor,
+    DeepSeekChatIntraChunkDiscourseExtractor,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
     InMemoryStageCache,
@@ -49,6 +56,8 @@ class AppServices:
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
+    discorag_query_service: DiscoRAGQueryService
+    query_router: QueryModeRouter
     document_service: DocumentService
     dataset_service: DatasetService
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
@@ -116,6 +125,12 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
+    discourse_extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        api_key=deepseek_runtime_config.api_key,
+        base_url=deepseek_runtime_config.base_url,
+        model=deepseek_runtime_config.model,
+        reasoning_effort=deepseek_runtime_config.reasoning_effort,
+    )
     base_retriever = _build_retriever(embedder, vector_index)
     query_grounder = DeepSeekChatQueryGrounder(
         api_key=deepseek_runtime_config.api_key,
@@ -128,6 +143,21 @@ def build_services(settings: Settings) -> AppServices:
         query_grounder=query_grounder,
         graph_store=graph_store,
         chunk_lookup=vector_index,
+    )
+    query_service = QueryService(
+        retriever=retriever,
+        answerer=answerer,
+    )
+    discorag_query_service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=discourse_extractor,
+        blueprint_builder=DiscoRAGAnswerBlueprintBuilder(),
+        answerer=answerer,
+    )
+    query_router = QueryModeRouter(
+        standard_service=query_service,
+        discorag_service=discorag_query_service,
     )
 
     task_store = InMemoryTaskStore()
@@ -155,10 +185,9 @@ def build_services(settings: Settings) -> AppServices:
         settings=settings,
         ingestion_pipeline=pipeline,
         retriever=retriever,
-        query_service=QueryService(
-            retriever=retriever,
-            answerer=answerer,
-        ),
+        query_service=query_service,
+        discorag_query_service=discorag_query_service,
+        query_router=query_router,
         document_service=DocumentService(
             catalog=vector_index,
             dataset_store=vector_index,
@@ -184,6 +213,13 @@ def get_ingestion_pipeline(
 def get_query_service(services: AppServices = Depends(get_services)) -> QueryService:
     """提供查询回答主流程给路由层使用。"""
     return services.query_service
+
+
+def get_query_router(
+    services: AppServices = Depends(get_services),
+) -> QueryModeRouter:
+    """提供查询模式分发入口给路由层使用。"""
+    return services.query_router
 
 
 def get_document_service(
