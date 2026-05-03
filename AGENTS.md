@@ -2,7 +2,7 @@
 `MicroRAG` 是一个结合了 `MiniRAG` 和 `DiscoRAG` 的个人项目；内部 Python 包名和运行时配置前缀暂保持 `ragflow_lite` / `RAGFLOW_LITE_*`。
 
 ## Current Stage
-- 当前处于 `V3` 阶段: [阶段计划/索引页/V3.md](阶段计划/索引页/V3.md)
+现在对minirag和discorag进行实际工程化的改进
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。
