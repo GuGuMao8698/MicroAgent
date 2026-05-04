@@ -151,6 +151,7 @@ def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
         contexts=retriever.result.chunks,
         mode="discorag",
         blueprint=blueprint_builder.blueprint,
+        metadata={"source_selection": None},
     )
 
 
@@ -272,3 +273,35 @@ def test_discorag_query_service_is_exported_from_application_services() -> None:
     from ragflow_lite.application.services import DiscoRAGQueryService as Exported
 
     assert Exported is DiscoRAGQueryService
+
+
+def test_discorag_query_service_passes_source_selection_summary_to_answer_request() -> (
+    None
+):
+    retriever = FakeTopologyRetriever(
+        result=_retrieval_result(
+            chunks=[_chunk()],
+        )
+    )
+    retriever.result.metadata["source_selection"] = {
+        "selected_answer_chunk_ids": ["chunk_a"],
+        "selected_discourse_chunk_ids": ["chunk_a"],
+        "fallback_reason": None,
+    }
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=3)
+
+    assert answerer.last_request is not None
+    assert answerer.last_request.metadata["source_selection"] == {
+        "selected_answer_chunk_ids": ["chunk_a"],
+        "selected_discourse_chunk_ids": ["chunk_a"],
+        "fallback_reason": None,
+    }

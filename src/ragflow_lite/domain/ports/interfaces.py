@@ -17,8 +17,11 @@ from ragflow_lite.domain.models import (
     IndexedDocument,
     IngestionTaskSnapshot,
     IntraChunkDiscoursePackage,
+    MiniEntityCandidate,
+    MiniRelationshipCandidate,
     ParsedDocument,
     RetrievedChunk,
+    TopologyPath,
     TopologyRetrievalResult,
 )
 
@@ -152,6 +155,43 @@ class VectorIndex(Protocol):
 
 class QueryGrounder(Protocol):
     def ground(self, query: str) -> GroundedQuery: ...
+
+
+# ---------------------------------------------------------------------------
+# MiniRAG graph-first retrieval ports (图优先检索端口)
+# ---------------------------------------------------------------------------
+
+
+class EntityNameIndex(Protocol):
+    """实体名称索引 —— 根据实体文本列表查询匹配候选。"""
+
+    def query_entities(
+        self,
+        entity_texts: list[str],
+        top_k: int,
+    ) -> list[MiniEntityCandidate]: ...
+
+
+class RelationshipIndex(Protocol):
+    """关系索引 —— 根据查询和回答类型关键词查询匹配候选关系。"""
+
+    def query_relationships(
+        self,
+        query: str,
+        answer_type_keywords: list[str],
+        top_k: int,
+    ) -> list[MiniRelationshipCandidate]: ...
+
+
+class ReasoningPathExpander(Protocol):
+    """推理路径扩展器 —— 从种子实体/关系出发扩展拓扑路径。"""
+
+    def expand_paths(
+        self,
+        seed_entity_ids: list[str],
+        seed_relation_ids: list[str],
+        max_hops: int,
+    ) -> list[TopologyPath]: ...
 
 
 class ChunkLookup(Protocol):

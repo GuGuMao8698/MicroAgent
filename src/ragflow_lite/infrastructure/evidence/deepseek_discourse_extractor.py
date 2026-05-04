@@ -77,7 +77,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         if not self.enabled:
             return self._empty_package(evidence_package, "disabled")
 
-        selected_items = evidence_package.items[: self.max_chunks]
+        selected_items, selection_source = self._select_items(evidence_package.items)
         if not selected_items:
             return self._empty_package(evidence_package, "empty")
 
@@ -98,8 +98,37 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 "selected_evidence_count": len(selected_items),
                 "structure_count": len(structures),
                 "status": "ok",
+                "selection_source": selection_source,
             },
         )
+
+    def _select_items(
+        self, items: list[EvidenceItem]
+    ) -> tuple[list[EvidenceItem], str]:
+        """优先选择显式标记为 discourse 候选的 items，不足时按原序补充。"""
+        explicit = [
+            item
+            for item in items
+            if item.metadata.get("selected_for_discourse") is True
+        ]
+        selected: list[EvidenceItem] = []
+        seen: set[str] = set()
+        for item in explicit:
+            selected.append(item)
+            seen.add(item.canonical_chunk_id)
+            if len(selected) >= self.max_chunks:
+                return selected, "source_selection"
+
+        for item in items:
+            if item.canonical_chunk_id in seen:
+                continue
+            selected.append(item)
+            seen.add(item.canonical_chunk_id)
+            if len(selected) >= self.max_chunks:
+                break
+
+        source = "source_selection" if explicit else "prefix"
+        return selected, source
 
     def _empty_package(
         self,
@@ -116,6 +145,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 "selected_evidence_count": 0,
                 "structure_count": 0,
                 "status": status,
+                "selection_source": "none",
             },
         )
 

@@ -7,6 +7,9 @@ from ragflow_lite.application.services.discorag_query_service import (
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
+from ragflow_lite.application.services.mini_graph_first_retriever import (
+    MiniGraphFirstRetriever,
+)
 from ragflow_lite.application.services.minirag_topology_retriever import (
     MiniRAGTopologyRetriever,
 )
@@ -21,6 +24,7 @@ __all__ = [
     "DiscoRAGAnswerBlueprintBuilder",
     "DiscoRAGQueryService",
     "EvidencePackageBuilder",
+    "MiniGraphFirstRetriever",
     "MiniRAGTopologyRetriever",
     "QueryMode",
     "QueryModeRouter",

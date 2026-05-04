@@ -142,6 +142,7 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
         "selected_evidence_count": 1,
         "structure_count": 1,
         "status": "ok",
+        "selection_source": "prefix",
     }
     structure = package.structures[0]
     assert structure.canonical_chunk_id == "chunk_doc_alpha_0"
@@ -184,6 +185,7 @@ def test_deepseek_discourse_extractor_disabled_path_skips_model_call() -> None:
 
     assert package.structures == []
     assert package.metadata["status"] == "disabled"
+    assert package.metadata["selection_source"] == "none"
     assert client.calls == []
 
 
@@ -197,6 +199,7 @@ def test_deepseek_discourse_extractor_empty_package_skips_model_call() -> None:
 
     assert package.structures == []
     assert package.metadata["status"] == "empty"
+    assert package.metadata["selection_source"] == "none"
     assert client.calls == []
 
 
@@ -404,3 +407,42 @@ def test_deepseek_discourse_extractor_normalizes_label_whitespace() -> None:
         "Supporting Detail",
     ]
     assert structure.relations[0].relation_type == "Supports By"
+
+
+def test_extract_prefers_selected_discourse_items_before_prefix() -> None:
+    client = _FakeDeepSeekClient(
+        json.dumps(
+            {
+                "chunks": [
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_1",
+                        "units": [
+                            {
+                                "text": "A second chunk should not be sent when max_chunks is one.",
+                                "role": "main",
+                                "start_char": 0,
+                                "end_char": 56,
+                            }
+                        ],
+                        "relations": [],
+                        "main_unit_indexes": [0],
+                        "supporting_unit_indexes": [],
+                    }
+                ]
+            }
+        )
+    )
+    package = _package_with_two_items()
+    package.items[1].metadata["selected_for_discourse"] = True
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_chunks=1,
+    )
+
+    result = extractor.extract(package)
+
+    assert [s.canonical_chunk_id for s in result.structures] == ["chunk_doc_alpha_1"]
+    assert result.metadata["selected_evidence_count"] == 1
+    assert result.metadata["selection_source"] == "source_selection"
+    assert "canonical_chunk_id: chunk_doc_alpha_1" in client.calls[0]["input_text"]
+    assert "canonical_chunk_id: chunk_doc_alpha_0" not in client.calls[0]["input_text"]

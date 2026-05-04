@@ -5,6 +5,7 @@ from ragflow_lite.application.services.evidence_package_builder import (
 )
 from ragflow_lite.domain.models import (
     EvidencePackage,
+    GraphFirstSourceSelection,
     GroundedQuery,
     RetrievedChunk,
     TopologyPath,
@@ -56,6 +57,7 @@ def _result(
     chunks: list[RetrievedChunk] | None = None,
     paths: list[TopologyPath] | None = None,
     metadata: dict | None = None,
+    source_selection: GraphFirstSourceSelection | None = None,
 ) -> TopologyRetrievalResult:
     return TopologyRetrievalResult(
         query="what is X",
@@ -63,6 +65,7 @@ def _result(
         chunks=chunks or [],
         paths=paths or [],
         metadata=metadata or {},
+        source_selection=source_selection,
     )
 
 
@@ -333,3 +336,74 @@ class TestEvidenceItemMetadata:
         item_meta = package.items[0].metadata
         assert item_meta == original_meta
         assert item_meta is not original_meta
+
+
+class TestSourceSelectionMetadata:
+    def test_source_selection_metadata_copied_to_evidence_items_and_package(
+        self,
+    ) -> None:
+        from ragflow_lite.domain.models import (
+            GraphFirstSource,
+            GraphFirstSourceSelection,
+        )
+
+        chunks = [
+            _chunk("c1", text="selected", score=1.5),
+            _chunk("c2", text="answer only", score=1.0),
+        ]
+        selection = GraphFirstSourceSelection(
+            sources=[
+                GraphFirstSource(
+                    chunk_id="c1",
+                    rank=0,
+                    score=1.5,
+                    score_components={"path": 1.0, "relation": 0.5},
+                    supporting_entity_ids=["e1"],
+                    supporting_relation_ids=["r1"],
+                    supporting_path_ids=["p1"],
+                    auxiliary_chunk_hit=False,
+                    selected_for_answer=True,
+                    selected_for_discourse=True,
+                    selection_reason="graph_path_support+graph_relation_support",
+                ),
+                GraphFirstSource(
+                    chunk_id="c2",
+                    rank=1,
+                    score=1.0,
+                    score_components={"entity": 1.0},
+                    supporting_entity_ids=["e2"],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=True,
+                    selected_for_discourse=False,
+                    selection_reason="graph_entity_support+auxiliary_fallback",
+                ),
+            ],
+            final_context_k=2,
+            discourse_selection_k=1,
+            context_token_budget=None,
+            omitted_source_count=0,
+            fallback_reason=None,
+        )
+        result = _result(chunks=chunks, source_selection=selection)
+
+        package = EvidencePackageBuilder().build(result)
+
+        assert package.items[0].metadata["source_selection_rank"] == 0
+        assert package.items[0].metadata["selected_for_discourse"] is True
+        assert package.items[0].metadata["selection_reason"] == (
+            "graph_path_support+graph_relation_support"
+        )
+        assert package.items[0].metadata["source_score_components"] == {
+            "path": 1.0,
+            "relation": 0.5,
+        }
+        assert package.items[1].metadata["selected_for_discourse"] is False
+        assert package.metadata["source_selection"]["selected_answer_chunk_ids"] == [
+            "c1",
+            "c2",
+        ]
+        assert package.metadata["source_selection"]["selected_discourse_chunk_ids"] == [
+            "c1",
+        ]

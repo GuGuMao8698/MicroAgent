@@ -17,6 +17,24 @@ class DiscoRAGAnswerBlueprintBuilder:
 
     def build(self, package: IntraChunkDiscoursePackage) -> AnswerBlueprint:
         items = package.evidence_package.items
+        # 从 evidence_package.metadata 中提取 source_selection 摘要
+        source_selection = package.evidence_package.metadata.get("source_selection")
+        if not isinstance(source_selection, dict):
+            source_selection = {}
+        selected_answer_chunk_ids = source_selection.get(
+            "selected_answer_chunk_ids", []
+        )
+        if not isinstance(selected_answer_chunk_ids, list):
+            selected_answer_chunk_ids = []
+        selected_discourse_chunk_ids = source_selection.get(
+            "selected_discourse_chunk_ids", []
+        )
+        if not isinstance(selected_discourse_chunk_ids, list):
+            selected_discourse_chunk_ids = []
+        fallback_reason = source_selection.get("fallback_reason")
+        if fallback_reason is not None and not isinstance(fallback_reason, str):
+            fallback_reason = None
+
         if not items:
             return AnswerBlueprint(
                 ordered_chunk_ids=[],
@@ -31,6 +49,10 @@ class DiscoRAGAnswerBlueprintBuilder:
                     "role_counts": {},
                     "topology_path_ids": [],
                     "topology_relation_ids": [],
+                    "selected_answer_chunk_ids": [],
+                    "selected_discourse_chunk_ids": [],
+                    "source_selection_status": "empty",
+                    "source_selection_fallback_reason": None,
                 },
             )
 
@@ -66,6 +88,12 @@ class DiscoRAGAnswerBlueprintBuilder:
                 "role_counts": role_counts,
                 "topology_path_ids": topology_path_ids,
                 "topology_relation_ids": topology_relation_ids,
+                "selected_answer_chunk_ids": list(selected_answer_chunk_ids),
+                "selected_discourse_chunk_ids": list(selected_discourse_chunk_ids),
+                "source_selection_status": package.metadata.get(
+                    "selection_source", "unknown"
+                ),
+                "source_selection_fallback_reason": fallback_reason,
             },
         )
 

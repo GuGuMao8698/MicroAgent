@@ -10,7 +10,7 @@ from ragflow_lite.application.services import (
     DiscoRAGAnswerBlueprintBuilder,
     DiscoRAGQueryService,
     EvidencePackageBuilder,
-    MiniRAGTopologyRetriever,
+    MiniGraphFirstRetriever,
     QueryModeRouter,
 )
 from ragflow_lite.config import (
@@ -28,6 +28,7 @@ from ragflow_lite.infrastructure import (
     LocalJsonGraphEvidenceStore,
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
+from ragflow_lite.infrastructure.evidence import LocalJsonGraphEvidenceIndex
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
 
@@ -162,14 +163,17 @@ def test_build_services_uses_infinity_hybrid_retriever(
 ) -> None:
     services = build_services(_build_settings(tmp_path))
 
-    assert isinstance(services.query_service.retriever, MiniRAGTopologyRetriever)
+    # 图优先检索器作为主检索器
+    assert isinstance(services.query_service.retriever, MiniGraphFirstRetriever)
+    # InfinityHybridRetriever 作为 chunk 辅助检索器
     assert isinstance(
-        services.query_service.retriever.base_retriever, InfinityHybridRetriever
+        services.query_service.retriever.chunk_auxiliary_retriever,
+        InfinityHybridRetriever,
     )
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
     assert (
         services.ingestion_pipeline.embedder
-        is services.query_service.retriever.base_retriever.embedder
+        is services.query_service.retriever.chunk_auxiliary_retriever.embedder
     )
     assert isinstance(
         services.ingestion_pipeline.vector_index, InfinityDenseVectorIndex
@@ -226,18 +230,28 @@ def test_infrastructure_exports_current_runtime_components() -> None:
     assert not hasattr(retrievers_module, "InfinityFullTextRetriever")
 
 
-def test_build_services_wires_minirag_topology_retriever(tmp_path: Path) -> None:
+def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None:
+    """验证 build_services 组装 MiniGraphFirstRetriever 并在两个 query service 间共享。"""
     settings = _build_settings(tmp_path)
 
     services = build_services(settings)
 
-    assert isinstance(services.query_service.retriever, MiniRAGTopologyRetriever)
+    # 主检索器是 MiniGraphFirstRetriever
+    assert isinstance(services.retriever, MiniGraphFirstRetriever)
+    # 两个 query service 共享同一个检索器实例
+    assert services.query_service.retriever is services.retriever
+    assert services.discorag_query_service.retriever is services.retriever
+    # query_grounder 正确装配
+    assert isinstance(services.retriever.query_grounder, DeepSeekChatQueryGrounder)
+    # 图证据索引正确装配，且 entity/relationship/path_expander 共用同一实例
+    assert isinstance(services.retriever.entity_index, LocalJsonGraphEvidenceIndex)
+    assert services.retriever.entity_index is services.retriever.relationship_index
+    assert services.retriever.entity_index is services.retriever.path_expander
+    # chunk_lookup 使用 vector_index
+    assert services.retriever.chunk_lookup is services.ingestion_pipeline.vector_index
+    # chunk_auxiliary_retriever 使用 InfinityHybridRetriever
     assert isinstance(
-        services.query_service.retriever.query_grounder,
-        DeepSeekChatQueryGrounder,
-    )
-    assert services.query_service.retriever.graph_store is (
-        services.ingestion_pipeline.graph_store
+        services.retriever.chunk_auxiliary_retriever, InfinityHybridRetriever
     )
 
 

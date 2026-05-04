@@ -167,6 +167,75 @@ class GroundedQuery:
     metadata: Metadata = field(default_factory=dict)
 
 
+# --- MiniRAG graph-first retrieval candidate models ---
+# 图优先检索的候选实体/关系及 chunk 支撑模型
+
+
+@dataclass(slots=True)
+class MiniEntityCandidate:
+    """实体名称匹配候选 —— 从 EntityNameIndex 查询得到。"""
+
+    entity: EntityEvidence
+    score: float
+    matched_terms: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class MiniRelationshipCandidate:
+    """关系匹配候选 —— 从 RelationshipIndex 查询得到。"""
+
+    relation: RelationEvidence
+    score: float
+    matched_terms: list[str]
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SourceChunkSupport:
+    """chunk 级聚合支撑信息 —— 记录一个 chunk 被哪些实体/关系/路径命中。"""
+
+    chunk_id: str
+    score: float
+    score_components: dict[str, float]
+    supporting_entity_ids: list[str]
+    supporting_relation_ids: list[str]
+    supporting_path_ids: list[str]
+    auxiliary_chunk_hit: bool = False
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphFirstSource:
+    """图优先检索命中的单个 source chunk，携带评分与选择决策。"""
+
+    chunk_id: str
+    rank: int
+    score: float
+    score_components: dict[str, float]
+    supporting_entity_ids: list[str]
+    supporting_relation_ids: list[str]
+    supporting_path_ids: list[str]
+    auxiliary_chunk_hit: bool
+    selected_for_answer: bool
+    selected_for_discourse: bool
+    selection_reason: str
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphFirstSourceSelection:
+    """图优先检索的最终 source 选择结果 —— 含被选和被省略的 source 汇总。"""
+
+    sources: list[GraphFirstSource]
+    final_context_k: int
+    discourse_selection_k: int
+    context_token_budget: int | None
+    omitted_source_count: int
+    fallback_reason: str | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class EvidenceProvenance:
     document_id: str
@@ -252,6 +321,8 @@ class TopologyPath:
     relation_ids: list[str]
     source_chunk_ids: list[str]
     score: float
+    candidate_group_id: str | None = None
+    candidate_rank: int | None = None
     metadata: Metadata = field(default_factory=dict)
 
 
@@ -261,6 +332,7 @@ class TopologyRetrievalResult:
     grounded_query: GroundedQuery
     chunks: list[RetrievedChunk]
     paths: list[TopologyPath]
+    source_selection: GraphFirstSourceSelection | None = None
     metadata: Metadata = field(default_factory=dict)
 
 

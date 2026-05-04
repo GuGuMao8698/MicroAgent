@@ -21,7 +21,7 @@ from ragflow_lite.application.services import (
     DiscoRAGAnswerBlueprintBuilder,
     DiscoRAGQueryService,
     EvidencePackageBuilder,
-    MiniRAGTopologyRetriever,
+    MiniGraphFirstRetriever,
     QueryModeRouter,
 )
 from ragflow_lite.config import Settings
@@ -45,6 +45,7 @@ from ragflow_lite.infrastructure import (
     LocalJsonGraphEvidenceStore,
     RecursiveCharacterChunker,
 )
+from ragflow_lite.infrastructure.evidence import LocalJsonGraphEvidenceIndex
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
 
@@ -131,18 +132,26 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
-    base_retriever = _build_retriever(embedder, vector_index)
+    # chunk 辅助检索器：Infinity hybrid 作为辅助召回通道
+    chunk_auxiliary_retriever = _build_retriever(embedder, vector_index)
     query_grounder = DeepSeekChatQueryGrounder(
         api_key=deepseek_runtime_config.api_key,
         base_url=deepseek_runtime_config.base_url,
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
-    retriever = MiniRAGTopologyRetriever(
-        base_retriever=base_retriever,
+    # 图证据索引：同一实例承担实体名称索引、关系索引和路径扩展三个端口
+    graph_evidence_index = LocalJsonGraphEvidenceIndex(
+        evidence_dir=settings.local_index_dir / "graph_evidence",
+    )
+    # 图优先检索器：先做 query grounding，再查图索引、扩展路径，最后评分与合并 chunk
+    retriever = MiniGraphFirstRetriever(
         query_grounder=query_grounder,
-        graph_store=graph_store,
+        entity_index=graph_evidence_index,
+        relationship_index=graph_evidence_index,
+        path_expander=graph_evidence_index,
         chunk_lookup=vector_index,
+        chunk_auxiliary_retriever=chunk_auxiliary_retriever,
     )
     query_service = QueryService(
         retriever=retriever,

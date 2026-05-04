@@ -58,6 +58,11 @@ class DiscoRAGQueryService:
                     contexts=retrieval_result.chunks,
                     mode="discorag",
                     blueprint=blueprint,
+                    metadata={
+                        "source_selection": retrieval_result.metadata.get(
+                            "source_selection"
+                        ),
+                    },
                 )
             )
             log_query_event(

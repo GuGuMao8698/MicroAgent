@@ -129,7 +129,7 @@ def _install_fake_ark_client(client, fake_ark_client: FakeArkClient) -> FakeArkC
     services = client.app.state.services
     assert (
         services.ingestion_pipeline.embedder
-        is services.retriever.base_retriever.embedder
+        is services.retriever.chunk_auxiliary_retriever.embedder
     )
     services.ingestion_pipeline.embedder.client = fake_ark_client
     return fake_ark_client

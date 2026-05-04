@@ -288,3 +288,38 @@ def test_blueprint_builder_is_exported_from_application_services() -> None:
     )
 
     assert Exported is DiscoRAGAnswerBlueprintBuilder
+
+
+def test_build_records_source_selection_metadata() -> None:
+    evidence_package = EvidencePackage(
+        query="How does MiniRAG organize evidence?",
+        grounded_query=_grounded_query(),
+        items=[
+            _evidence_item(
+                "chunk_a",
+                order=0,
+                topology_path_ids=["path_a"],
+            ),
+            _evidence_item("chunk_b", order=1),
+        ],
+        metadata={
+            "source_selection": {
+                "selected_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                "selected_discourse_chunk_ids": ["chunk_a"],
+                "fallback_reason": None,
+            }
+        },
+    )
+    package = IntraChunkDiscoursePackage(
+        query=evidence_package.query,
+        evidence_package=evidence_package,
+        structures=[],
+        metadata={"selection_source": "source_selection"},
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package)
+
+    assert blueprint.metadata["selected_answer_chunk_ids"] == ["chunk_a", "chunk_b"]
+    assert blueprint.metadata["selected_discourse_chunk_ids"] == ["chunk_a"]
+    assert blueprint.metadata["source_selection_status"] == "source_selection"
+    assert blueprint.metadata["source_selection_fallback_reason"] is None
