@@ -10,9 +10,6 @@ from ragflow_lite.application.services.evidence_package_builder import (
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
-from ragflow_lite.application.services.minirag_topology_retriever import (
-    MiniRAGTopologyRetriever,
-)
 from ragflow_lite.application.services.query_mode_router import (
     QueryMode,
     QueryModeRouter,
@@ -25,7 +22,6 @@ __all__ = [
     "DiscoRAGQueryService",
     "EvidencePackageBuilder",
     "MiniGraphFirstRetriever",
-    "MiniRAGTopologyRetriever",
     "QueryMode",
     "QueryModeRouter",
     "QueryService",
