@@ -370,8 +370,6 @@ def _path_chunk_weight(answer_hit_count: int, edge_vote_count: int) -> float:
 
 def _path_candidate_rank(path: TopologyPath) -> int | None:
     raw = path.candidate_rank
-    if raw is None:
-        raw = path.metadata.get("candidate_rank")
     if isinstance(raw, int):
         return raw if raw >= 0 else None
     if isinstance(raw, float):
@@ -511,8 +509,6 @@ def _with_source_selection_metadata(
             "selected_for_answer": source.selected_for_answer,
             "selected_for_discourse": source.selected_for_discourse,
             "selection_reason": source.selection_reason,
-            # 兼容旧键：下游测试仍读取 "score_components"；规范键为 "source_score_components"
-            "score_components": dict(source.score_components),
             "source_score_components": dict(source.score_components),
             "supporting_entity_ids": source.supporting_entity_ids,
             "supporting_relation_ids": source.supporting_relation_ids,

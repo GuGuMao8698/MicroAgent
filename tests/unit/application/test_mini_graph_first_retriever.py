@@ -159,10 +159,6 @@ def _path(
 ) -> TopologyPath:
     """构造 TopologyPath 的辅助函数，支持 answer_type_hit_count 元数据。"""
     metadata: dict[str, object] = {"answer_type_hit_count": answer_hit_count}
-    if candidate_group_id is not None:
-        metadata["candidate_group_id"] = candidate_group_id
-    if candidate_rank is not None:
-        metadata["candidate_rank"] = candidate_rank
     return TopologyPath(
         path_id=path_id,
         document_id="doc1",
@@ -260,8 +256,8 @@ def test_source_chunk_with_more_minirag_counter_support_ranks_first() -> None:
     # chunk_b 被 1 条路径支撑（path_2 贡献 1*1*1.0=1.0）
     assert [chunk.chunk_id for chunk in chunks] == ["chunk_a", "chunk_b"]
     assert chunks[0].metadata["scoring_policy"] == "minirag_counter_parity"
-    assert chunks[0].metadata["score_components"]["minirag_counter_score"] == 3.0
-    assert chunks[1].metadata["score_components"]["minirag_counter_score"] == 1.0
+    assert chunks[0].metadata["source_score_components"]["minirag_counter_score"] == 3.0
+    assert chunks[1].metadata["source_score_components"]["minirag_counter_score"] == 1.0
 
 
 def test_graph_first_source_selection_models_are_exported() -> None:
