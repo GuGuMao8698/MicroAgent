@@ -260,6 +260,7 @@ def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None
     assert isinstance(
         services.retriever.entity_index, LocalJsonGraphEvidenceHybridIndex
     )
+    assert services.retriever.entity_index._canonicalize_cross_document is True
     assert services.retriever.entity_index is services.retriever.relationship_index
     assert services.retriever.entity_index is services.retriever.path_expander
     # 共享实例验证：sidecar 和 embedder 跨 pipeline 复用
