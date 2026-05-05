@@ -376,12 +376,14 @@ async def query_documents(
     query_router: QueryModeRouter = Depends(get_query_router),
 ) -> QueryResponse:
     try:
-        result = query_router.query(payload.query, payload.top_k, mode=payload.mode)
+        result = query_router.query(
+            payload.query, payload.answer_top_n, mode=payload.mode
+        )
         _log_request_event(
             request,
             logging.INFO,
             "query_answered",
-            top_k=payload.top_k,
+            top_n=payload.answer_top_n,
             context_count=len(result.contexts),
         )
         return QueryResponse(

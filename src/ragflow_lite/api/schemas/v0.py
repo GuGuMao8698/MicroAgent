@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -60,7 +60,9 @@ class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1)
-    top_k: int = Field(default=4, ge=1, le=10)
+    # 回答预算：top_n 是正式字段，top_k 作为过渡别名
+    top_n: int = Field(default=6, ge=1, le=10)
+    top_k: int | None = Field(default=None, ge=1, le=10, exclude=True)
     mode: Literal["standard", "discorag"] = "standard"
 
     @field_validator("query")
@@ -70,6 +72,21 @@ class QueryRequest(BaseModel):
         if not stripped:
             raise ValueError("query must not be blank")
         return stripped
+
+    @model_validator(mode="after")
+    def normalize_top_k_alias(self) -> "QueryRequest":
+        """top_k 别名处理：仅传 top_k 时覆盖默认 top_n；两者都传且不一致时报错。"""
+        if self.top_k is None:
+            return self
+        if self.top_n != 6 and self.top_n != self.top_k:
+            raise ValueError("top_n and top_k must match when both are provided")
+        object.__setattr__(self, "top_n", self.top_k)
+        return self
+
+    @property
+    def answer_top_n(self) -> int:
+        """路由层读取的最终回答预算值。"""
+        return self.top_n
 
 
 class RetrievedContextResponse(BaseModel):
