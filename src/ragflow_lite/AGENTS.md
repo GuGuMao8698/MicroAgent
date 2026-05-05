@@ -10,7 +10,7 @@
 - 保持基础 inline citation、文档目录读取和 grounded answer 主链路可用，但把实现细节放回各自子层，不在源码根重复项目阶段说明。
 - 仅允许把 cross-cutting observability helper 放进 `shared`，例如 logging formatter、request/trace context、Prometheus helper；不要把业务流程和 HTTP 逻辑塞进 `shared`。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
-- `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取、持久化与 graph candidate sidecar，query-time hybrid entity/relationship candidate retrieval + BFS path expansion，以及 query-time 块内语篇结构提取。不要在源码根重复 provider 迁移状态或具体符号清单。
+- `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取、持久化与 graph candidate sidecar，query-time canonical graph evidence view（跨文档同名实体/有向边合并）、hybrid entity/relationship candidate retrieval + BFS path expansion，以及 query-time 块内语篇结构提取。不要在源码根重复 provider 迁移状态或具体符号清单。
 - query-time 图检索已落地：`MiniGraphFirstRetriever`（无状态，安全共享）作为默认检索器，产出 `GraphFirstSourceSelection` 合约（显式 budget 分配 answer/discourse 候选 + 可解释 selection_reason），通过下游 `EvidencePackageBuilder` → discourse extractor（优先 selected_for_discourse）→ blueprint builder → answerer 全链路传递。`QueryModeRouter` 作为 `/queries` 的分发入口，根据请求 `mode` 调度到 `standard`（`QueryService`）或 `discorag`（`DiscoRAGQueryService`）路径。
 
 ## Avoid Here
