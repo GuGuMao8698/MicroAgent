@@ -133,6 +133,11 @@ class Settings:
     infinity_database: str = "default_db"
     infinity_document_table: str = "documents"
     infinity_chunk_table: str = "chunks"
+    graph_candidate_lexical_weight: float = 0.3
+    graph_candidate_dense_weight: float = 0.7
+    graph_candidate_minimum_should_match: float = 0.3
+    graph_candidate_dense_similarity_threshold: float = 0.2
+    graph_initial_candidate_k: int = 1024
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")

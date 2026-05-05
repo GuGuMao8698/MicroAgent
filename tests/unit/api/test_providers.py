@@ -28,7 +28,11 @@ from ragflow_lite.infrastructure import (
     LocalJsonGraphEvidenceStore,
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
-from ragflow_lite.infrastructure.evidence import LocalJsonGraphEvidenceIndex
+from ragflow_lite.infrastructure.evidence import (
+    GraphCandidateSidecar,
+    GraphEvidenceSidecarStore,
+    LocalJsonGraphEvidenceHybridIndex,
+)
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
 
@@ -188,8 +192,15 @@ def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> Non
     services = build_services(_build_settings(tmp_path))
 
     assert isinstance(
-        services.ingestion_pipeline.graph_store,
+        services.ingestion_pipeline.graph_store, GraphEvidenceSidecarStore
+    )
+    assert isinstance(
+        services.ingestion_pipeline.graph_store._graph_store,
         LocalJsonGraphEvidenceStore,
+    )
+    assert isinstance(
+        services.ingestion_pipeline.graph_store._sidecar,
+        GraphCandidateSidecar,
     )
     assert isinstance(
         services.ingestion_pipeline.evidence_extractor,
@@ -207,6 +218,8 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "DeepSeekChatAnswerer",
         "DeepSeekChatEvidenceExtractor",
         "DeepSeekChatIntraChunkDiscourseExtractor",
+        "GraphCandidateSidecar",
+        "GraphEvidenceSidecarStore",
         "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",
@@ -243,10 +256,20 @@ def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None
     assert services.discorag_query_service.retriever is services.retriever
     # query_grounder 正确装配
     assert isinstance(services.retriever.query_grounder, DeepSeekChatQueryGrounder)
-    # 图证据索引正确装配，且 entity/relationship/path_expander 共用同一实例
-    assert isinstance(services.retriever.entity_index, LocalJsonGraphEvidenceIndex)
+    # 图证据混合索引正确装配，且 entity/relationship/path_expander 共用同一实例
+    assert isinstance(
+        services.retriever.entity_index, LocalJsonGraphEvidenceHybridIndex
+    )
     assert services.retriever.entity_index is services.retriever.relationship_index
     assert services.retriever.entity_index is services.retriever.path_expander
+    # 共享实例验证：sidecar 和 embedder 跨 pipeline 复用
+    assert (
+        services.retriever.entity_index.sidecar
+        is services.ingestion_pipeline.graph_store._sidecar
+    )
+    assert (
+        services.retriever.entity_index.embedder is services.ingestion_pipeline.embedder
+    )
     # chunk_lookup 使用 vector_index
     assert services.retriever.chunk_lookup is services.ingestion_pipeline.vector_index
     # chunk_auxiliary_retriever 使用 InfinityHybridRetriever
