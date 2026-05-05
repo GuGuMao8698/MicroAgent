@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,16 @@ from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     EntityEvidence,
     GraphEvidenceBatch,
+    GraphEvidenceWriteResult,
     RelationEvidence,
 )
 from ragflow_lite.infrastructure.evidence.graph_candidate_sidecar import (
     GraphCandidateSidecar,
     build_entity_embedding_text,
     build_relationship_embedding_text,
+)
+from ragflow_lite.infrastructure.evidence.graph_evidence_sidecar_store import (
+    GraphEvidenceSidecarStore,
 )
 
 # ---------------------------------------------------------------------------
@@ -183,3 +188,98 @@ def test_sidecar_rejects_embedding_signature_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ProcessingError):
         sidecar_b.load_all()
+
+
+# ---------------------------------------------------------------------------
+# Recording fake for GraphEvidenceStore（包装器测试用）
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RecordingGraphStore:
+    """记录 upsert 和 delete 调用的伪图证据存储。"""
+
+    upserts: list[GraphEvidenceBatch] = field(default_factory=list)
+    delete_calls: list[str] = field(default_factory=list)
+
+    def upsert_document_evidence(
+        self, batch: GraphEvidenceBatch
+    ) -> GraphEvidenceWriteResult:
+        self.upserts.append(batch)
+        return GraphEvidenceWriteResult(
+            document_id=batch.document_id,
+            entity_count=len(batch.entities),
+            relation_count=len(batch.relations),
+        )
+
+    def delete_document(self, document_id: str) -> None:
+        self.delete_calls.append(document_id)
+
+    def get_document_evidence(self, document_id: str) -> GraphEvidenceBatch | None:
+        for batch in self.upserts:
+            if batch.document_id == document_id:
+                return batch
+        return None
+
+
+# ---------------------------------------------------------------------------
+# GraphEvidenceSidecarStore wrapper tests
+# ---------------------------------------------------------------------------
+
+
+def test_sidecar_store_rebuilds_vectors_after_graph_store_upsert(
+    tmp_path: Path,
+) -> None:
+    """upsert 通过包装器后，graph_store 收到 upsert 且 sidecar 有向量。"""
+    embedder = FakeEmbedder()
+    inner_store = _RecordingGraphStore()
+    sidecar = GraphCandidateSidecar(
+        sidecar_dir=tmp_path / "sidecar",
+        embedding_signature=SIGNATURE_A,
+    )
+    wrapper = GraphEvidenceSidecarStore(
+        graph_store=inner_store,
+        sidecar=sidecar,
+        embedder=embedder,
+    )
+    batch = _make_batch("doc_wrap_1")
+
+    result = wrapper.upsert_document_evidence(batch)
+
+    # graph_store 收到 upsert
+    assert len(inner_store.upserts) == 1
+    assert inner_store.upserts[0].document_id == "doc_wrap_1"
+    # 返回正确的 GraphEvidenceWriteResult
+    assert result.document_id == "doc_wrap_1"
+    assert result.entity_count == 1
+    assert result.relation_count == 1
+    # sidecar 有向量
+    snapshot = sidecar.load_all()
+    assert len(snapshot.entities) == 1
+    assert len(snapshot.relationships) == 1
+
+
+def test_sidecar_store_deletes_graph_and_sidecar_data(tmp_path: Path) -> None:
+    """upsert 后 delete，graph_store.delete 和 sidecar 数据均被清理。"""
+    embedder = FakeEmbedder()
+    inner_store = _RecordingGraphStore()
+    sidecar = GraphCandidateSidecar(
+        sidecar_dir=tmp_path / "sidecar",
+        embedding_signature=SIGNATURE_A,
+    )
+    wrapper = GraphEvidenceSidecarStore(
+        graph_store=inner_store,
+        sidecar=sidecar,
+        embedder=embedder,
+    )
+    batch = _make_batch("doc_wrap_del")
+    wrapper.upsert_document_evidence(batch)
+
+    wrapper.delete_document("doc_wrap_del")
+
+    # graph_store 收到 delete
+    assert inner_store.delete_calls == ["doc_wrap_del"]
+    # sidecar 数据已清理
+    snapshot = sidecar.load_all()
+    assert len(snapshot.entities) == 0
+    assert len(snapshot.relationships) == 0
