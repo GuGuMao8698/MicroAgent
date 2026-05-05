@@ -43,7 +43,12 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
         embedder: QueryEmbedder,
         config: GraphCandidateRetrievalConfig | None = None,
     ) -> None:
-        super().__init__(evidence_dir, reload_on_query=True)
+        # 启用 canonicalize 以跨文档合并同名实体/关系，hybrid dense 分数随之映射
+        super().__init__(
+            evidence_dir,
+            reload_on_query=True,
+            canonicalize_cross_document=True,
+        )
         self.sidecar = sidecar
         self.embedder = embedder
         self.config = config or GraphCandidateRetrievalConfig()
@@ -73,7 +78,12 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
         # 2. 加载实体和旁路向量
         entities = self._get_entities()
         snapshot = self.sidecar.load_all()
-        entity_vectors = {r.candidate_id: r for r in snapshot.entities}
+
+        # 获取 raw -> canonical id 映射，用于将 sidecar 原始稠密得分映射到 canonical 候选
+        canonical_graph = self._get_canonical_graph()
+        entity_id_map = (
+            canonical_graph.entity_id_map if canonical_graph is not None else {}
+        )
 
         # 3. 词法评分
         lexical_scores: dict[str, float] = {}
@@ -91,10 +101,15 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
         dense_scores: dict[str, float] = {}
         dense_records: dict[str, str] = {}  # candidate_id -> embedding_text
         for record in snapshot.entities:
+            # raw sidecar id 映射到 canonical id；未命中映射时保留原始 id（向后兼容）
+            candidate_id = entity_id_map.get(record.candidate_id, record.candidate_id)
             sim = cosine_similarity(query_vector, record.vector)
             if sim >= self.config.dense_similarity_threshold:
-                dense_scores[record.candidate_id] = sim
-                dense_records[record.candidate_id] = record.embedding_text
+                # 同一 canonical candidate 的多个 raw member 取最大稠密得分
+                previous = dense_scores.get(candidate_id, 0.0)
+                if sim >= previous:
+                    dense_scores[candidate_id] = sim
+                    dense_records[candidate_id] = record.embedding_text
 
         # 5. 融合
         fused = fuse_candidate_scores(lexical_scores, dense_scores, self.config)
@@ -141,6 +156,10 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
                 "dense_similarity_threshold": self.config.dense_similarity_threshold,
                 "embedding_text": emb_text,
                 "matched_terms": matched,
+                # 合并 canonical 来源信息（entity.metadata 包含 member_entity_ids 等）
+                **entity.metadata,
+                "canonical_id": entity.entity_id,
+                "source_chunk_ids": list(entity.source_chunk_ids),
             }
 
             candidates.append(
@@ -180,7 +199,12 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
         # 2. 加载关系和旁路向量
         relations = self._get_relations()
         snapshot = self.sidecar.load_all()
-        rel_vectors = {r.candidate_id: r for r in snapshot.relationships}
+
+        # 获取 raw -> canonical id 映射，用于将 sidecar 原始稠密得分映射到 canonical 候选
+        canonical_graph = self._get_canonical_graph()
+        relation_id_map = (
+            canonical_graph.relation_id_map if canonical_graph is not None else {}
+        )
 
         # 3. 词法评分
         lexical_scores: dict[str, float] = {}
@@ -197,10 +221,15 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
         dense_scores: dict[str, float] = {}
         dense_records: dict[str, str] = {}  # candidate_id -> embedding_text
         for record in snapshot.relationships:
+            # raw sidecar id 映射到 canonical id；未命中映射时保留原始 id（向后兼容）
+            candidate_id = relation_id_map.get(record.candidate_id, record.candidate_id)
             sim = cosine_similarity(query_vector, record.vector)
             if sim >= self.config.dense_similarity_threshold:
-                dense_scores[record.candidate_id] = sim
-                dense_records[record.candidate_id] = record.embedding_text
+                # 同一 canonical candidate 的多个 raw member 取最大稠密得分
+                previous = dense_scores.get(candidate_id, 0.0)
+                if sim >= previous:
+                    dense_scores[candidate_id] = sim
+                    dense_records[candidate_id] = record.embedding_text
 
         # 5. 融合
         fused = fuse_candidate_scores(lexical_scores, dense_scores, self.config)
@@ -247,6 +276,10 @@ class LocalJsonGraphEvidenceHybridIndex(LocalJsonGraphEvidenceIndex):
                 "dense_similarity_threshold": self.config.dense_similarity_threshold,
                 "embedding_text": emb_text,
                 "matched_terms": matched,
+                # 合并 canonical 来源信息（relation.metadata 包含 member_entity_ids 等）
+                **relation.metadata,
+                "canonical_id": relation.relation_id,
+                "source_chunk_ids": list(relation.source_chunk_ids),
             }
 
             candidates.append(

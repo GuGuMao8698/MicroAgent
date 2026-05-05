@@ -247,12 +247,12 @@ def test_hybrid_entity_query_recalls_dense_alias_and_exposes_metadata(
 
     results = index.query_entities(["ts"], top_k=3)
 
-    # 应能召回 TypeScript 实体
-    ids = [c.entity.entity_id for c in results]
-    assert "entity_typescript" in ids
+    # 应能召回 TypeScript 实体（canonical 模式下 entity_id 为哈希，按名称匹配）
+    names = [c.entity.name for c in results]
+    assert "TypeScript" in names
 
     # 找到 TypeScript 候选并检查 metadata
-    ts_candidate = next(c for c in results if c.entity.entity_id == "entity_typescript")
+    ts_candidate = next(c for c in results if c.entity.name == "TypeScript")
     meta = ts_candidate.metadata
     assert meta["retrieval_mode"] == "graph_evidence_hybrid"
     assert "dense" in meta["retrieval_sources"]
@@ -282,13 +282,13 @@ def test_hybrid_entity_query_keeps_name_match_above_description_match(
     )
     index = _make_hybrid_index(evidence_dir, sidecar_dir, config=config)
 
-    # "typescript" 应匹配 entity_typescript（名称精确）和 entity_web_framework（描述包含）
+    # "typescript" 应匹配 TypeScript（名称精确）和 Web Framework（描述包含）
     results = index.query_entities(["typescript"], top_k=3)
 
-    ids = [c.entity.entity_id for c in results]
+    names = [c.entity.name for c in results]
     # 名称精确匹配的 TypeScript 应排在描述包含匹配的 Web Framework 之前
-    assert len(ids) >= 2
-    assert ids.index("entity_typescript") < ids.index("entity_web_framework")
+    assert len(names) >= 2
+    assert names.index("TypeScript") < names.index("Web Framework")
 
 
 def test_hybrid_relationship_query_recalls_dense_paraphrase(tmp_path) -> None:
@@ -303,13 +303,11 @@ def test_hybrid_relationship_query_recalls_dense_paraphrase(tmp_path) -> None:
 
     results = index.query_relationships("uses runtime", [], top_k=3)
 
-    ids = [c.relation.relation_id for c in results]
-    assert "rel_uses_runtime" in ids
-
-    # 检查 metadata
+    # canonical 模式下 relation_id 为哈希，按描述内容匹配
     rel_candidate = next(
-        c for c in results if c.relation.relation_id == "rel_uses_runtime"
+        (c for c in results if "Node.js" in c.relation.description), None
     )
+    assert rel_candidate is not None
     meta = rel_candidate.metadata
     assert meta["retrieval_mode"] == "graph_evidence_hybrid"
     assert "dense" in meta["retrieval_sources"]
@@ -327,9 +325,9 @@ def test_hybrid_index_reload_sees_new_graph_evidence(tmp_path) -> None:
 
     # 初始查询确认只有 doc_ts 的数据
     initial = index.query_entities(["TypeScript"], top_k=10)
-    initial_ids = {c.entity.entity_id for c in initial}
-    assert "entity_typescript" in initial_ids
-    assert "entity_python" not in initial_ids
+    initial_names = {c.entity.name for c in initial}
+    assert "TypeScript" in initial_names
+    assert "Python" not in initial_names
 
     # 写入新文档证据
     store = LocalJsonGraphEvidenceStore(evidence_dir)
@@ -356,8 +354,8 @@ def test_hybrid_index_reload_sees_new_graph_evidence(tmp_path) -> None:
 
     # 同一个索引实例应能看到新数据
     after = index.query_entities(["Python"], top_k=10)
-    after_ids = {c.entity.entity_id for c in after}
-    assert "entity_python" in after_ids
+    after_names = {c.entity.name for c in after}
+    assert "Python" in after_names
 
 
 # ---------------------------------------------------------------------------
@@ -509,3 +507,65 @@ def test_legacy_index_still_keeps_document_scoped_duplicate_entities(tmp_path) -
         "doc_a_minirag",
         "doc_b_minirag",
     ]
+
+
+def test_hybrid_index_returns_canonical_dense_alias_candidate(tmp_path) -> None:
+    """hybrid index 在 canonical 模式下应返回合并后的 canonical entity，而非重复 raw 候选。"""
+    store = LocalJsonGraphEvidenceStore(tmp_path)
+    store.upsert_document_evidence(
+        GraphEvidenceBatch(
+            document_id="doc_a",
+            entities=[
+                EntityEvidence(
+                    entity_id="doc_a_ts",
+                    document_id="doc_a",
+                    name="TypeScript",
+                    entity_type="language",
+                    description="Typed JavaScript in doc A.",
+                    source_chunk_ids=["chunk_ts_a"],
+                )
+            ],
+            relations=[],
+        )
+    )
+    store.upsert_document_evidence(
+        GraphEvidenceBatch(
+            document_id="doc_b",
+            entities=[
+                EntityEvidence(
+                    entity_id="doc_b_ts",
+                    document_id="doc_b",
+                    name="TypeScript",
+                    entity_type="language",
+                    description="Typed JavaScript in doc B.",
+                    source_chunk_ids=["chunk_ts_b"],
+                )
+            ],
+            relations=[],
+        )
+    )
+    sidecar = GraphCandidateSidecar(
+        tmp_path / "sidecar",
+        embedding_signature={"provider": "fake", "model": "alias", "dimensions": 8},
+    )
+    for doc_id in ["doc_a", "doc_b"]:
+        batch = store.get_document_evidence(doc_id)
+        assert batch is not None
+        sidecar.rebuild_document(batch, _AliasAwareEmbedder())
+    index = LocalJsonGraphEvidenceHybridIndex(
+        evidence_dir=tmp_path,
+        sidecar=sidecar,
+        embedder=_AliasAwareEmbedder(),
+        config=GraphCandidateRetrievalConfig(dense_similarity_threshold=0.2),
+    )
+
+    candidates = index.query_entities(["ts"], top_k=5)
+
+    # 应合并为一个 canonical entity，而非两个 raw 实体
+    assert [candidate.entity.name for candidate in candidates] == ["TypeScript"]
+    candidate = candidates[0]
+    assert candidate.entity.document_id == "__canonical__"
+    assert candidate.entity.source_chunk_ids == ["chunk_ts_a", "chunk_ts_b"]
+    assert candidate.metadata["canonical"] is True
+    assert candidate.metadata["member_entity_ids"] == ["doc_a_ts", "doc_b_ts"]
+    assert "dense" in candidate.metadata["retrieval_sources"]
