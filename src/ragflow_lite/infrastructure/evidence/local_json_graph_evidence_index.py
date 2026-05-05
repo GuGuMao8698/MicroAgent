@@ -15,6 +15,10 @@ from ragflow_lite.domain.models import (
     RelationEvidence,
     TopologyPath,
 )
+from ragflow_lite.infrastructure.evidence.graph_evidence_canonicalizer import (
+    CanonicalGraphEvidence,
+    canonicalize_graph_evidence,
+)
 from ragflow_lite.infrastructure.evidence.local_json_store import (
     LocalJsonGraphEvidenceStore,
 )
@@ -51,12 +55,21 @@ class LocalJsonGraphEvidenceIndex:
     提供 query_entities / query_relationships / expand_paths 三种查询能力。
     """
 
-    def __init__(self, evidence_dir: Path, *, reload_on_query: bool = False) -> None:
+    def __init__(
+        self,
+        evidence_dir: Path,
+        *,
+        reload_on_query: bool = False,
+        canonicalize_cross_document: bool = False,
+    ) -> None:
         self._evidence_dir = evidence_dir
         self._reload_on_query = reload_on_query
+        # 跨文档同名实体合并开关：启用后在加载阶段将 raw 图证据 canonicalize
+        self._canonicalize_cross_document = canonicalize_cross_document
         # 惰性加载标记
         self._entities: list[EntityEvidence] | None = None
         self._relations: list[RelationEvidence] | None = None
+        self._canonical_graph: CanonicalGraphEvidence | None = None
 
     # ------------------------------------------------------------------
     # 数据加载
@@ -80,8 +93,16 @@ class LocalJsonGraphEvidenceIndex:
             if batch is not None:
                 all_entities.extend(batch.entities)
                 all_relations.extend(batch.relations)
-        self._entities = all_entities
-        self._relations = all_relations
+        # 启用 canonical 模式时，将 raw 图证据合并为去重 canonical 图
+        if self._canonicalize_cross_document:
+            canonical_graph = canonicalize_graph_evidence(all_entities, all_relations)
+            self._entities = canonical_graph.entities
+            self._relations = canonical_graph.relationships
+            self._canonical_graph = canonical_graph
+        else:
+            self._entities = all_entities
+            self._relations = all_relations
+            self._canonical_graph = None
 
     def _get_entities(self) -> list[EntityEvidence]:
         self._ensure_loaded()
@@ -92,6 +113,11 @@ class LocalJsonGraphEvidenceIndex:
         self._ensure_loaded()
         assert self._relations is not None
         return self._relations
+
+    def _get_canonical_graph(self) -> CanonicalGraphEvidence | None:
+        """返回 canonical graph（含 raw->canonical 映射），供 hybrid index 使用。"""
+        self._ensure_loaded()
+        return self._canonical_graph
 
     # ------------------------------------------------------------------
     # EntityNameIndex 实现
