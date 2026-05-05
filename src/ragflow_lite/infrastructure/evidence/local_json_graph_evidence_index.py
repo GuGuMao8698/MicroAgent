@@ -51,8 +51,9 @@ class LocalJsonGraphEvidenceIndex:
     提供 query_entities / query_relationships / expand_paths 三种查询能力。
     """
 
-    def __init__(self, evidence_dir: Path) -> None:
+    def __init__(self, evidence_dir: Path, *, reload_on_query: bool = False) -> None:
         self._evidence_dir = evidence_dir
+        self._reload_on_query = reload_on_query
         # 惰性加载标记
         self._entities: list[EntityEvidence] | None = None
         self._relations: list[RelationEvidence] | None = None
@@ -63,7 +64,11 @@ class LocalJsonGraphEvidenceIndex:
 
     def _ensure_loaded(self) -> None:
         """惰性加载所有文档的实体和关系。"""
-        if self._entities is not None and self._relations is not None:
+        if (
+            not self._reload_on_query
+            and self._entities is not None
+            and self._relations is not None
+        ):
             return
         all_entities: list[EntityEvidence] = []
         all_relations: list[RelationEvidence] = []

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from ragflow_lite.domain.models import EntityEvidence, RelationEvidence
 from ragflow_lite.infrastructure.evidence.graph_candidate_scoring import (
     GraphCandidateRetrievalConfig,
     cosine_similarity,
@@ -48,6 +49,22 @@ def test_tokenize_query_terms_deduplicates_preserving_order() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _make_entity(
+    name: str = "",
+    entity_type: str = "",
+    description: str = "",
+) -> EntityEvidence:
+    """创建测试用 EntityEvidence，填充必要字段。"""
+    return EntityEvidence(
+        entity_id="test-id",
+        document_id="test-doc",
+        name=name,
+        entity_type=entity_type,
+        description=description,
+        source_chunk_ids=[],
+    )
+
+
 def test_entity_lexical_scoring_prioritizes_name_description_type() -> None:
     """名称匹配得分 > 描述匹配得分 > 类型匹配得分。
 
@@ -61,9 +78,11 @@ def test_entity_lexical_scoring_prioritizes_name_description_type() -> None:
 
     # 仅 name 精确匹配
     score_name = score_entity_lexical(
-        name="python",
-        entity_type="language",
-        description="A general-purpose programming language.",
+        entity=_make_entity(
+            name="python",
+            entity_type="language",
+            description="A general-purpose programming language.",
+        ),
         query_terms=terms,
         config=cfg,
     )
@@ -76,9 +95,11 @@ def test_entity_lexical_scoring_prioritizes_name_description_type() -> None:
     # name="foo" 不含 "python"，entity_type="bar" 不含 "python"
     # description="python" 精确匹配 -> 0.45
     score_desc = score_entity_lexical(
-        name="foo",
-        entity_type="bar",
-        description="python",
+        entity=_make_entity(
+            name="foo",
+            entity_type="bar",
+            description="python",
+        ),
         query_terms=terms,
         config=cfg,
     )
@@ -86,9 +107,11 @@ def test_entity_lexical_scoring_prioritizes_name_description_type() -> None:
 
     # 仅 entity_type 精确匹配
     score_type = score_entity_lexical(
-        name="foo",
-        entity_type="python",
-        description="some description text",
+        entity=_make_entity(
+            name="foo",
+            entity_type="python",
+            description="some description text",
+        ),
         query_terms=terms,
         config=cfg,
     )
@@ -105,9 +128,11 @@ def test_entity_lexical_scoring_containment_scores() -> None:
 
     # name containment: "py" in "python" -> 0.75
     score = score_entity_lexical(
-        name="python",
-        entity_type="language",
-        description="A programming language.",
+        entity=_make_entity(
+            name="python",
+            entity_type="language",
+            description="A programming language.",
+        ),
         query_terms=terms,
         config=cfg,
     )
@@ -115,9 +140,11 @@ def test_entity_lexical_scoring_containment_scores() -> None:
 
     # description containment: "py" in "cpython interpreter" -> 0.25
     score = score_entity_lexical(
-        name="foo",
-        entity_type="bar",
-        description="cpython interpreter",
+        entity=_make_entity(
+            name="foo",
+            entity_type="bar",
+            description="cpython interpreter",
+        ),
         query_terms=terms,
         config=cfg,
     )
@@ -141,9 +168,11 @@ def test_minimum_should_match_blocks_weak_description_overlap() -> None:
     # entity_type="concept" 不匹配任何查询词
     # description 中 "graph" 被 containment 命中
     result = score_entity_lexical(
-        name="FooBar",
-        entity_type="concept",
-        description="A graph-first approach.",
+        entity=_make_entity(
+            name="FooBar",
+            entity_type="concept",
+            description="A graph-first approach.",
+        ),
         query_terms=["minirag", "graph", "retrieval", "mode"],
         config=cfg,
     )
@@ -161,9 +190,11 @@ def test_minimum_should_match_allows_strong_overlap() -> None:
     # "minirag" -> name exact, "graph" -> description containment,
     # "retrieval" -> description containment
     result = score_entity_lexical(
-        name="MiniRAG",
-        entity_type="concept",
-        description="A graph-first retrieval approach.",
+        entity=_make_entity(
+            name="MiniRAG",
+            entity_type="concept",
+            description="A graph-first retrieval approach.",
+        ),
         query_terms=["minirag", "graph", "retrieval", "mode"],
         config=cfg,
     )
@@ -289,14 +320,37 @@ def test_fusion_handles_all_zero_scores() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _make_relation(
+    source_entity_name: str = "",
+    target_entity_name: str = "",
+    keywords: list[str] | None = None,
+    description: str = "",
+) -> RelationEvidence:
+    """创建测试用 RelationEvidence，填充必要字段。"""
+    return RelationEvidence(
+        relation_id="test-relation-id",
+        document_id="test-doc",
+        source_entity_id="src-id",
+        target_entity_id="tgt-id",
+        source_entity_name=source_entity_name,
+        target_entity_name=target_entity_name,
+        description=description,
+        keywords=keywords or [],
+        weight=1.0,
+        source_chunk_ids=[],
+    )
+
+
 def test_relationship_lexical_scoring_endpoint_exact_match() -> None:
     """端点实体名称精确匹配得分最高（1.0）。"""
     cfg = GraphCandidateRetrievalConfig(minimum_should_match=0.0)
     result = score_relationship_lexical(
-        source_entity_name="python",
-        target_entity_name="django",
-        keywords=["web", "framework"],
-        description="Python is a web framework using Django.",
+        relation=_make_relation(
+            source_entity_name="python",
+            target_entity_name="django",
+            keywords=["web", "framework"],
+            description="Python is a web framework using Django.",
+        ),
         query_terms=["python"],
         config=cfg,
     )
@@ -309,10 +363,12 @@ def test_relationship_lexical_scoring_keywords_match() -> None:
     """关键词匹配使用 relationship keywords 字段。"""
     cfg = GraphCandidateRetrievalConfig(minimum_should_match=0.0)
     result = score_relationship_lexical(
-        source_entity_name="foo",
-        target_entity_name="bar",
-        keywords=["framework", "web"],
-        description="Something about design.",
+        relation=_make_relation(
+            source_entity_name="foo",
+            target_entity_name="bar",
+            keywords=["framework", "web"],
+            description="Something about design.",
+        ),
         query_terms=["framework"],
         config=cfg,
     )

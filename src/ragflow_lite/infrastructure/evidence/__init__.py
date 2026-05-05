@@ -7,6 +7,9 @@ from ragflow_lite.infrastructure.evidence.deepseek_extractor import (
 from ragflow_lite.infrastructure.evidence.local_json_graph_evidence_index import (
     LocalJsonGraphEvidenceIndex,
 )
+from ragflow_lite.infrastructure.evidence.local_json_graph_hybrid_index import (
+    LocalJsonGraphEvidenceHybridIndex,
+)
 from ragflow_lite.infrastructure.evidence.local_json_store import (
     LocalJsonGraphEvidenceStore,
 )
@@ -17,6 +20,7 @@ from ragflow_lite.infrastructure.evidence.openai_extractor import (
 __all__ = [
     "DeepSeekChatEvidenceExtractor",
     "DeepSeekChatIntraChunkDiscourseExtractor",
+    "LocalJsonGraphEvidenceHybridIndex",
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",

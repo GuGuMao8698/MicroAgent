@@ -10,6 +10,8 @@ import math
 import re
 from dataclasses import dataclass, field
 
+from ragflow_lite.domain.models import EntityEvidence, RelationEvidence  # noqa: auto
+
 # ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
@@ -140,9 +142,7 @@ def _best_score_for_term_in_fields(
 
 
 def score_entity_lexical(
-    name: str,
-    entity_type: str,
-    description: str,
+    entity: EntityEvidence,
     query_terms: list[str],
     config: GraphCandidateRetrievalConfig,
 ) -> LexicalScore:
@@ -152,9 +152,7 @@ def score_entity_lexical(
     总分取所有词项之和。最后通过 minimum_should_match 门控。
 
     Args:
-        name: 实体名称。
-        entity_type: 实体类型。
-        description: 实体描述。
+        entity: 实体证据对象，包含 name、entity_type、description。
         query_terms: 已分词的查询词列表（小写）。
         config: 评分配置，包含 minimum_should_match 门控阈值。
 
@@ -162,9 +160,9 @@ def score_entity_lexical(
         LexicalScore，包含分数和匹配到的词项。
     """
     # 统一小写化
-    name_lower = name.lower()
-    type_lower = entity_type.lower()
-    desc_lower = description.lower()
+    name_lower = entity.name.lower()
+    type_lower = entity.entity_type.lower()
+    desc_lower = entity.description.lower()
 
     fields = [
         (name_lower, *_ENTITY_FIELD_WEIGHTS["name"]),
@@ -196,10 +194,7 @@ def score_entity_lexical(
 
 
 def score_relationship_lexical(
-    source_entity_name: str,
-    target_entity_name: str,
-    keywords: list[str],
-    description: str,
+    relation: RelationEvidence,
     query_terms: list[str],
     config: GraphCandidateRetrievalConfig,
 ) -> LexicalScore:
@@ -209,19 +204,17 @@ def score_relationship_lexical(
     总分取所有词项之和。最后通过 minimum_should_match 门控。
 
     Args:
-        source_entity_name: 源端实体名称。
-        target_entity_name: 目标端实体名称。
-        keywords: 关系关键词列表。
-        description: 关系描述。
+        relation: 关系证据对象，包含 source_entity_name、target_entity_name、
+            keywords、description。
         query_terms: 已分词的查询词列表（小写）。
         config: 评分配置，包含 minimum_should_match 门控阈值。
 
     Returns:
         LexicalScore，包含分数和匹配到的词项。
     """
-    src_lower = source_entity_name.lower()
-    tgt_lower = target_entity_name.lower()
-    desc_lower = description.lower()
+    src_lower = relation.source_entity_name.lower()
+    tgt_lower = relation.target_entity_name.lower()
+    desc_lower = relation.description.lower()
 
     fields = [
         (src_lower, *_RELATIONSHIP_FIELD_WEIGHTS["endpoint"]),
@@ -229,7 +222,7 @@ def score_relationship_lexical(
         (desc_lower, *_RELATIONSHIP_FIELD_WEIGHTS["description"]),
     ]
     # 每个 keyword 单独作为一个字段参与评分
-    for kw in keywords:
+    for kw in relation.keywords:
         fields.append((kw.lower(), *_RELATIONSHIP_FIELD_WEIGHTS["keywords"]))
 
     total_score = 0.0
