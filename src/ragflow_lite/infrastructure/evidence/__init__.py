@@ -16,6 +16,10 @@ from ragflow_lite.infrastructure.evidence.graph_candidate_sidecar import (
 from ragflow_lite.infrastructure.evidence.graph_evidence_sidecar_store import (
     GraphEvidenceSidecarStore,
 )
+from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
+    GraphCandidateInfinityConfig,
+    InfinityGraphCandidateIndex,
+)
 from ragflow_lite.infrastructure.evidence.local_json_graph_evidence_index import (
     LocalJsonGraphEvidenceIndex,
 )
@@ -34,8 +38,10 @@ __all__ = [
     "RELATIONSHIP_MATCH_TEXT_FIELDS",
     "DeepSeekChatEvidenceExtractor",
     "DeepSeekChatIntraChunkDiscourseExtractor",
+    "GraphCandidateInfinityConfig",
     "GraphCandidateSidecar",
     "GraphEvidenceSidecarStore",
+    "InfinityGraphCandidateIndex",
     "LocalJsonGraphEvidenceHybridIndex",
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
