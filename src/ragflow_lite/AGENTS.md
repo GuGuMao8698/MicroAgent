@@ -6,11 +6,11 @@
 ## Do Here
 - 保持 `api`、`application`、`domain`、`infrastructure` 的清晰分层。
 - 让实现围绕主链路演进，避免为未来阶段提前扩张默认运行路径。
-- 默认生产检索路径是 graph-first：`MiniGraphFirstRetriever` 先做 query grounding → graph index 查询 → path expansion → source chunk scoring（MiniRAG mini mode Counter/vote 对齐）→ source selection（budget 分配 `final_context_k` / `discourse_selection_k`），`InfinityHybridRetriever` 作为辅助 chunk 检索（auxiliary）按 MiniRAG `kwd2chunk` 候选路径放大参与评分。pure dense / pure fulltext 仅保留为 index 层内部诊断能力。
+- 默认生产检索路径是 graph-first：`MiniGraphFirstRetriever` 先做 query grounding → graph index 查询 → path expansion → source chunk scoring（MiniRAG mini mode Counter/vote 对齐）→ source selection（budget 分配 `final_context_k` / `discourse_selection_n`），`InfinityHybridRetriever` 作为辅助 chunk 检索（auxiliary）按 MiniRAG `kwd2chunk` 候选路径放大参与评分。pure dense / pure fulltext 仅保留为 index 层内部诊断能力。最终回答预算公开 API 使用 `top_n`（默认 `6`），内部 `discourse_selection_n` 跟随 `answer_top_n`；MiniRAG 内部图候选预算为 `mini_internal_candidate_n`（默认 `60`）。
 - 保持基础 inline citation、文档目录读取和 grounded answer 主链路可用，但把实现细节放回各自子层，不在源码根重复项目阶段说明。
 - 仅允许把 cross-cutting observability helper 放进 `shared`，例如 logging formatter、request/trace context、Prometheus helper；不要把业务流程和 HTTP 逻辑塞进 `shared`。
 - 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
-- `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取、持久化与 graph candidate sidecar，query-time canonical graph evidence view（跨文档同名实体/有向边合并）、hybrid entity/relationship candidate retrieval + BFS path expansion，以及 query-time 块内语篇结构提取。不要在源码根重复 provider 迁移状态或具体符号清单。
+- `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取与持久化，query-time canonical graph evidence view（跨文档同名实体/有向边合并）、graph entity/relationship candidate Infinity 混合检索（`InfinityGraphCandidateIndex`，独立表 `graph_entities` / `graph_relationships`，`match_text + match_dense + weighted_sum` 融合，信任 Infinity `_score`）、BFS path expansion（`LocalJsonGraphEvidenceIndex`），以及 query-time 块内语篇结构提取。`GraphEvidenceInfinityStore` 同步写入 JSON 图证据和 Infinity 候选行，失败时双向回滚。不要在源码根重复 provider 迁移状态或具体符号清单。
 - query-time 图检索已落地：`MiniGraphFirstRetriever`（无状态，安全共享）作为默认检索器，产出 `GraphFirstSourceSelection` 合约（显式 budget 分配 answer/discourse 候选 + 可解释 selection_reason），通过下游 `EvidencePackageBuilder` → discourse extractor（优先 selected_for_discourse）→ blueprint builder → answerer 全链路传递。`QueryModeRouter` 作为 `/queries` 的分发入口，根据请求 `mode` 调度到 `standard`（`QueryService`）或 `discorag`（`DiscoRAGQueryService`）路径。
 
 ## Avoid Here
