@@ -65,6 +65,11 @@ class TestQueryRequestTopN:
         req = QueryRequest(query="test", top_n=5)
         assert req.answer_top_n == 5
 
+    def test_explicit_default_top_n_conflicts_with_different_top_k(self) -> None:
+        """显式 top_n=6 和不同 top_k 同传时也应视为冲突。"""
+        with pytest.raises(ValueError, match="top_n and top_k must match"):
+            QueryRequest(query="test", top_n=6, top_k=3)
+
     def test_top_k_is_excluded_from_serialization(self) -> None:
         """top_k 字段不序列化输出。"""
         req = QueryRequest(query="test", top_k=3)

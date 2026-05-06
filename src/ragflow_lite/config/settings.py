@@ -134,7 +134,6 @@ class Settings:
     infinity_document_table: str = "documents"
     infinity_chunk_table: str = "chunks"
     # ── 图候选 Infinity 检索参数 ──
-    answer_top_n_default: int = 6
     mini_internal_candidate_n: int = 60
     query_entity_limit: int = 5
     graph_initial_recall_n: int = 1024

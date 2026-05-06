@@ -78,7 +78,7 @@ class QueryRequest(BaseModel):
         """top_k 别名处理：仅传 top_k 时覆盖默认 top_n；两者都传且不一致时报错。"""
         if self.top_k is None:
             return self
-        if self.top_n != 6 and self.top_n != self.top_k:
+        if "top_n" in self.model_fields_set and self.top_n != self.top_k:
             raise ValueError("top_n and top_k must match when both are provided")
         object.__setattr__(self, "top_n", self.top_k)
         return self

@@ -287,7 +287,6 @@ def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> 
 def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     """验证图候选 Infinity 设置的默认值与规格一致。"""
     settings = _build_settings(tmp_path)
-    assert settings.answer_top_n_default == 6
     assert settings.mini_internal_candidate_n == 60
     assert settings.query_entity_limit == 5
     assert settings.graph_initial_recall_n == 1024
