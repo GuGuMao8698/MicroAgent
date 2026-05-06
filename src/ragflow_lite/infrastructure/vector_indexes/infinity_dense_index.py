@@ -389,6 +389,13 @@ class InfinityDenseVectorIndex:
             f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
             f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
         }
+        # 迁移窗口：只为表中实际存在的列创建全文索引。
+        available_columns = self._chunk_column_names()
+        required_indexes = {
+            index_name: column_name
+            for index_name, column_name in required_indexes.items()
+            if column_name in available_columns
+        }
         existing_indexes = self._list_index_names(chunk_table)
 
         for index_name, column_name in required_indexes.items():
@@ -412,6 +419,17 @@ class InfinityDenseVectorIndex:
                 f"indexes: {', '.join(sorted(missing_indexes))}. "
                 "Drop and recreate the indexes or repair the Infinity schema."
             )
+
+    def _chunk_column_names(self) -> set[str]:
+        """读取 chunk 表当前所有列名，用于迁移窗口兼容。"""
+        chunk_table = self._db.get_table(self._chunk_table)
+        df = self._columns_dataframe(chunk_table.show_columns())
+        names: set[str] = set()
+        for row in df.iter_rows(named=True):
+            name = row.get("column_name", row.get("name"))
+            if name:
+                names.add(str(name))
+        return names
 
     def _list_index_names(self, table: Any) -> set[str]:
         """尽量读取 RemoteTable 上的索引列表；缺失接口时退化为空集合。"""

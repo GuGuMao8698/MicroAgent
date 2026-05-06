@@ -116,6 +116,27 @@ def _create_existing_chunk_table_without_fulltext_indexes(db: Any) -> Any:
     return db.get_table("chunks")
 
 
+def _create_legacy_chunk_table_without_fielded_text_columns(db: Any) -> Any:
+    """模拟迁移前旧表：只有 filename / text，没有 fielded text 列。"""
+    db.create_table(
+        "chunks",
+        {
+            "chunk_id": {"type": "varchar"},
+            "document_id": {"type": "varchar"},
+            "chunk_index": {"type": "integer"},
+            "text": {"type": "varchar"},
+            "vec": {"type": f"vector,{DIMS},float"},
+            "filename": {"type": "varchar"},
+            "file_type": {"type": "varchar"},
+            "chunk_metadata_json": {"type": "varchar"},
+            "embedding_provider": {"type": "varchar"},
+            "embedding_model": {"type": "varchar"},
+            "embedding_dimensions": {"type": "integer"},
+        },
+    )
+    return db.get_table("chunks")
+
+
 class TestInfinityDenseVectorIndex:
     def test_chunk_hybrid_config_defaults_match_spec(self) -> None:
         config = ChunkHybridRetrievalConfig()
@@ -130,7 +151,8 @@ class TestInfinityDenseVectorIndex:
         assert config.position_prior_enabled is True
         assert (
             config.match_text_fields
-            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
+            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks,"
+            "filename^10,text"
         )
 
     def test_accepts_custom_chunk_hybrid_config(self, make_index) -> None:
@@ -484,6 +506,32 @@ class TestInfinityDenseVectorIndex:
                 client=client,
             )
 
+    def test_init_preserves_legacy_chunk_table_without_fielded_text_columns(
+        self,
+        fake_infinity_client_factory,
+    ) -> None:
+        """启动时遇到只有 filename/text 的旧表不应崩溃，只为存在的列建全文索引。"""
+        client = fake_infinity_client_factory()
+        db = client.get_database("default_db")
+        _create_legacy_chunk_table_without_fielded_text_columns(db)
+
+        InfinityDenseVectorIndex(
+            host="127.0.0.1",
+            port=23817,
+            database="default_db",
+            document_table="documents",
+            chunk_table="chunks",
+            embedding_dimensions=DIMS,
+            embedding_signature=SIGNATURE,
+            client=client,
+        )
+
+        chunk_table = db.get_table("chunks")
+        assert chunk_table.list_indexes().index_names == [
+            "chunks_text_fulltext_idx",
+            "chunks_filename_fulltext_idx",
+        ]
+
     def test_search_text_returns_matching_chunks(self, make_index) -> None:
         _, idx = make_index()
         asset = _make_asset()
@@ -765,7 +813,23 @@ class TestInfinityDenseVectorIndex:
         )
         assert (
             chunk_table.last_hybrid_text_fields
-            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
+            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks,"
+            "filename^10,text"
+        )
+
+    def test_search_hybrid_includes_legacy_text_fields_for_migration_window(
+        self,
+        make_index,
+    ) -> None:
+        """match_text_fields 必须包含 filename^10,text 以保持旧行稀疏召回。"""
+        _, idx = make_index()
+
+        idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=5)
+
+        chunk_table = idx._db.get_table("chunks")
+        assert chunk_table.last_hybrid_text_fields == (
+            "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks,"
+            "filename^10,text"
         )
 
     def test_search_hybrid_recalls_via_filename_match(self, make_index) -> None:
