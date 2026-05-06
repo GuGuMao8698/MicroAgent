@@ -4,7 +4,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -1577,3 +1577,73 @@ def test_graph_evidence_sidecar_failure_rolls_back_sidecar_wrapper() -> None:
         )
         assert vector_index.delete_calls == 1
         assert document_store.delete_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# GraphEvidenceInfinityStore rollback test
+# ---------------------------------------------------------------------------
+
+
+def test_graph_evidence_infinity_failure_rolls_back_both_stores() -> None:
+    """当 Infinity candidate 写入失败时，GraphEvidenceInfinityStore 回滚 JSON store 和 candidate 行。"""
+    from ragflow_lite.infrastructure.evidence.graph_evidence_infinity_store import (
+        GraphEvidenceInfinityStore,
+    )
+
+    # 记录调用、Infinity 写入时失败的伪依赖
+    @dataclass
+    class _RecordingGraphStore:
+        upserts: list[GraphEvidenceBatch] = field(default_factory=list)
+        delete_calls: list[str] = field(default_factory=list)
+
+        def upsert_document_evidence(self, batch: GraphEvidenceBatch):
+            self.upserts.append(batch)
+            return GraphEvidenceWriteResult(
+                document_id=batch.document_id,
+                entity_count=len(batch.entities),
+                relation_count=len(batch.relations),
+            )
+
+        def delete_document(self, document_id: str) -> None:
+            self.delete_calls.append(document_id)
+
+        def get_document_evidence(self, document_id: str) -> GraphEvidenceBatch | None:
+            return None
+
+    @dataclass
+    class _FailingCandidateIndex:
+        """upsert_document_evidence 总是失败的伪候选索引。"""
+
+        deletes: list[str] = field(default_factory=list)
+
+        def upsert_document_evidence(self, batch: GraphEvidenceBatch) -> None:
+            raise RuntimeError("infinity candidate write failed")
+
+        def delete_document(self, document_id: str) -> None:
+            self.deletes.append(document_id)
+
+    inner_store = _RecordingGraphStore()
+    failing_index = _FailingCandidateIndex()
+    wrapper = GraphEvidenceInfinityStore(
+        graph_store=inner_store,
+        candidate_index=cast(Any, failing_index),
+    )
+
+    vector_index = _FakeVectorIndex()
+    document_store = _FakeDocumentStore()
+    pipeline = _build_pipeline(
+        vector_index=vector_index,
+        document_store=document_store,
+        chunker=_ProducingChunker(),
+    )
+    pipeline.evidence_extractor = _FakeEvidenceExtractor()
+    pipeline.graph_store = wrapper
+
+    with pytest.raises(ProcessingError, match="Failed to index document"):
+        pipeline.ingest("infinity_test.txt", b"infinity content")
+
+    # wrapper 回滚：inner_store 和 candidate_index 都收到 delete
+    assert inner_store.delete_calls, "JSON store rollback should have been called"
+    assert failing_index.deletes, "Infinity candidate rollback should have been called"
+    assert vector_index.delete_calls == 1
+    assert document_store.delete_calls == 1
