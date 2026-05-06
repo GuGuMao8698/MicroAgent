@@ -12,6 +12,7 @@ import pytest
 from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import DocumentAsset, EmbeddedChunk
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
+    ChunkHybridRetrievalConfig,
     InfinityDenseVectorIndex,
 )
 
@@ -110,6 +111,19 @@ def _create_existing_chunk_table_without_fulltext_indexes(db: Any) -> Any:
 
 
 class TestInfinityDenseVectorIndex:
+    def test_chunk_hybrid_config_defaults_match_spec(self) -> None:
+        config = ChunkHybridRetrievalConfig()
+
+        assert config.initial_recall_n == 1024
+        assert config.text_weight == 0.05
+        assert config.dense_weight == 0.95
+        assert config.minimum_should_match == 0.3
+        assert config.dense_similarity_threshold == 0.2
+        assert config.fusion_normalize == "atan"
+        assert config.position_prior_weight == 0.03
+        assert config.position_prior_enabled is True
+        assert config.match_text_fields == "filename^3,text"
+
     def test_creates_tables_on_init(self, make_index) -> None:
         client, _ = make_index()
         db = client.get_database("default_db")

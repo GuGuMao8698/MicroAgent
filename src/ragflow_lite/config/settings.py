@@ -145,6 +145,15 @@ class Settings:
     graph_candidate_fusion_normalize: str = "atan"
     infinity_graph_entity_table: str = "graph_entities"
     infinity_graph_relationship_table: str = "graph_relationships"
+    # ── chunk Infinity hybrid 检索参数 ──
+    chunk_initial_recall_n: int = 1024
+    chunk_text_weight: float = 0.05
+    chunk_dense_weight: float = 0.95
+    chunk_minimum_should_match: float = 0.3
+    chunk_dense_similarity_threshold: float = 0.2
+    chunk_fusion_normalize: str = "atan"
+    chunk_position_prior_weight: float = 0.03
+    chunk_position_prior_enabled: bool = True
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")

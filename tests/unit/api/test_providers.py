@@ -300,6 +300,19 @@ def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.infinity_graph_relationship_table == "graph_relationships"
 
 
+def test_chunk_hybrid_defaults_match_spec(tmp_path: Path) -> None:
+    """验证 chunk Infinity hybrid 设置默认值与规格一致。"""
+    settings = _build_settings(tmp_path)
+    assert settings.chunk_initial_recall_n == 1024
+    assert settings.chunk_text_weight == 0.05
+    assert settings.chunk_dense_weight == 0.95
+    assert settings.chunk_minimum_should_match == 0.3
+    assert settings.chunk_dense_similarity_threshold == 0.2
+    assert settings.chunk_fusion_normalize == "atan"
+    assert settings.chunk_position_prior_weight == 0.03
+    assert settings.chunk_position_prior_enabled is True
+
+
 def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
     services = build_services(_build_settings(tmp_path))
 

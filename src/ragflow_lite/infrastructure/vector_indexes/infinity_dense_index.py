@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -38,6 +39,39 @@ EmbeddingSignature = dict[str, str | int | None]
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class ChunkHybridRetrievalConfig:
+    """Infinity hybrid retrieval settings for chunk search."""
+
+    initial_recall_n: int = 1024
+    text_weight: float = 0.05
+    dense_weight: float = 0.95
+    minimum_should_match: float = 0.3
+    dense_similarity_threshold: float = 0.2
+    fusion_normalize: str = "atan"
+    position_prior_weight: float = 0.03
+    position_prior_enabled: bool = True
+    match_text_fields: str = "filename^3,text"
+
+    def __post_init__(self) -> None:
+        if self.initial_recall_n < 1:
+            raise ValueError("initial_recall_n must be >= 1")
+        if self.text_weight < 0 or self.dense_weight < 0:
+            raise ValueError("chunk hybrid weights must be non-negative")
+        if self.text_weight == 0 and self.dense_weight == 0:
+            raise ValueError("at least one chunk hybrid weight must be positive")
+        if not 0 <= self.minimum_should_match <= 1:
+            raise ValueError("minimum_should_match must be between 0 and 1")
+        if self.dense_similarity_threshold < 0:
+            raise ValueError("dense_similarity_threshold must be >= 0")
+        if self.position_prior_weight < 0:
+            raise ValueError("position_prior_weight must be >= 0")
+
+    @property
+    def fusion_weights(self) -> str:
+        return f"{self.text_weight},{self.dense_weight}"
 
 
 class InfinityDenseVectorIndex:
