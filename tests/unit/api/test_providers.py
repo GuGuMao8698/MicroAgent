@@ -431,3 +431,18 @@ def test_build_services_wires_chunk_hybrid_config(tmp_path: Path) -> None:
     assert config.fusion_normalize == "atan"
     assert config.position_prior_weight == 0.01
     assert config.position_prior_enabled is False
+
+
+def test_chunk_and_graph_candidate_configs_are_separate(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    settings.chunk_initial_recall_n = 77
+    settings.graph_initial_recall_n = 88
+
+    services = build_services(settings)
+
+    vector_index = services.ingestion_pipeline.vector_index
+    graph_index = services.retriever.entity_index
+    assert isinstance(vector_index, InfinityDenseVectorIndex)
+    assert isinstance(graph_index, InfinityGraphCandidateIndex)
+    assert vector_index._chunk_hybrid_config.initial_recall_n == 77
+    assert graph_index._config.graph_initial_recall_n == 88
