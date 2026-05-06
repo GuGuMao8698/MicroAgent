@@ -355,6 +355,21 @@ class EmptyGrounder:
         )
 
 
+@dataclass
+class KeywordOnlyGrounder:
+    """返回 answer_type_keywords 但不返回实体，用于验证关系预算下限。"""
+
+    calls: list[str] = field(default_factory=list)
+
+    def ground(self, query: str) -> GroundedQuery:
+        self.calls.append(query)
+        return GroundedQuery(
+            query=query,
+            answer_type_keywords=["mechanism"],
+            entities_from_query=[],
+        )
+
+
 def test_mini_graph_first_retriever_source_selection_records_empty_grounding_fallback() -> (
     None
 ):
@@ -927,3 +942,54 @@ def test_explicit_chunk_auxiliary_candidate_n_overrides_default() -> None:
 
     retriever.retrieve_context("How does MiniRAG work?", top_k=2)
     assert auxiliary_retriever.calls[0][1] == 15
+
+
+# ---------------------------------------------------------------------------
+# MiniRAG 内部预算正数下限回归测试
+# ---------------------------------------------------------------------------
+
+
+def test_keyword_only_grounding_keeps_positive_relationship_budget() -> None:
+    """当 grounding 只返回关键词、不返回实体时，关系预算应保持 >= 1。"""
+    grounder = KeywordOnlyGrounder()
+    entity_index = BudgetRecordingEntityIndex()
+    relationship_index = BudgetRecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        mini_internal_candidate_n=7,
+    )
+
+    retriever.retrieve_context("which mechanism matters?", top_k=2)
+
+    assert relationship_index.calls == [("which mechanism matters?", ("mechanism",), 7)]
+
+
+def test_auxiliary_default_budget_is_at_least_one() -> None:
+    """mini_internal_candidate_n=1 时，辅助检索默认预算 int(1/2)=0 应被提升为 1。"""
+    grounder = RecordingGrounder()
+    entity_index = BudgetRecordingEntityIndex()
+    relationship_index = BudgetRecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+    auxiliary_retriever = BudgetRecordingAuxiliaryRetriever()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        mini_internal_candidate_n=1,
+    )
+
+    retriever.retrieve_context("How does MiniRAG work?", top_k=2)
+
+    assert auxiliary_retriever.calls[0][1] == 1

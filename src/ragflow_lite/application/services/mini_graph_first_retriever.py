@@ -134,8 +134,11 @@ class MiniGraphFirstRetriever:
         query_entities = grounded_query.entities_from_query[: self.query_entity_limit]
         query_entity_n = len(query_entities)
         entity_candidate_n = self.mini_internal_candidate_n
-        # 关系候选预算 = 实体数 * 内部候选数
-        relationship_candidate_n = query_entity_n * self.mini_internal_candidate_n
+        # 关系候选预算 = 实体数 * 内部候选数（下限为 mini_internal_candidate_n）
+        relationship_candidate_n = max(
+            self.mini_internal_candidate_n,
+            query_entity_n * self.mini_internal_candidate_n,
+        )
 
         # 第 3 步: 图索引查询 —— 实体名称索引 + 关系索引
         entity_candidates = self.entity_index.query_entities(
@@ -285,8 +288,8 @@ class MiniGraphFirstRetriever:
         """辅助检索的 top_k：优先使用显式配置，否则按 mini_internal_candidate_n / 2 推导。"""
         if self.chunk_auxiliary_candidate_n is not None:
             return self.chunk_auxiliary_candidate_n
-        # 默认推导：mini_internal_candidate_n 的一半
-        return int(self.mini_internal_candidate_n / 2)
+        # 默认推导：mini_internal_candidate_n 的一半（保证 >= 1）
+        return _at_least_one(int(self.mini_internal_candidate_n / 2))
 
     def _build_source_selection(
         self,
@@ -622,6 +625,11 @@ def _relation_ids(candidates: list[MiniRelationshipCandidate]) -> list[str]:
 def _dedupe(values: list[str]) -> list[str]:
     """保序去重。"""
     return list(dict.fromkeys(values))
+
+
+def _at_least_one(value: int) -> int:
+    """保证内部预算推导结果不小于 1。"""
+    return max(1, value)
 
 
 def _require_positive_top_k(top_k: int) -> None:
