@@ -16,6 +16,7 @@ from typing import Any
 
 from ragflow_lite.domain.models.entities import (
     EntityEvidence,
+    GraphEvidenceBatch,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
     RelationEvidence,
@@ -23,6 +24,10 @@ from ragflow_lite.domain.models.entities import (
 from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
     ENTITY_MATCH_TEXT_FIELDS,
     RELATIONSHIP_MATCH_TEXT_FIELDS,
+    build_entity_candidate_row,
+    build_entity_embedding_text,
+    build_relationship_candidate_row,
+    build_relationship_embedding_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -364,3 +369,59 @@ class InfinityGraphCandidateIndex:
 
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates[:top_k]
+
+    # ------------------------------------------------------------------
+    # 行生命周期：upsert / delete
+    # ------------------------------------------------------------------
+
+    def upsert_document_evidence(self, batch: GraphEvidenceBatch) -> None:
+        """插入（或替换）一个文档的全部图证据行。
+
+        先删除该文档的旧行，再重新插入 —— upsert 语义。
+
+        Args:
+            batch: 包含实体和关系的图证据批次
+        """
+        # 先删除该文档的旧行
+        self.delete_document(batch.document_id)
+
+        # 构建并插入实体行
+        entity_rows = [
+            build_entity_candidate_row(
+                entity,
+                vector=self._embedder.embed_query(build_entity_embedding_text(entity)),
+            )
+            for entity in batch.entities
+        ]
+
+        # 构建并插入关系行
+        relationship_rows = [
+            build_relationship_candidate_row(
+                relation,
+                vector=self._embedder.embed_query(
+                    build_relationship_embedding_text(relation)
+                ),
+            )
+            for relation in batch.relations
+        ]
+
+        if entity_rows:
+            self._get_table(self._config.entity_table).insert(entity_rows)
+        if relationship_rows:
+            self._get_table(self._config.relationship_table).insert(relationship_rows)
+
+    def delete_document(self, document_id: str) -> None:
+        """删除一个文档在两张表中的全部行。
+
+        Args:
+            document_id: 要删除的文档 ID
+        """
+        # 防止 SQL 注入：转义单引号
+        escaped = document_id.replace("'", "\\'")
+        filter_expr = f"document_id = '{escaped}'"
+        self._get_table(self._config.entity_table).delete(filter_expr)
+        self._get_table(self._config.relationship_table).delete(filter_expr)
+
+    def _get_table(self, name: str) -> Any:
+        """按名称获取 Infinity 表对象。"""
+        return self._db.get_table(name)

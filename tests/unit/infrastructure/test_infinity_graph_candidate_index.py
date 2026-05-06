@@ -12,8 +12,11 @@ import polars as pl
 import pytest
 
 from ragflow_lite.domain.models.entities import (
+    EntityEvidence,
+    GraphEvidenceBatch,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
+    RelationEvidence,
 )
 from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
     ENTITY_MATCH_TEXT_FIELDS,
@@ -175,9 +178,22 @@ class _GraphFakeInfinityTable:
         self.rows: list[dict[str, Any]] = []
         # 记录查询调用
         self.query_calls: list[dict[str, Any]] = []
+        # 记录 delete 调用的 filter 表达式
+        self.deleted_filters: list[str] = []
 
     def insert(self, data: list[dict[str, Any]]) -> None:
         self.rows.extend(data)
+
+    def delete(self, filter_expr: str) -> None:
+        """记录 delete 调用，并按 document_id 过滤移除匹配行。"""
+        self.deleted_filters.append(filter_expr)
+        # 简单解析 "document_id = 'xxx'" 格式，移除匹配行
+        import re
+
+        m = re.match(r"document_id\s*=\s*'((?:[^'\\]|\\.)*)'", filter_expr)
+        if m:
+            doc_id = m.group(1).replace("\\'", "'")
+            self.rows = [r for r in self.rows if r.get("document_id") != doc_id]
 
     def match_text(self, **kwargs: Any) -> _GraphFakeQueryBuilder:
         self.query_calls.append({"type": "match_text", "kwargs": kwargs})
@@ -888,3 +904,295 @@ class TestConstructor:
         results = idx.query_entities(["Python"], top_k=10)
         # 如果查到了，说明使用了正确的自定义表名
         assert len(results) >= 1
+
+
+# ===========================================================================
+# 测试：行生命周期（upsert / delete）
+# ===========================================================================
+
+
+def _make_entity_evidence(
+    *,
+    entity_id: str = "ent_1",
+    document_id: str = "doc_1",
+    name: str = "Python",
+    entity_type: str = "language",
+    description: str = "A programming language",
+    source_chunk_ids: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> EntityEvidence:
+    """创建测试用 EntityEvidence。"""
+    return EntityEvidence(
+        entity_id=entity_id,
+        document_id=document_id,
+        name=name,
+        entity_type=entity_type,
+        description=description,
+        source_chunk_ids=source_chunk_ids or ["chunk_1"],
+        metadata=metadata or {},
+    )
+
+
+def _make_relation_evidence(
+    *,
+    relation_id: str = "rel_1",
+    document_id: str = "doc_1",
+    source_entity_id: str = "src_1",
+    target_entity_id: str = "tgt_1",
+    source_entity_name: str = "Python",
+    target_entity_name: str = "Django",
+    description: str = "Python uses Django",
+    keywords: list[str] | None = None,
+    weight: float = 1.0,
+    source_chunk_ids: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> RelationEvidence:
+    """创建测试用 RelationEvidence。"""
+    return RelationEvidence(
+        relation_id=relation_id,
+        document_id=document_id,
+        source_entity_id=source_entity_id,
+        target_entity_id=target_entity_id,
+        source_entity_name=source_entity_name,
+        target_entity_name=target_entity_name,
+        description=description,
+        keywords=keywords or ["web framework"],
+        weight=weight,
+        source_chunk_ids=source_chunk_ids or ["chunk_1"],
+        metadata=metadata or {},
+    )
+
+
+class TestUpsertDocumentEvidence:
+    """upsert_document_evidence 生命周期测试。"""
+
+    def test_builds_and_inserts_entity_and_relationship_rows(self) -> None:
+        """upsert 应先删除旧行，再构建并插入实体和关系行。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+        rel_table = db.get_table("graph_relationships")
+
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[
+                _make_entity_evidence(entity_id="ent_1", name="Python"),
+            ],
+            relations=[
+                _make_relation_evidence(relation_id="rel_1"),
+            ],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        # 验证 delete 先被调用（upsert 语义：先删后插）
+        assert "document_id = 'doc_1'" in entity_table.deleted_filters
+        assert "document_id = 'doc_1'" in rel_table.deleted_filters
+
+        # 验证实体行已插入
+        assert len(entity_table.rows) == 1
+        entity_row = entity_table.rows[0]
+        assert entity_row["candidate_id"] == "ent_1"
+        assert entity_row["document_id"] == "doc_1"
+        assert entity_row["candidate_kind"] == "entity"
+        assert entity_row["entity_name_kwd"] == "Python"
+        assert "vec" in entity_row
+
+        # 验证关系行已插入
+        assert len(rel_table.rows) == 1
+        rel_row = rel_table.rows[0]
+        assert rel_row["candidate_id"] == "rel_1"
+        assert rel_row["document_id"] == "doc_1"
+        assert rel_row["candidate_kind"] == "relationship"
+        assert "vec" in rel_row
+
+    def test_delete_called_before_insert(self) -> None:
+        """upsert 应先删除旧行再插入新行，确保替换语义。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+
+        # 先插入旧行
+        entity_table.insert(
+            [_make_entity_row(candidate_id="old_ent", document_id="doc_1")]
+        )
+        assert len(entity_table.rows) == 1
+
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[_make_entity_evidence(entity_id="new_ent")],
+            relations=[],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        # 旧行应被删除，只有新行存在
+        assert len(entity_table.rows) == 1
+        assert entity_table.rows[0]["candidate_id"] == "new_ent"
+
+    def test_embedder_called_for_each_entity_and_relation(self) -> None:
+        """upsert 应为每个实体和关系调用 embedder 构建 embedding。"""
+        embedder = FakeEmbedder(dim=4)
+        idx, client, _ = _make_index(embedder=embedder)
+
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[
+                _make_entity_evidence(entity_id="e1", name="Python"),
+                _make_entity_evidence(entity_id="e2", name="Java"),
+            ],
+            relations=[
+                _make_relation_evidence(
+                    relation_id="r1",
+                    source_entity_name="Python",
+                    target_entity_name="Django",
+                ),
+            ],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        # embedder.last_query 保存最后一次调用
+        # 关系 embed 文本包含 target name，验证最后一次调用
+        assert "Django" in embedder.last_query
+
+    def test_entity_row_has_correct_fields(self) -> None:
+        """插入的实体行应包含 build_entity_candidate_row 的全部字段。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+
+        entity = _make_entity_evidence(
+            entity_id="ent_42",
+            name="FastAPI",
+            entity_type="framework",
+            description="A modern web framework",
+            source_chunk_ids=["chunk_a", "chunk_b"],
+        )
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[entity],
+            relations=[],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        row = entity_table.rows[0]
+        assert row["candidate_id"] == "ent_42"
+        assert row["canonical_id"] == "ent_42"
+        assert row["document_id"] == "doc_1"
+        assert row["candidate_kind"] == "entity"
+        assert row["entity_name_kwd"] == "FastAPI"
+        assert row["source_chunk_ids"] == ["chunk_a", "chunk_b"]
+        assert row["metadata"] == {}
+
+
+class TestUpsertSkipsInsert:
+    """upsert 在无实体或无关系时应跳过对应的 insert。"""
+
+    def test_skips_entity_insert_when_no_entities(self) -> None:
+        """没有实体时不应调用实体表 insert。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+        rel_table = db.get_table("graph_relationships")
+
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[],
+            relations=[_make_relation_evidence(relation_id="rel_1")],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        # 实体表不应有插入行（delete 后无新行）
+        assert len(entity_table.rows) == 0
+        # 关系表应有插入行
+        assert len(rel_table.rows) == 1
+
+    def test_skips_relationship_insert_when_no_relations(self) -> None:
+        """没有关系时不应调用关系表 insert。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+        rel_table = db.get_table("graph_relationships")
+
+        batch = GraphEvidenceBatch(
+            document_id="doc_1",
+            entities=[_make_entity_evidence(entity_id="ent_1")],
+            relations=[],
+        )
+
+        idx.upsert_document_evidence(batch)
+
+        # 实体表应有插入行
+        assert len(entity_table.rows) == 1
+        # 关系表不应有插入行
+        assert len(rel_table.rows) == 0
+
+
+class TestDeleteDocument:
+    """delete_document 生命周期测试。"""
+
+    def test_removes_rows_from_both_tables(self) -> None:
+        """delete_document 应从实体表和关系表中删除匹配行。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+        rel_table = db.get_table("graph_relationships")
+
+        # 插入测试数据
+        entity_table.insert(
+            [
+                _make_entity_row(candidate_id="e1", document_id="doc_1"),
+                _make_entity_row(candidate_id="e2", document_id="doc_2"),
+            ]
+        )
+        rel_table.insert(
+            [
+                _make_relationship_row(candidate_id="r1", document_id="doc_1"),
+                _make_relationship_row(candidate_id="r2", document_id="doc_2"),
+            ]
+        )
+
+        idx.delete_document("doc_1")
+
+        # doc_1 的行应被删除
+        assert all(r["document_id"] != "doc_1" for r in entity_table.rows)
+        assert all(r["document_id"] != "doc_1" for r in rel_table.rows)
+        # doc_2 的行应保留
+        assert any(r["document_id"] == "doc_2" for r in entity_table.rows)
+        assert any(r["document_id"] == "doc_2" for r in rel_table.rows)
+
+    def test_delete_filter_expression(self) -> None:
+        """delete 应使用正确的 filter 表达式。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+        rel_table = db.get_table("graph_relationships")
+
+        idx.delete_document("my_doc")
+
+        assert entity_table.deleted_filters == ["document_id = 'my_doc'"]
+        assert rel_table.deleted_filters == ["document_id = 'my_doc'"]
+
+    def test_delete_escapes_single_quotes(self) -> None:
+        """document_id 含单引号时应正确转义，防止 SQL 注入。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+
+        idx.delete_document("it's_a_trap")
+
+        # 单引号应被转义
+        assert entity_table.deleted_filters == ["document_id = 'it\\'s_a_trap'"]
+
+    def test_delete_nonexistent_document_is_safe(self) -> None:
+        """删除不存在的文档不应抛出异常。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+
+        # 表为空时删除不应报错
+        idx.delete_document("nonexistent")
+        assert entity_table.deleted_filters == ["document_id = 'nonexistent'"]
