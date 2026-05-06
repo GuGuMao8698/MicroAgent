@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from ragflow_lite.infrastructure.nlp import (
+    RAGFlowTokenizerUnavailableError,
+    tokenize,
+)
+
 _CJK_BOUNDARY_LTR = re.compile(
     r"(?<=[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff])(?=[a-zA-Z0-9])"
 )
@@ -67,3 +72,13 @@ def build_sparse_query(query: str) -> str:
         fallback = text.strip()
         return fallback if fallback else query.strip()
     return " ".join(tokens)
+
+
+def build_chunk_text_query(query: str) -> str:
+    """Build match_text query for RAGFlow-tokenized chunk fields."""
+    try:
+        tokenized = tokenize(query)
+    except RAGFlowTokenizerUnavailableError:
+        return build_sparse_query(query)
+    normalized = tokenized.strip()
+    return normalized if normalized else build_sparse_query(query)

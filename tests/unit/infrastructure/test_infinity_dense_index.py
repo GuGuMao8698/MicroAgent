@@ -128,7 +128,10 @@ class TestInfinityDenseVectorIndex:
         assert config.fusion_normalize == "atan"
         assert config.position_prior_weight == 0.03
         assert config.position_prior_enabled is True
-        assert config.match_text_fields == "filename^3,text"
+        assert (
+            config.match_text_fields
+            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
+        )
 
     def test_accepts_custom_chunk_hybrid_config(self, make_index) -> None:
         config = ChunkHybridRetrievalConfig(
@@ -744,8 +747,10 @@ class TestInfinityDenseVectorIndex:
         assert len(results) == 1
         assert results[0].chunk_id == dual.chunk_id
 
-    def test_search_hybrid_text_fields_is_filename_boost_text(self, make_index) -> None:
-        """search_hybrid 的 text 分支使用 filename^3,text 多字段。"""
+    def test_search_hybrid_text_fields_use_chunk_fielded_text(
+        self, make_index
+    ) -> None:
+        """search_hybrid 的 text 分支使用 chunk fielded text 多字段。"""
         client, idx = make_index()
         asset = _make_asset()
         chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
@@ -758,7 +763,10 @@ class TestInfinityDenseVectorIndex:
             query_vector=[1.0, 0.0, 0.0, 0.0],
             top_k=5,
         )
-        assert chunk_table.last_hybrid_text_fields == "filename^3,text"
+        assert (
+            chunk_table.last_hybrid_text_fields
+            == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
+        )
 
     def test_search_hybrid_recalls_via_filename_match(self, make_index) -> None:
         """正文不命中、dense 不命中时，仅靠 filename sparse 字段召回。"""

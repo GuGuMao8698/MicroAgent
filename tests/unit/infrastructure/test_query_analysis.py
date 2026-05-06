@@ -1,4 +1,4 @@
-"""build_sparse_query 纯函数单测。"""
+"""query_analysis 纯函数单测。"""
 
 from __future__ import annotations
 
@@ -89,3 +89,23 @@ class TestFallbackAndSymbolCleanup:
     )
     def test_build_sparse_query(self, query: str, expected: str) -> None:
         assert build_sparse_query(query) == expected
+
+
+def test_build_chunk_text_query_uses_ragflow_tokenizer(monkeypatch) -> None:
+    from ragflow_lite.infrastructure.retrievers import query_analysis
+
+    monkeypatch.setattr(query_analysis, "tokenize", lambda text: f"tok({text})")
+
+    assert query_analysis.build_chunk_text_query("TypeScript 手册") == "tok(TypeScript 手册)"
+
+
+def test_build_chunk_text_query_falls_back_to_sparse_query(monkeypatch) -> None:
+    from ragflow_lite.infrastructure.nlp import RAGFlowTokenizerUnavailableError
+    from ragflow_lite.infrastructure.retrievers import query_analysis
+
+    def fail_tokenize(text: str) -> str:
+        raise RAGFlowTokenizerUnavailableError("missing")
+
+    monkeypatch.setattr(query_analysis, "tokenize", fail_tokenize)
+
+    assert query_analysis.build_chunk_text_query("TypeScript 手册") == "typescript 手册"

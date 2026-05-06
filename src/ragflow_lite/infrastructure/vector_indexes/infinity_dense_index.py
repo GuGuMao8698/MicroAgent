@@ -32,6 +32,9 @@ from ragflow_lite.domain.models import (
     RetrievedChunk,
 )
 from ragflow_lite.infrastructure.vector_indexes import chunk_text_fields
+from ragflow_lite.infrastructure.vector_indexes.chunk_text_fields import (
+    CHUNK_FIELD_MATCH_TEXT_FIELDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ class ChunkHybridRetrievalConfig:
     fusion_normalize: str = "atan"
     position_prior_weight: float = 0.03
     position_prior_enabled: bool = True
-    match_text_fields: str = "filename^3,text"
+    match_text_fields: str = CHUNK_FIELD_MATCH_TEXT_FIELDS
 
     def __post_init__(self) -> None:
         if self.initial_recall_n < 1:
