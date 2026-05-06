@@ -58,6 +58,22 @@ def _join_unique(values: list[str], separator: str) -> str:
     return separator.join(_stable_union([v for v in values if v.strip()]))
 
 
+def _canonical_display_name(members: list[EntityEvidence]) -> str:
+    """Choose a stable human-readable display name for a canonical entity.
+
+    规则：同一 canonical 组内，选择非空 name.strip() 中最长的那个，
+    保证跨运行确定性（仅取决于输入集合，不依赖排序）。
+    """
+    best_name = members[0].name.strip()
+    best_len = len(best_name)
+    for member in members[1:]:
+        candidate = member.name.strip()
+        if len(candidate) > best_len:
+            best_name = candidate
+            best_len = len(candidate)
+    return best_name
+
+
 @dataclass(slots=True)
 class CanonicalGraphEvidence:
     """规范化后的跨文档图证据。
@@ -134,10 +150,13 @@ def canonicalize_graph_evidence(
         # source_entity_names: 去重后的原始名称集合（同名实体可能有不同大小写）
         source_entity_names = _stable_union([m.name for m in members])
 
+        # 选择最长的原始名称作为 display name
+        display_name = _canonical_display_name(members)
+
         canonical_entity = EntityEvidence(
             entity_id=canonical_eid,
             document_id=CANONICAL_DOCUMENT_ID,
-            name=members[0].name,
+            name=display_name,
             entity_type=entity_type,
             description=description,
             source_chunk_ids=source_chunk_ids,
@@ -155,8 +174,8 @@ def canonicalize_graph_evidence(
         for m in members:
             entity_id_map[m.entity_id] = canonical_eid
 
-        # 记录 canonical id -> 首个显示名称，供关系阶段使用
-        canonical_name_by_id[canonical_eid] = members[0].name
+        # 记录 canonical id -> 选择的 display name，供关系阶段使用
+        canonical_name_by_id[canonical_eid] = display_name
 
     # --- 阶段 2: 关系合并 ---
 

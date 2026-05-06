@@ -260,3 +260,45 @@ def test_canonicalize_deduplicates_relation_descriptions_and_chunks() -> None:
     assert rel.description == "same"
     # 两个不同的 chunk id
     assert rel.source_chunk_ids == ["ch_r1", "ch_r2"]
+
+
+def test_canonical_entity_display_name_prefers_longest_original_name() -> None:
+    """同一 canonical 组内，display name 选择最长的原始名称并保持确定性。
+
+    归一化键相同（normalize 后都是 "mini rag"），但 name.strip() 长度不同：
+    "Mini RAG" -> strip len 8，"Mini  RAG" -> strip len 9。
+    """
+    short = _entity("short", "doc_a", "Mini RAG", "chunk_a")
+    long = _entity("long", "doc_b", "Mini  RAG", "chunk_b")
+    graph = canonicalize_graph_evidence([short, long], [])
+    assert len(graph.entities) == 1
+    entity = graph.entities[0]
+    assert entity.name == "Mini  RAG"
+    assert entity.metadata["source_entity_names"] == [
+        "Mini RAG",
+        "Mini  RAG",
+    ]
+
+
+def test_canonical_relationship_endpoint_names_use_chosen_display_names() -> None:
+    """关系端点名称使用 canonical display name（最长原始名称）。"""
+    source_short = _entity("source_short", "doc_a", "Mini RAG", "chunk_a")
+    source_long = _entity("source_long", "doc_b", "Mini  RAG", "chunk_b")
+    target_short = _entity("target_short", "doc_a", "Source Chunks", "chunk_c")
+    target_long = _entity("target_long", "doc_b", "Source  Chunks", "chunk_d")
+    relation = _relation(
+        "rel_1",
+        "doc_b",
+        source_long,
+        target_long,
+        "chunk_rel",
+        description="Mini  RAG recovers Source  Chunks.",
+    )
+    graph = canonicalize_graph_evidence(
+        [source_short, source_long, target_short, target_long],
+        [relation],
+    )
+    assert len(graph.relationships) == 1
+    rel = graph.relationships[0]
+    assert rel.source_entity_name == "Mini  RAG"
+    assert rel.target_entity_name == "Source  Chunks"

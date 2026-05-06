@@ -68,6 +68,14 @@ class GraphCandidateInfinityConfig:
 # ---------------------------------------------------------------------------
 
 
+def _entity_display_name(row: dict[str, Any], canonical_id: str) -> str:
+    """从行中提取实体可读名称，缺失时回退到 canonical_id。"""
+    raw_name = row.get("entity_name_kwd")
+    if isinstance(raw_name, str) and raw_name.strip():
+        return raw_name.strip()
+    return canonical_id
+
+
 def _resolve_score(row: dict[str, Any], field_name: str = "_score") -> float:
     """从融合结果行中提取分数，兼容多种字段命名。"""
     for candidate in [field_name, "SCORE", "score", "_distance"]:
@@ -293,6 +301,7 @@ class InfinityGraphCandidateIndex:
                         "candidate_id",
                         "canonical_id",
                         "document_id",
+                        "entity_name_kwd",
                         "source_chunk_ids",
                         "metadata",
                         "_score",
@@ -363,7 +372,7 @@ class InfinityGraphCandidateIndex:
                 entity=EntityEvidence(
                     entity_id=canonical_id,
                     document_id=str(row.get("document_id", "")),
-                    name=str(row.get("candidate_id", canonical_id)),
+                    name=_entity_display_name(row, canonical_id),
                     entity_type="",
                     description="",
                     source_chunk_ids=list(row.get("source_chunk_ids") or []),

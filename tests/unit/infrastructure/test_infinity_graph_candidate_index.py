@@ -451,8 +451,23 @@ class TestQueryEntities:
         entity = results[0].entity
         assert entity.entity_id == "canonical_python"
         assert entity.document_id == "doc_42"
-        assert entity.name == "ent_1"  # 用 candidate_id 作为名称提示
+        assert entity.name == "Python"  # 使用 entity_name_kwd 作为可读名称
         assert entity.source_chunk_ids == ["chunk_a", "chunk_b"]
+
+    def test_entity_candidate_name_falls_back_to_canonical_id(self) -> None:
+        """实体名称字段缺失时，display name 回退到 canonical_id 而不是 candidate_id。"""
+        idx, client, _ = _make_index()
+        db = client.get_database("test_db")
+        row = _make_entity_row(
+            candidate_id="ent_1",
+            canonical_id="canonical_python",
+            entity_name="",
+        )
+        row["entity_name_kwd"] = ""
+        _insert_entity_rows(db, "graph_entities", [row])
+        results = idx.query_entities(["Python"], top_k=10)
+        assert results[0].entity.name == "canonical_python"
+        assert results[0].metadata["candidate_id"] == "ent_1"
 
     def test_entity_metadata_contains_retrieval_info(self) -> None:
         """候选实体的 metadata 应包含完整的检索参数信息。"""
