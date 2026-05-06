@@ -908,6 +908,18 @@ class InfinityDenseVectorIndex:
             return {}
 
 
+def _pop_chunk_index(chunk: RetrievedChunk) -> int:
+    """从 chunk metadata 中移除并返回 ``_chunk_index``，无效值退化为 0。"""
+    raw = chunk.metadata.pop("_chunk_index", None)
+    try:
+        idx = int(raw)  # type: ignore[arg-type]
+        if idx < 0:
+            return 0
+        return idx
+    except (TypeError, ValueError):
+        return 0
+
+
 def _apply_position_prior(
     chunks: list[RetrievedChunk],
     *,
@@ -919,20 +931,14 @@ def _apply_position_prior(
     ``chunk_index`` 缺失、非整数或小于 0 时 boost 按 0 处理。
     """
     for chunk in chunks:
-        raw = chunk.metadata.pop("_chunk_index", None)
-        try:
-            idx = int(raw)  # type: ignore[arg-type]
-            if idx < 0:
-                idx = 0
-        except (TypeError, ValueError):
-            idx = 0
+        idx = _pop_chunk_index(chunk)
         chunk.score += boost / (1 + idx)
 
 
 def _drop_position_prior_metadata(chunks: list[RetrievedChunk]) -> None:
     """Remove internal chunk index metadata when position prior is disabled."""
     for chunk in chunks:
-        chunk.metadata.pop("_chunk_index", None)
+        _pop_chunk_index(chunk)
 
 
 def _doc_id_filter(document_id: str) -> str:

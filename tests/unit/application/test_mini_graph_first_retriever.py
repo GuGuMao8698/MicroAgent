@@ -876,16 +876,6 @@ def test_budget_validation_rejects_invalid_params() -> None:
             query_entity_limit=0,
         )
 
-    with pytest.raises(ProcessingError, match="graph_initial_recall_n must be >= 1"):
-        MiniGraphFirstRetriever(
-            query_grounder=grounder,
-            entity_index=entity_index,
-            relationship_index=relationship_index,
-            path_expander=path_expander,
-            chunk_lookup=chunk_lookup,
-            graph_initial_recall_n=0,
-        )
-
 
 def test_legacy_params_map_to_new_budget_params() -> None:
     """验证旧参数名 (grounded_entity_k 等) 仍然可用并映射到新参数。"""

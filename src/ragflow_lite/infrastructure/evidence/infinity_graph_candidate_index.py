@@ -322,8 +322,6 @@ class InfinityGraphCandidateIndex:
                         existing["matched_query_entity"] = entity_text
                     # 收集 member candidate IDs
                     existing["member_candidate_ids"].add(candidate_id)
-                    # 收集所有匹配的查询实体
-                    existing["matched_query_entities"].add(entity_text)
                 else:
                     merged[canonical_id] = {
                         "canonical_id": canonical_id,
@@ -331,7 +329,6 @@ class InfinityGraphCandidateIndex:
                         "best_row": row_dict,
                         "member_candidate_ids": {candidate_id},
                         "matched_query_entity": entity_text,
-                        "matched_query_entities": {entity_text},
                     }
 
         # 4. 转换为 MiniEntityCandidate 并按分数截断

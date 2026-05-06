@@ -46,7 +46,6 @@ class MiniGraphFirstRetriever:
         chunk_auxiliary_retriever: Retriever | None = None,
         mini_internal_candidate_n: int = 60,
         query_entity_limit: int = 5,
-        graph_initial_recall_n: int = 1024,
         path_hop_limit: int = 2,
         path_candidate_k: int = 24,
         chunk_auxiliary_candidate_n: int | None = None,
@@ -54,7 +53,6 @@ class MiniGraphFirstRetriever:
         context_token_budget: int | None = None,
         # ── 向后兼容别名（旧参数名） ──
         grounded_entity_k: int | None = None,
-        relationship_candidate_k: int | None = None,
         chunk_auxiliary_retrieval_k: int | None = None,
         discourse_selection_k: int | None = None,
     ) -> None:
@@ -71,8 +69,6 @@ class MiniGraphFirstRetriever:
             raise ProcessingError("mini_internal_candidate_n must be >= 1")
         if query_entity_limit < 1:
             raise ProcessingError("query_entity_limit must be >= 1")
-        if graph_initial_recall_n < 1:
-            raise ProcessingError("graph_initial_recall_n must be >= 1")
         if discourse_selection_n is not None and discourse_selection_n < 1:
             raise ProcessingError("discourse_selection_n must be >= 1 when provided")
         if context_token_budget is not None and context_token_budget < 1:
@@ -87,7 +83,6 @@ class MiniGraphFirstRetriever:
         # MiniRAG mini-mode 预算参数
         self.mini_internal_candidate_n = mini_internal_candidate_n
         self.query_entity_limit = query_entity_limit
-        self.graph_initial_recall_n = graph_initial_recall_n
         self.path_hop_limit = path_hop_limit
         self.path_candidate_k = path_candidate_k
         self.chunk_auxiliary_candidate_n = chunk_auxiliary_candidate_n
@@ -96,7 +91,7 @@ class MiniGraphFirstRetriever:
         self.context_token_budget = context_token_budget
         # 保留旧属性名作为只读别名，避免下游引用立即断裂
         self.grounded_entity_k = self.mini_internal_candidate_n
-        self.relationship_candidate_k = relationship_candidate_k or 0
+        self.relationship_candidate_k = self.mini_internal_candidate_n
         self.chunk_auxiliary_retrieval_k = self.chunk_auxiliary_candidate_n
         self.discourse_selection_k = self.discourse_selection_n or 0
 
