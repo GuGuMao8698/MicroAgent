@@ -141,7 +141,6 @@ class Settings:
     graph_candidate_text_weight: float = 0.05
     graph_candidate_dense_weight: float = 0.95
     graph_candidate_minimum_should_match: float = 0.3
-    graph_candidate_fallback_minimum_should_match: float = 0.1
     graph_candidate_dense_similarity_threshold: float = 0.2
     graph_candidate_fusion_normalize: str = "atan"
     infinity_graph_entity_table: str = "graph_entities"

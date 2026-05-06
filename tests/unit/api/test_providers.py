@@ -219,8 +219,6 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "DeepSeekChatAnswerer",
         "DeepSeekChatEvidenceExtractor",
         "DeepSeekChatIntraChunkDiscourseExtractor",
-        "GraphCandidateSidecar",
-        "GraphEvidenceSidecarStore",
         "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",

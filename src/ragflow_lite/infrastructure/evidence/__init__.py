@@ -10,14 +10,8 @@ from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
     build_entity_candidate_row,
     build_relationship_candidate_row,
 )
-from ragflow_lite.infrastructure.evidence.graph_candidate_sidecar import (
-    GraphCandidateSidecar,
-)
 from ragflow_lite.infrastructure.evidence.graph_evidence_infinity_store import (
     GraphEvidenceInfinityStore,
-)
-from ragflow_lite.infrastructure.evidence.graph_evidence_sidecar_store import (
-    GraphEvidenceSidecarStore,
 )
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
@@ -25,9 +19,6 @@ from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import 
 )
 from ragflow_lite.infrastructure.evidence.local_json_graph_evidence_index import (
     LocalJsonGraphEvidenceIndex,
-)
-from ragflow_lite.infrastructure.evidence.local_json_graph_hybrid_index import (
-    LocalJsonGraphEvidenceHybridIndex,
 )
 from ragflow_lite.infrastructure.evidence.local_json_store import (
     LocalJsonGraphEvidenceStore,
@@ -42,11 +33,8 @@ __all__ = [
     "DeepSeekChatEvidenceExtractor",
     "DeepSeekChatIntraChunkDiscourseExtractor",
     "GraphCandidateInfinityConfig",
-    "GraphCandidateSidecar",
     "GraphEvidenceInfinityStore",
-    "GraphEvidenceSidecarStore",
     "InfinityGraphCandidateIndex",
-    "LocalJsonGraphEvidenceHybridIndex",
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",

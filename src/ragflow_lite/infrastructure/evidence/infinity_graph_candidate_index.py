@@ -14,6 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from infinity.common import ConflictType
+from infinity.index import IndexInfo, IndexType
+
 from ragflow_lite.domain.models.entities import (
     EntityEvidence,
     GraphEvidenceBatch,
@@ -94,6 +97,125 @@ class InfinityGraphCandidateIndex:
         self._db = client.get_database(database)
         self._embedder = embedder
         self._config = config or GraphCandidateInfinityConfig()
+        self._ensure_tables()
+
+    # ------------------------------------------------------------------
+    # 表管理
+    # ------------------------------------------------------------------
+
+    def _ensure_tables(self) -> None:
+        """确保 graph candidate 表和全文索引存在。"""
+        dimensions = self._embedding_dimensions()
+        entity_columns = {
+            "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
+            "canonical_id": {"type": "varchar"},
+            "document_id": {"type": "varchar"},
+            "candidate_kind": {"type": "varchar"},
+            "entity_name_kwd": {"type": "varchar"},
+            "entity_name_tks": {"type": "varchar"},
+            "entity_type_tks": {"type": "varchar"},
+            "entity_description_tks": {"type": "varchar"},
+            "embedding_text": {"type": "varchar"},
+            "vec": {"type": f"vector,{dimensions},float"},
+            "source_chunk_ids": {"type": "varchar"},
+            "metadata": {"type": "varchar"},
+        }
+        relationship_columns = {
+            "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
+            "canonical_id": {"type": "varchar"},
+            "document_id": {"type": "varchar"},
+            "candidate_kind": {"type": "varchar"},
+            "source_entity_id": {"type": "varchar"},
+            "target_entity_id": {"type": "varchar"},
+            "source_entity_name": {"type": "varchar"},
+            "target_entity_name": {"type": "varchar"},
+            "relationship_endpoint_kwd": {"type": "varchar"},
+            "relationship_endpoint_tks": {"type": "varchar"},
+            "relationship_keyword_tks": {"type": "varchar"},
+            "relationship_description_tks": {"type": "varchar"},
+            "embedding_text": {"type": "varchar"},
+            "vec": {"type": f"vector,{dimensions},float"},
+            "keywords": {"type": "varchar"},
+            "weight": {"type": "float"},
+            "source_chunk_ids": {"type": "varchar"},
+            "metadata": {"type": "varchar"},
+        }
+        self._db.create_table(
+            self._config.entity_table,
+            entity_columns,
+            ConflictType.Ignore,
+        )
+        self._db.create_table(
+            self._config.relationship_table,
+            relationship_columns,
+            ConflictType.Ignore,
+        )
+        self._ensure_fulltext_indexes(
+            self._config.entity_table,
+            [
+                "entity_name_kwd",
+                "entity_name_tks",
+                "entity_type_tks",
+                "entity_description_tks",
+            ],
+        )
+        self._ensure_fulltext_indexes(
+            self._config.relationship_table,
+            [
+                "relationship_endpoint_kwd",
+                "relationship_endpoint_tks",
+                "relationship_keyword_tks",
+                "relationship_description_tks",
+            ],
+        )
+
+    def _embedding_dimensions(self) -> int:
+        signature = getattr(self._embedder, "signature", None)
+        if isinstance(signature, dict):
+            dimensions = signature.get("dimensions")
+            if dimensions is not None:
+                return int(dimensions)
+        dimensions = getattr(self._embedder, "dimensions", None)
+        if dimensions is not None:
+            return int(dimensions)
+        dim = getattr(self._embedder, "dim", None)
+        if dim is not None:
+            return int(dim)
+        raise RuntimeError(
+            "Graph candidate Infinity tables require an embedder with "
+            "signature['dimensions'], dimensions, or dim."
+        )
+
+    def _ensure_fulltext_indexes(self, table_name: str, columns: list[str]) -> None:
+        table = self._db.get_table(table_name)
+        existing_indexes = self._list_index_names(table)
+        for column in columns:
+            index_name = f"{table_name}_{column}_fulltext_idx"
+            if index_name in existing_indexes:
+                continue
+            table.create_index(
+                index_name,
+                IndexInfo(column, IndexType.FullText),
+                ConflictType.Ignore,
+            )
+
+    def _list_index_names(self, table: Any) -> set[str]:
+        list_indexes = getattr(table, "list_indexes", None)
+        if not callable(list_indexes):
+            return set()
+
+        response = list_indexes()
+        if response is None:
+            return set()
+        if isinstance(response, tuple):
+            response = response[0]
+
+        names = getattr(response, "index_names", None)
+        if names is None and isinstance(response, dict):
+            names = response.get("index_names")
+        if names is None:
+            return set()
+        return {str(name) for name in names}
 
     # ------------------------------------------------------------------
     # 实体查询

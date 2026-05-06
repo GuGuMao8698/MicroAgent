@@ -10,6 +10,7 @@ from typing import Any
 
 import polars as pl
 import pytest
+from infinity.index import IndexType
 
 from ragflow_lite.domain.models.entities import (
     EntityEvidence,
@@ -180,6 +181,7 @@ class _GraphFakeInfinityTable:
         self.query_calls: list[dict[str, Any]] = []
         # 记录 delete 调用的 filter 表达式
         self.deleted_filters: list[str] = []
+        self._indexes: dict[str, dict[str, Any]] = {}
 
     def insert(self, data: list[dict[str, Any]]) -> None:
         self.rows.extend(data)
@@ -203,15 +205,47 @@ class _GraphFakeInfinityTable:
         self.query_calls.append({"type": "match_dense", "kwargs": kwargs})
         return _GraphFakeQueryBuilder(self, "dense", kwargs)
 
+    def create_index(
+        self,
+        index_name: str,
+        index_info: Any,
+        conflict_type: Any = None,
+        index_comment: str = "",
+    ) -> None:
+        self._indexes[index_name] = {
+            "type": getattr(index_info, "index_type", index_info),
+            "columns": getattr(index_info, "target_name", None),
+            "conflict_type": conflict_type,
+            "comment": index_comment,
+        }
+
+    def list_indexes(self) -> Any:
+        return type(
+            "IndexList",
+            (),
+            {"error_code": 0, "error_msg": "", "index_names": list(self._indexes)},
+        )()
+
 
 class _GraphFakeInfinityDatabase:
     def __init__(self) -> None:
         self._tables: dict[str, _GraphFakeInfinityTable] = {}
+        self.created_tables: dict[str, dict[str, Any]] = {}
 
     def get_table(self, name: str) -> _GraphFakeInfinityTable:
         if name not in self._tables:
-            self._tables[name] = _GraphFakeInfinityTable(name)
+            raise RuntimeError(f"Table '{name}' does not exist")
         return self._tables[name]
+
+    def create_table(
+        self,
+        name: str,
+        columns: dict[str, Any],
+        conflict_type: Any = None,
+    ) -> None:
+        self.created_tables[name] = columns
+        if name not in self._tables:
+            self._tables[name] = _GraphFakeInfinityTable(name)
 
 
 class _GraphFakeInfinityClient:
@@ -862,6 +896,67 @@ class TestConstructor:
         )
         assert idx._config.entity_table == "graph_entities"
         assert idx._config.relationship_table == "graph_relationships"
+
+    def test_creates_graph_candidate_tables_and_fulltext_indexes_on_init(self) -> None:
+        """初始化时应幂等创建 graph_entities / graph_relationships 及全文索引。"""
+        client = _GraphFakeInfinityClient()
+        embedder = FakeEmbedder(dim=4)
+
+        InfinityGraphCandidateIndex(
+            client=client,
+            database="test_db",
+            embedder=embedder,
+        )
+
+        db = client.get_database("test_db")
+        assert "graph_entities" in db.created_tables
+        assert "graph_relationships" in db.created_tables
+
+        entity_columns = db.created_tables["graph_entities"]
+        relationship_columns = db.created_tables["graph_relationships"]
+        assert entity_columns["vec"]["type"] == "vector,4,float"
+        assert relationship_columns["vec"]["type"] == "vector,4,float"
+        assert entity_columns["candidate_id"]["constraints"] == ["primary key"]
+        assert relationship_columns["candidate_id"]["constraints"] == ["primary key"]
+
+        entity_table = db.get_table("graph_entities")
+        relationship_table = db.get_table("graph_relationships")
+        assert (
+            entity_table._indexes["graph_entities_entity_name_kwd_fulltext_idx"]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            entity_table._indexes["graph_entities_entity_name_tks_fulltext_idx"]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            entity_table._indexes["graph_entities_entity_type_tks_fulltext_idx"]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            relationship_table._indexes[
+                "graph_relationships_relationship_endpoint_kwd_fulltext_idx"
+            ]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            relationship_table._indexes[
+                "graph_relationships_relationship_endpoint_tks_fulltext_idx"
+            ]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            relationship_table._indexes[
+                "graph_relationships_relationship_keyword_tks_fulltext_idx"
+            ]["type"]
+            == IndexType.FullText
+        )
+        assert (
+            relationship_table._indexes[
+                "graph_relationships_relationship_description_tks_fulltext_idx"
+            ]["type"]
+            == IndexType.FullText
+        )
 
     def test_custom_config(self) -> None:
         """自定义 config 应被使用。"""
