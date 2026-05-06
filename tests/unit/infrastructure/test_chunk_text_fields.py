@@ -38,5 +38,6 @@ def test_build_chunk_text_fields_uses_filename_and_text(monkeypatch) -> None:
 def test_chunk_match_text_fields_are_localized_ragflow_boosts() -> None:
     assert (
         fields.CHUNK_FIELD_MATCH_TEXT_FIELDS
-        == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
+        == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks,"
+        "filename^10,text"
     )
