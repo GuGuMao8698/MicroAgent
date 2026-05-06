@@ -77,6 +77,16 @@ def _resolve_score(row: dict[str, Any], field_name: str = "_score") -> float:
     return 0.0
 
 
+def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
+    """Build Infinity SDK-compatible dense-match optional parameters."""
+    return {"threshold": str(similarity_threshold)}
+
+
+def _minimum_should_match_option(minimum_should_match: float) -> str:
+    """Build Infinity fulltext option using the server's percent format."""
+    return f"{int(minimum_should_match * 100)}%"
+
+
 # ---------------------------------------------------------------------------
 # 索引实现
 # ---------------------------------------------------------------------------
@@ -255,7 +265,9 @@ class InfinityGraphCandidateIndex:
                     matching_text=entity_text,
                     topn=recall_n,
                     extra_options={
-                        "minimum_should_match": self._config.minimum_should_match,
+                        "minimum_should_match": _minimum_should_match_option(
+                            self._config.minimum_should_match
+                        ),
                     },
                 )
                 .match_dense(
@@ -264,7 +276,9 @@ class InfinityGraphCandidateIndex:
                     embedding_data_type="float",
                     distance_type="ip",
                     topn=recall_n,
-                    threshold=self._config.dense_similarity_threshold,
+                    knn_params=_dense_knn_params(
+                        self._config.dense_similarity_threshold
+                    ),
                 )
                 .fusion(
                     "weighted_sum",
@@ -407,7 +421,9 @@ class InfinityGraphCandidateIndex:
                 matching_text=matching_text,
                 topn=recall_n,
                 extra_options={
-                    "minimum_should_match": self._config.minimum_should_match,
+                    "minimum_should_match": _minimum_should_match_option(
+                        self._config.minimum_should_match
+                    ),
                 },
             )
             .match_dense(
@@ -416,7 +432,7 @@ class InfinityGraphCandidateIndex:
                 embedding_data_type="float",
                 distance_type="ip",
                 topn=recall_n,
-                threshold=self._config.dense_similarity_threshold,
+                knn_params=_dense_knn_params(self._config.dense_similarity_threshold),
             )
             .fusion(
                 "weighted_sum",

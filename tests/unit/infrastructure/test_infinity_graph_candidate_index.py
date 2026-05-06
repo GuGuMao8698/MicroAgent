@@ -74,6 +74,7 @@ class _GraphFakeQueryBuilder:
 
     def match_dense(self, **kwargs: Any) -> _GraphFakeQueryBuilder:
         self._dense_kwargs = kwargs
+        self._table.query_calls.append({"type": "match_dense", "kwargs": kwargs})
         return self
 
     def fusion(
@@ -646,6 +647,39 @@ class TestQueryEntities:
             field_name = field_spec.split("^")[0]
             assert field_name in fields_arg
 
+    def test_fusion_uses_infinity_sdk_threshold_options(self) -> None:
+        """实体查询应使用真实 Infinity 服务端接受的阈值参数形态。"""
+        config = GraphCandidateInfinityConfig(
+            minimum_should_match=0.3,
+            dense_similarity_threshold=0.2,
+        )
+        idx, client, _ = _make_index(config=config)
+        db = client.get_database("test_db")
+        entity_table = db.get_table("graph_entities")
+
+        _insert_entity_rows(
+            db,
+            "graph_entities",
+            [
+                _make_entity_row(
+                    candidate_id="e1", canonical_id="c1", entity_name="Python"
+                ),
+            ],
+        )
+
+        idx.query_entities(["Python"], top_k=10)
+
+        match_text_call = next(
+            c for c in entity_table.query_calls if c["type"] == "match_text"
+        )
+        match_dense_call = next(
+            c for c in entity_table.query_calls if c["type"] == "match_dense"
+        )
+        assert match_text_call["kwargs"]["extra_options"] == {
+            "minimum_should_match": "30%"
+        }
+        assert match_dense_call["kwargs"]["knn_params"] == {"threshold": "0.2"}
+
     def test_graph_initial_recall_n_not_multiplied(self) -> None:
         """graph_initial_recall_n 不应随查询实体数量倍增。"""
         config = GraphCandidateInfinityConfig(graph_initial_recall_n=64)
@@ -849,6 +883,44 @@ class TestQueryRelationships:
         for field_spec in RELATIONSHIP_MATCH_TEXT_FIELDS:
             field_name = field_spec.split("^")[0]
             assert field_name in fields_arg
+
+    def test_uses_infinity_sdk_threshold_options(self) -> None:
+        """关系查询应使用真实 Infinity 服务端接受的阈值参数形态。"""
+        config = GraphCandidateInfinityConfig(
+            minimum_should_match=0.3,
+            dense_similarity_threshold=0.2,
+        )
+        idx, client, _ = _make_index(config=config)
+        db = client.get_database("test_db")
+        rel_table = db.get_table("graph_relationships")
+
+        rel_table.insert(
+            [
+                _make_relationship_row(
+                    candidate_id="rel_1",
+                    canonical_id="canonical_rel_1",
+                    source_name="Python",
+                    target_name="Django",
+                ),
+            ]
+        )
+
+        idx.query_relationships(
+            query="Python Django",
+            answer_type_keywords=[],
+            top_k=10,
+        )
+
+        match_text_call = next(
+            c for c in rel_table.query_calls if c["type"] == "match_text"
+        )
+        match_dense_call = next(
+            c for c in rel_table.query_calls if c["type"] == "match_dense"
+        )
+        assert match_text_call["kwargs"]["extra_options"] == {
+            "minimum_should_match": "30%"
+        }
+        assert match_dense_call["kwargs"]["knn_params"] == {"threshold": "0.2"}
 
     def test_embedder_called_with_original_query(self) -> None:
         """关系查询应使用原始 query 做 embedding。"""
