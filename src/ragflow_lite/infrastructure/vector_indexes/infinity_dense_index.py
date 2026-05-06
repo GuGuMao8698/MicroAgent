@@ -86,6 +86,7 @@ class InfinityDenseVectorIndex:
         chunk_table: str,
         embedding_dimensions: int,
         embedding_signature: EmbeddingSignature,
+        chunk_hybrid_config: ChunkHybridRetrievalConfig | None = None,
         client: Any | None = None,
     ) -> None:
         self._host = host
@@ -95,6 +96,7 @@ class InfinityDenseVectorIndex:
         self._chunk_table = chunk_table
         self._dimensions = embedding_dimensions
         self._embedding_signature = embedding_signature
+        self._chunk_hybrid_config = chunk_hybrid_config or ChunkHybridRetrievalConfig()
 
         if client is not None:
             self._client = client

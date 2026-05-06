@@ -405,3 +405,29 @@ def test_settings_rejects_invalid_metrics_env(
 
     with pytest.raises(RuntimeError, match="RAGFLOW_LITE_METRICS_ENABLED"):
         _build_settings(tmp_path)
+
+
+def test_build_services_wires_chunk_hybrid_config(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    settings.chunk_initial_recall_n = 77
+    settings.chunk_text_weight = 0.2
+    settings.chunk_dense_weight = 0.8
+    settings.chunk_minimum_should_match = 0.4
+    settings.chunk_dense_similarity_threshold = 0.25
+    settings.chunk_fusion_normalize = "atan"
+    settings.chunk_position_prior_weight = 0.01
+    settings.chunk_position_prior_enabled = False
+
+    services = build_services(settings)
+
+    vector_index = services.ingestion_pipeline.vector_index
+    assert isinstance(vector_index, InfinityDenseVectorIndex)
+    config = vector_index._chunk_hybrid_config
+    assert config.initial_recall_n == 77
+    assert config.text_weight == 0.2
+    assert config.dense_weight == 0.8
+    assert config.minimum_should_match == 0.4
+    assert config.dense_similarity_threshold == 0.25
+    assert config.fusion_normalize == "atan"
+    assert config.position_prior_weight == 0.01
+    assert config.position_prior_enabled is False

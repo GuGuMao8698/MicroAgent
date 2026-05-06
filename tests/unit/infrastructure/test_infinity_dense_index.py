@@ -28,6 +28,7 @@ def make_index(fake_infinity_client_factory):
         dimensions: int = DIMS,
         signature: dict[str, Any] | None = None,
         show_columns_mode: str = "dataframe",
+        chunk_hybrid_config: ChunkHybridRetrievalConfig | None = None,
     ) -> tuple[Any, InfinityDenseVectorIndex]:
         active_client = client
         if active_client is None:
@@ -43,6 +44,7 @@ def make_index(fake_infinity_client_factory):
             chunk_table="chunks",
             embedding_dimensions=dimensions,
             embedding_signature=signature or SIGNATURE,
+            chunk_hybrid_config=chunk_hybrid_config,
             client=active_client,
         )
         return active_client, index
@@ -123,6 +125,22 @@ class TestInfinityDenseVectorIndex:
         assert config.position_prior_weight == 0.03
         assert config.position_prior_enabled is True
         assert config.match_text_fields == "filename^3,text"
+
+    def test_accepts_custom_chunk_hybrid_config(self, make_index) -> None:
+        config = ChunkHybridRetrievalConfig(
+            initial_recall_n=77,
+            text_weight=0.2,
+            dense_weight=0.8,
+            minimum_should_match=0.4,
+            dense_similarity_threshold=0.25,
+            fusion_normalize="atan",
+            position_prior_weight=0.01,
+            position_prior_enabled=False,
+        )
+
+        _, idx = make_index(chunk_hybrid_config=config)
+
+        assert idx._chunk_hybrid_config is config
 
     def test_creates_tables_on_init(self, make_index) -> None:
         client, _ = make_index()

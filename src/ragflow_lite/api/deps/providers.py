@@ -54,6 +54,9 @@ from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import 
     GraphCandidateInfinityConfig,
 )
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
+from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
+    ChunkHybridRetrievalConfig,
+)
 
 
 @dataclass(slots=True)
@@ -84,6 +87,16 @@ def _build_vector_index(
         chunk_table=settings.infinity_chunk_table,
         embedding_dimensions=settings.ark_embedding_dimensions,
         embedding_signature=embedder.signature,
+        chunk_hybrid_config=ChunkHybridRetrievalConfig(
+            initial_recall_n=settings.chunk_initial_recall_n,
+            text_weight=settings.chunk_text_weight,
+            dense_weight=settings.chunk_dense_weight,
+            minimum_should_match=settings.chunk_minimum_should_match,
+            dense_similarity_threshold=settings.chunk_dense_similarity_threshold,
+            fusion_normalize=settings.chunk_fusion_normalize,
+            position_prior_weight=settings.chunk_position_prior_weight,
+            position_prior_enabled=settings.chunk_position_prior_enabled,
+        ),
     )
 
 
