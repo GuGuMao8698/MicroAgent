@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
-from ragflow_lite.infrastructure.evidence.graph_evidence_infinity_store import (
-    GraphEvidenceInfinityStore,
-)
 
 from ragflow_lite.domain.models import (
     EntityEvidence,
     GraphEvidenceBatch,
     GraphEvidenceWriteResult,
     RelationEvidence,
+)
+from ragflow_lite.infrastructure.evidence.graph_evidence_infinity_store import (
+    GraphEvidenceInfinityStore,
 )
 
 # ---------------------------------------------------------------------------
@@ -25,6 +25,7 @@ class _RecordingGraphStore:
 
     upserts: list[GraphEvidenceBatch] = field(default_factory=list)
     deletes: list[str] = field(default_factory=list)
+    documents: dict[str, GraphEvidenceBatch] = field(default_factory=dict)
     fail_upsert: bool = False
 
     def upsert_document_evidence(
@@ -33,6 +34,7 @@ class _RecordingGraphStore:
         if self.fail_upsert:
             raise RuntimeError("graph store upsert failed")
         self.upserts.append(batch)
+        self.documents[batch.document_id] = batch
         return GraphEvidenceWriteResult(
             document_id=batch.document_id,
             entity_count=len(batch.entities),
@@ -41,9 +43,10 @@ class _RecordingGraphStore:
 
     def delete_document(self, document_id: str) -> None:
         self.deletes.append(document_id)
+        self.documents.pop(document_id, None)
 
     def get_document_evidence(self, document_id: str) -> GraphEvidenceBatch | None:
-        return None
+        return self.documents.get(document_id)
 
 
 @dataclass
@@ -156,7 +159,27 @@ class TestUpsertDocumentEvidence:
         assert len(graph_store.upserts) == 1
         # 但被回滚删除
         assert graph_store.deletes == ["doc_1"]
+        assert graph_store.get_document_evidence("doc_1") is None
         # Infinity candidates 也被回滚删除
+        assert candidate_index.deletes == ["doc_1"]
+
+    def test_candidate_failure_restores_previous_json_evidence(self) -> None:
+        """Infinity 写入失败时，应恢复旧 JSON evidence，而不是删除整份旧数据。"""
+        old_batch = _make_batch(document_id="doc_1")
+        new_batch = _make_batch(document_id="doc_1")
+        new_batch.entities[0].name = "Python updated"
+        graph_store = _RecordingGraphStore(documents={"doc_1": old_batch})
+        candidate_index = _RecordingCandidateIndex(fail_upsert=True)
+        store = _build_store(
+            graph_store=graph_store,
+            candidate_index=candidate_index,
+        )
+
+        with pytest.raises(RuntimeError, match="candidate upsert failed"):
+            store.upsert_document_evidence(new_batch)
+
+        assert graph_store.get_document_evidence("doc_1") is old_batch
+        assert graph_store.deletes == []
         assert candidate_index.deletes == ["doc_1"]
 
     def test_json_store_failure_propagates_without_rollback(self) -> None:
