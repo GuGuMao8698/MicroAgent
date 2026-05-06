@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pytest
+
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
@@ -200,7 +202,8 @@ def test_mini_graph_first_retriever_grounds_before_auxiliary_chunk_retrieval() -
     assert path_expander.calls == [
         (("entity_minirag",), ("relation_minirag_sources",), 2)
     ]
-    assert auxiliary_retriever.calls == [("How does MiniRAG recover sources?", 2)]
+    # 新预算语义：auxiliary top_k = int(mini_internal_candidate_n / 2) = int(60 / 2) = 30
+    assert auxiliary_retriever.calls == [("How does MiniRAG recover sources?", 30)]
     # 新评分：path_weight=2.0, first_candidate=2.0, aux_path=1.0
     # chunk_a 和 chunk_b 均为 4.0，按 chunk_id 升序排列
     assert chunk_lookup.calls == [["chunk_a", "chunk_b"]]
@@ -640,3 +643,287 @@ def test_minirag_parity_auxiliary_only_chunk_does_not_flat_bonus_rank_first() ->
     assert [source.chunk_id for source in result.source_selection.sources] == [
         "chunk_graph"
     ]
+
+
+# ---------------------------------------------------------------------------
+# MiniRAG mini-mode budget 语义测试
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BudgetRecordingEntityIndex:
+    """记录 entity_texts 和 top_k，用于验证预算推导。"""
+
+    calls: list[tuple[list[str], int]] = field(default_factory=list)
+
+    def query_entities(
+        self,
+        entity_texts: list[str],
+        top_k: int,
+    ) -> list[MiniEntityCandidate]:
+        self.calls.append((list(entity_texts), top_k))
+        return [
+            MiniEntityCandidate(
+                entity=EntityEvidence(
+                    entity_id=f"entity_{name}",
+                    document_id="doc1",
+                    name=name,
+                    entity_type="concept",
+                    description=f"{name} entity",
+                    source_chunk_ids=[f"chunk_{name}"],
+                ),
+                score=1.0,
+                matched_terms=[name],
+            )
+            for name in entity_texts
+        ]
+
+
+@dataclass
+class BudgetRecordingRelationshipIndex:
+    """记录 query, keywords 和 top_k，用于验证预算推导。"""
+
+    calls: list[tuple[str, tuple[str, ...], int]] = field(default_factory=list)
+
+    def query_relationships(
+        self,
+        query: str,
+        answer_type_keywords: list[str],
+        top_k: int,
+    ) -> list[MiniRelationshipCandidate]:
+        self.calls.append((query, tuple(answer_type_keywords), top_k))
+        return [
+            MiniRelationshipCandidate(
+                relation=RelationEvidence(
+                    relation_id="relation_1",
+                    document_id="doc1",
+                    source_entity_id="entity_A",
+                    target_entity_id="entity_B",
+                    source_entity_name="A",
+                    target_entity_name="B",
+                    description="test relation",
+                    keywords=["mechanism"],
+                    weight=1.0,
+                    source_chunk_ids=["chunk_A", "chunk_B"],
+                ),
+                score=1.0,
+                matched_terms=["mechanism"],
+            )
+        ]
+
+
+@dataclass
+class SixEntityGrounder:
+    """返回 6 个实体，用于验证 query_entity_limit 截断。"""
+
+    calls: list[str] = field(default_factory=list)
+
+    def ground(self, query: str) -> GroundedQuery:
+        self.calls.append(query)
+        return GroundedQuery(
+            query=query,
+            answer_type_keywords=["mechanism"],
+            entities_from_query=["A", "B", "C", "D", "E", "F"],
+        )
+
+
+@dataclass
+class BudgetRecordingAuxiliaryRetriever:
+    """记录 query 和 top_k，用于验证辅助检索预算推导。"""
+
+    calls: list[tuple[str, int]] = field(default_factory=list)
+
+    def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
+        self.calls.append((query, top_k))
+        return [
+            RetrievedChunk(
+                chunk_id="chunk_aux",
+                document_id="doc1",
+                text="auxiliary result",
+                score=0.7,
+                metadata={},
+            )
+        ]
+
+
+def test_budget_defaults_derive_correctly_from_mini_internal_candidate_n() -> None:
+    """验证 MiniRAG mini-mode 预算语义：各阶段的 top_k 从 mini_internal_candidate_n 推导。"""
+    grounder = SixEntityGrounder()
+    entity_index = BudgetRecordingEntityIndex()
+    relationship_index = BudgetRecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+    auxiliary_retriever = BudgetRecordingAuxiliaryRetriever()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        chunk_auxiliary_retriever=auxiliary_retriever,
+    )
+
+    # top_k=6 意味着 answer_top_n=6
+    retriever.retrieve_context("test query", top_k=6)
+
+    # 1. 实体查询：entities_from_query 截断到 query_entity_limit=5，top_k=60
+    assert len(entity_index.calls) == 1
+    assert entity_index.calls[0][0] == ["A", "B", "C", "D", "E"]  # 截断到前 5 个
+    assert entity_index.calls[0][1] == 60  # mini_internal_candidate_n
+
+    # 2. 关系查询：top_k = query_entity_n * mini_internal_candidate_n = 5 * 60 = 300
+    assert len(relationship_index.calls) == 1
+    assert relationship_index.calls[0][2] == 300
+
+    # 3. 辅助检索：top_k = int(mini_internal_candidate_n / 2) = int(60 / 2) = 30
+    assert len(auxiliary_retriever.calls) == 1
+    assert auxiliary_retriever.calls[0][1] == 30
+
+    # 4. discourse_selection_n 默认等于 answer_top_n = 6
+    # 通过 source_selection.discourse_selection_k 验证
+    result = retriever.retrieve_context("test query", top_k=6)
+    assert result.source_selection is not None
+    assert result.source_selection.discourse_selection_k == 6
+
+
+def test_discourse_selection_defaults_to_answer_top_n() -> None:
+    """discourse_selection_n 未显式设置时，应默认等于 answer_top_n（即 top_k）。"""
+    grounder = RecordingGrounder()
+    entity_index = RecordingEntityIndex()
+    relationship_index = RecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        # 不设置 discourse_selection_n
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=4)
+    assert result.source_selection is not None
+    assert result.source_selection.discourse_selection_k == 4
+
+
+def test_discourse_selection_n_explicit_overrides_answer_top_n() -> None:
+    """显式设置 discourse_selection_n 时，应覆盖默认的 answer_top_n。"""
+    grounder = RecordingGrounder()
+    entity_index = RecordingEntityIndex()
+    relationship_index = RecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        discourse_selection_n=2,
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=4)
+    assert result.source_selection is not None
+    assert result.source_selection.discourse_selection_k == 2
+
+
+def test_budget_validation_rejects_invalid_params() -> None:
+    """验证构造参数的合法性校验。"""
+    from ragflow_lite.domain.errors import ProcessingError
+
+    grounder = RecordingGrounder()
+    entity_index = RecordingEntityIndex()
+    relationship_index = RecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+
+    with pytest.raises(ProcessingError, match="mini_internal_candidate_n must be >= 1"):
+        MiniGraphFirstRetriever(
+            query_grounder=grounder,
+            entity_index=entity_index,
+            relationship_index=relationship_index,
+            path_expander=path_expander,
+            chunk_lookup=chunk_lookup,
+            mini_internal_candidate_n=0,
+        )
+
+    with pytest.raises(ProcessingError, match="query_entity_limit must be >= 1"):
+        MiniGraphFirstRetriever(
+            query_grounder=grounder,
+            entity_index=entity_index,
+            relationship_index=relationship_index,
+            path_expander=path_expander,
+            chunk_lookup=chunk_lookup,
+            query_entity_limit=0,
+        )
+
+    with pytest.raises(ProcessingError, match="graph_initial_recall_n must be >= 1"):
+        MiniGraphFirstRetriever(
+            query_grounder=grounder,
+            entity_index=entity_index,
+            relationship_index=relationship_index,
+            path_expander=path_expander,
+            chunk_lookup=chunk_lookup,
+            graph_initial_recall_n=0,
+        )
+
+
+def test_legacy_params_map_to_new_budget_params() -> None:
+    """验证旧参数名 (grounded_entity_k 等) 仍然可用并映射到新参数。"""
+    grounder = RecordingGrounder()
+    entity_index = BudgetRecordingEntityIndex()
+    relationship_index = BudgetRecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+    auxiliary_retriever = BudgetRecordingAuxiliaryRetriever()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        grounded_entity_k=10,
+        chunk_auxiliary_retrieval_k=5,
+        discourse_selection_k=3,
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=2)
+
+    # grounded_entity_k=10 应映射到 entity top_k
+    assert entity_index.calls[0][1] == 10
+
+    # chunk_auxiliary_retrieval_k=5 应映射到 auxiliary top_k
+    assert auxiliary_retriever.calls[0][1] == 5
+
+    # discourse_selection_k=3 应映射到 discourse selection
+    assert result.source_selection is not None
+    assert result.source_selection.discourse_selection_k == 3
+
+
+def test_explicit_chunk_auxiliary_candidate_n_overrides_default() -> None:
+    """显式设置 chunk_auxiliary_candidate_n 时，应覆盖默认的 int(mini_internal_candidate_n / 2)。"""
+    grounder = RecordingGrounder()
+    entity_index = RecordingEntityIndex()
+    relationship_index = RecordingRelationshipIndex()
+    path_expander = RecordingPathExpander()
+    chunk_lookup = RecordingChunkLookup()
+    auxiliary_retriever = BudgetRecordingAuxiliaryRetriever()
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=path_expander,
+        chunk_lookup=chunk_lookup,
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        chunk_auxiliary_candidate_n=15,
+    )
+
+    retriever.retrieve_context("How does MiniRAG work?", top_k=2)
+    assert auxiliary_retriever.calls[0][1] == 15

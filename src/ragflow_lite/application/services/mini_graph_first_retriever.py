@@ -44,39 +44,78 @@ class MiniGraphFirstRetriever:
         path_expander: ReasoningPathExpander,
         chunk_lookup: ChunkLookup,
         chunk_auxiliary_retriever: Retriever | None = None,
-        grounded_entity_k: int = 8,
-        relationship_candidate_k: int = 16,
+        mini_internal_candidate_n: int = 60,
+        query_entity_limit: int = 5,
+        graph_initial_recall_n: int = 1024,
         path_hop_limit: int = 2,
         path_candidate_k: int = 24,
-        chunk_auxiliary_retrieval_k: int | None = None,
-        discourse_selection_k: int = 5,
+        chunk_auxiliary_candidate_n: int | None = None,
+        discourse_selection_n: int | None = None,
         context_token_budget: int | None = None,
+        # ── 向后兼容别名（旧参数名） ──
+        grounded_entity_k: int | None = None,
+        relationship_candidate_k: int | None = None,
+        chunk_auxiliary_retrieval_k: int | None = None,
+        discourse_selection_k: int | None = None,
     ) -> None:
-        if discourse_selection_k < 1:
-            raise ProcessingError("discourse_selection_k must be >= 1")
+        # 向后兼容：旧参数名映射到新参数
+        if grounded_entity_k is not None:
+            mini_internal_candidate_n = grounded_entity_k
+        if chunk_auxiliary_retrieval_k is not None:
+            chunk_auxiliary_candidate_n = chunk_auxiliary_retrieval_k
+        if discourse_selection_k is not None:
+            discourse_selection_n = discourse_selection_k
+
+        # 参数合法性校验
+        if mini_internal_candidate_n < 1:
+            raise ProcessingError("mini_internal_candidate_n must be >= 1")
+        if query_entity_limit < 1:
+            raise ProcessingError("query_entity_limit must be >= 1")
+        if graph_initial_recall_n < 1:
+            raise ProcessingError("graph_initial_recall_n must be >= 1")
+        if discourse_selection_n is not None and discourse_selection_n < 1:
+            raise ProcessingError("discourse_selection_n must be >= 1 when provided")
         if context_token_budget is not None and context_token_budget < 1:
             raise ProcessingError("context_token_budget must be >= 1 when provided")
+
         self.query_grounder = query_grounder
         self.entity_index = entity_index
         self.relationship_index = relationship_index
         self.path_expander = path_expander
         self.chunk_lookup = chunk_lookup
         self.chunk_auxiliary_retriever = chunk_auxiliary_retriever
-        self.grounded_entity_k = grounded_entity_k
-        self.relationship_candidate_k = relationship_candidate_k
+        # MiniRAG mini-mode 预算参数
+        self.mini_internal_candidate_n = mini_internal_candidate_n
+        self.query_entity_limit = query_entity_limit
+        self.graph_initial_recall_n = graph_initial_recall_n
         self.path_hop_limit = path_hop_limit
         self.path_candidate_k = path_candidate_k
-        self.chunk_auxiliary_retrieval_k = chunk_auxiliary_retrieval_k
-        self.discourse_selection_k = discourse_selection_k
+        self.chunk_auxiliary_candidate_n = chunk_auxiliary_candidate_n
+        # discourse_selection_n 为 None 时默认等于 answer_top_n（在 retrieve_context 中推导）
+        self.discourse_selection_n = discourse_selection_n
         self.context_token_budget = context_token_budget
+        # 保留旧属性名作为只读别名，避免下游引用立即断裂
+        self.grounded_entity_k = self.mini_internal_candidate_n
+        self.relationship_candidate_k = relationship_candidate_k or 0
+        self.chunk_auxiliary_retrieval_k = self.chunk_auxiliary_candidate_n
+        self.discourse_selection_k = self.discourse_selection_n or 0
 
     def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
         """仅返回检索到的 chunk 列表（不包含路径等上下文信息）。"""
         return self.retrieve_context(query, top_k).chunks
 
     def retrieve_context(self, query: str, top_k: int) -> TopologyRetrievalResult:
-        """完整检索流程：grounding -> 图索引 -> 路径扩展 -> 辅助 chunk -> 评分 -> 合并。"""
+        """完整检索流程：grounding -> 图索引 -> 路径扩展 -> 辅助 chunk -> 评分 -> 合并。
+
+        top_k 即 answer_top_n（最终返回的 chunk 数量），
+        各内部阶段的预算从 mini_internal_candidate_n 等参数推导。
+        """
         _require_positive_top_k(top_k)
+
+        # 推导各阶段预算
+        answer_top_n = top_k
+        # discourse_selection_n 未显式设置时默认等于 answer_top_n
+        discourse_selection_n = self.discourse_selection_n or answer_top_n
 
         # 第 1 步: query grounding —— 提取实体与回答类型关键词
         grounded_query = self.query_grounder.ground(query)
@@ -86,30 +125,40 @@ class MiniGraphFirstRetriever:
             not grounded_query.entities_from_query
             and not grounded_query.answer_type_keywords
         ):
-            return self._fallback_empty_grounding(query, grounded_query, top_k)
+            return self._fallback_empty_grounding(
+                query, grounded_query, answer_top_n, discourse_selection_n
+            )
 
-        # 第 2 步: 图索引查询 —— 实体名称索引 + 关系索引
+        # 第 2 步: 实体截断与预算推导
+        # 截断 grounding 实体到 query_entity_limit，然后推导内部候选数量
+        query_entities = grounded_query.entities_from_query[: self.query_entity_limit]
+        query_entity_n = len(query_entities)
+        entity_candidate_n = self.mini_internal_candidate_n
+        # 关系候选预算 = 实体数 * 内部候选数
+        relationship_candidate_n = query_entity_n * self.mini_internal_candidate_n
+
+        # 第 3 步: 图索引查询 —— 实体名称索引 + 关系索引
         entity_candidates = self.entity_index.query_entities(
-            grounded_query.entities_from_query,
-            top_k=self.grounded_entity_k,
+            query_entities,
+            top_k=entity_candidate_n,
         )
         relationship_candidates = self.relationship_index.query_relationships(
             query,
             grounded_query.answer_type_keywords,
-            top_k=self.relationship_candidate_k,
+            top_k=relationship_candidate_n,
         )
 
-        # 第 3 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径
+        # 第 4 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径
         paths = self.path_expander.expand_paths(
             seed_entity_ids=_entity_ids(entity_candidates),
             seed_relation_ids=_relation_ids(relationship_candidates),
             max_hops=self.path_hop_limit,
         )[: self.path_candidate_k]
 
-        # 第 4 步: chunk 辅助检索（可选）—— 作为评分加成与兜底
-        auxiliary_chunks = self._retrieve_auxiliary_chunks(query, top_k)
+        # 第 5 步: chunk 辅助检索（可选）—— 作为评分加成与兜底
+        auxiliary_chunks = self._retrieve_auxiliary_chunks(query, answer_top_n)
 
-        # 第 5 步: 源 chunk 评分与排序
+        # 第 6 步: 源 chunk 评分与排序
         supports = _score_source_chunks(
             entity_candidates=entity_candidates,
             relationship_candidates=relationship_candidates,
@@ -117,8 +166,10 @@ class MiniGraphFirstRetriever:
             auxiliary_chunks=auxiliary_chunks,
         )
 
-        # 第 6 步: 构建 source selection —— 将评分结果转为带选择决策的结构
-        selection = self._build_source_selection(supports, top_k)
+        # 第 7 步: 构建 source selection —— 将评分结果转为带选择决策的结构
+        selection = self._build_source_selection(
+            supports, answer_top_n, discourse_selection_n=discourse_selection_n
+        )
         selected_chunk_ids = [
             source.chunk_id
             for source in selection.sources
@@ -128,7 +179,7 @@ class MiniGraphFirstRetriever:
             selected_chunk_ids,
             auxiliary_chunks,
             selection,
-            top_k,
+            answer_top_n,
         )
         return TopologyRetrievalResult(
             query=query,
@@ -147,6 +198,7 @@ class MiniGraphFirstRetriever:
         query: str,
         grounded_query: GroundedQuery,
         top_k: int,
+        discourse_selection_n: int | None = None,
     ) -> TopologyRetrievalResult:
         """grounding 为空时的兜底路径：仅依赖辅助检索。"""
         auxiliary_chunks = self._retrieve_auxiliary_chunks(query, top_k)
@@ -167,6 +219,7 @@ class MiniGraphFirstRetriever:
             supports,
             top_k,
             fallback_reason="empty_grounding",
+            discourse_selection_n=discourse_selection_n,
         )
         # 为每个 chunk 附上 fallback 元数据
         chunks = [
@@ -229,21 +282,30 @@ class MiniGraphFirstRetriever:
         return self.chunk_auxiliary_retriever.retrieve(query, self._auxiliary_k(top_k))
 
     def _auxiliary_k(self, top_k: int) -> int:
-        """辅助检索的 top_k：优先使用显式配置，否则与主 top_k 一致。"""
-        return self.chunk_auxiliary_retrieval_k or top_k
+        """辅助检索的 top_k：优先使用显式配置，否则按 mini_internal_candidate_n / 2 推导。"""
+        if self.chunk_auxiliary_candidate_n is not None:
+            return self.chunk_auxiliary_candidate_n
+        # 默认推导：mini_internal_candidate_n 的一半
+        return int(self.mini_internal_candidate_n / 2)
 
     def _build_source_selection(
         self,
         supports: list[SourceChunkSupport],
         top_k: int,
         fallback_reason: str | None = None,
+        *,
+        discourse_selection_n: int | None = None,
     ) -> GraphFirstSourceSelection:
-        """将评分后的 SourceChunkSupport 列表转为带选择决策的 GraphFirstSourceSelection。"""
+        """将评分后的 SourceChunkSupport 列表转为带选择决策的 GraphFirstSourceSelection。
+
+        discourse_selection_n 控制语篇候选数量上限；未传入时退化为 top_k。
+        """
+        effective_discourse_n = discourse_selection_n or top_k
         sources: list[GraphFirstSource] = []
         for rank, support in enumerate(supports):
             selected_for_answer = rank < top_k
             selected_for_discourse = (
-                selected_for_answer and rank < self.discourse_selection_k
+                selected_for_answer and rank < effective_discourse_n
             )
             sources.append(
                 GraphFirstSource(
@@ -264,7 +326,7 @@ class MiniGraphFirstRetriever:
         return GraphFirstSourceSelection(
             sources=sources,
             final_context_k=top_k,
-            discourse_selection_k=self.discourse_selection_k,
+            discourse_selection_k=effective_discourse_n,
             # 仅记录字段，不做 token 计数强制执行；
             # 待后续 slice 引入 tokenizer 或仓库级计数策略后再强制。
             context_token_budget=self.context_token_budget,
