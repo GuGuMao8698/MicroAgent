@@ -4,6 +4,12 @@ from ragflow_lite.infrastructure.evidence.deepseek_discourse_extractor import (
 from ragflow_lite.infrastructure.evidence.deepseek_extractor import (
     DeepSeekChatEvidenceExtractor,
 )
+from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
+    ENTITY_MATCH_TEXT_FIELDS,
+    RELATIONSHIP_MATCH_TEXT_FIELDS,
+    build_entity_candidate_row,
+    build_relationship_candidate_row,
+)
 from ragflow_lite.infrastructure.evidence.graph_candidate_sidecar import (
     GraphCandidateSidecar,
 )
@@ -24,6 +30,8 @@ from ragflow_lite.infrastructure.evidence.openai_extractor import (
 )
 
 __all__ = [
+    "ENTITY_MATCH_TEXT_FIELDS",
+    "RELATIONSHIP_MATCH_TEXT_FIELDS",
     "DeepSeekChatEvidenceExtractor",
     "DeepSeekChatIntraChunkDiscourseExtractor",
     "GraphCandidateSidecar",
@@ -32,4 +40,6 @@ __all__ = [
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",
+    "build_entity_candidate_row",
+    "build_relationship_candidate_row",
 ]
