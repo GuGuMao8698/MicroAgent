@@ -77,6 +77,11 @@ class InfinityDenseVectorIndex:
         """断开与 Infinity 的连接。"""
         self._client.disconnect()
 
+    @property
+    def client(self) -> Any:
+        """底层 Infinity client，供其他组件复用同一连接。"""
+        return self._client
+
     # ------------------------------------------------------------------
     # VectorIndex 协议实现
     # ------------------------------------------------------------------

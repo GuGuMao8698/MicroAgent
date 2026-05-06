@@ -42,16 +42,16 @@ from ragflow_lite.infrastructure import (
     InMemoryStageCache,
     InMemoryTaskStore,
     LocalDocumentStore,
-    LocalJsonGraphEvidenceStore,
     RecursiveCharacterChunker,
 )
 from ragflow_lite.infrastructure.evidence import (
-    GraphCandidateSidecar,
-    GraphEvidenceSidecarStore,
-    LocalJsonGraphEvidenceHybridIndex,
+    GraphEvidenceInfinityStore,
+    InfinityGraphCandidateIndex,
+    LocalJsonGraphEvidenceIndex,
+    LocalJsonGraphEvidenceStore,
 )
-from ragflow_lite.infrastructure.evidence.graph_candidate_scoring import (
-    GraphCandidateRetrievalConfig,
+from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
+    GraphCandidateInfinityConfig,
 )
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
@@ -125,15 +125,27 @@ def build_services(settings: Settings) -> AppServices:
         render_citations=deepseek_runtime_config.render_citations,
     )
     graph_evidence_dir = settings.local_index_dir / "graph_evidence"
-    graph_candidate_sidecar = GraphCandidateSidecar(
-        sidecar_dir=settings.local_index_dir / "graph_candidate_vectors",
-        embedding_signature=embedder.signature,
-    )
-    base_graph_store = LocalJsonGraphEvidenceStore(graph_evidence_dir)
-    graph_store = GraphEvidenceSidecarStore(
-        graph_store=base_graph_store,
-        sidecar=graph_candidate_sidecar,
+    # Infinity 图候选索引：entity/relationship 混合检索（文本 + 稠密向量融合）
+    graph_candidate_index = InfinityGraphCandidateIndex(
+        client=vector_index.client,
+        database=settings.infinity_database,
         embedder=embedder,
+        config=GraphCandidateInfinityConfig(
+            entity_table=settings.infinity_graph_entity_table,
+            relationship_table=settings.infinity_graph_relationship_table,
+            graph_initial_recall_n=settings.graph_initial_recall_n,
+            text_weight=settings.graph_candidate_text_weight,
+            dense_weight=settings.graph_candidate_dense_weight,
+            minimum_should_match=settings.graph_candidate_minimum_should_match,
+            dense_similarity_threshold=settings.graph_candidate_dense_similarity_threshold,
+            fusion_normalize=settings.graph_candidate_fusion_normalize,
+        ),
+    )
+    # 图证据存储：同时写 JSON + Infinity candidates
+    base_graph_store = LocalJsonGraphEvidenceStore(graph_evidence_dir)
+    graph_store = GraphEvidenceInfinityStore(
+        graph_store=base_graph_store,
+        candidate_index=graph_candidate_index,
     )
     evidence_extractor = DeepSeekChatEvidenceExtractor(
         api_key=deepseek_runtime_config.api_key,
@@ -155,29 +167,22 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
-    # 图候选检索配置：从 settings 构建
-    graph_candidate_config = GraphCandidateRetrievalConfig(
-        lexical_weight=settings.graph_candidate_lexical_weight,
-        dense_weight=settings.graph_candidate_dense_weight,
-        minimum_should_match=settings.graph_candidate_minimum_should_match,
-        dense_similarity_threshold=settings.graph_candidate_dense_similarity_threshold,
-        graph_initial_candidate_k=settings.graph_initial_candidate_k,
-    )
-    # 图证据混合索引：词法 + 稠密混合检索，同一实例承担实体/关系/路径扩展三个端口
-    graph_evidence_index = LocalJsonGraphEvidenceHybridIndex(
+    # 本地 JSON 图证据索引：仅用于拓扑路径扩展
+    local_graph_evidence_index = LocalJsonGraphEvidenceIndex(
         evidence_dir=graph_evidence_dir,
-        sidecar=graph_candidate_sidecar,
-        embedder=embedder,
-        config=graph_candidate_config,
+        reload_on_query=True,
+        canonicalize_cross_document=True,
     )
     # 图优先检索器：先做 query grounding，再查图索引、扩展路径，最后评分与合并 chunk
     retriever = MiniGraphFirstRetriever(
         query_grounder=query_grounder,
-        entity_index=graph_evidence_index,
-        relationship_index=graph_evidence_index,
-        path_expander=graph_evidence_index,
+        entity_index=graph_candidate_index,
+        relationship_index=graph_candidate_index,
+        path_expander=local_graph_evidence_index,
         chunk_lookup=vector_index,
         chunk_auxiliary_retriever=chunk_auxiliary_retriever,
+        mini_internal_candidate_n=settings.mini_internal_candidate_n,
+        query_entity_limit=settings.query_entity_limit,
     )
     query_service = QueryService(
         retriever=retriever,

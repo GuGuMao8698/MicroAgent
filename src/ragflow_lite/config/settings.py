@@ -133,11 +133,19 @@ class Settings:
     infinity_database: str = "default_db"
     infinity_document_table: str = "documents"
     infinity_chunk_table: str = "chunks"
-    graph_candidate_lexical_weight: float = 0.3
-    graph_candidate_dense_weight: float = 0.7
+    # ── 图候选 Infinity 检索参数 ──
+    answer_top_n_default: int = 6
+    mini_internal_candidate_n: int = 60
+    query_entity_limit: int = 5
+    graph_initial_recall_n: int = 1024
+    graph_candidate_text_weight: float = 0.05
+    graph_candidate_dense_weight: float = 0.95
     graph_candidate_minimum_should_match: float = 0.3
+    graph_candidate_fallback_minimum_should_match: float = 0.1
     graph_candidate_dense_similarity_threshold: float = 0.2
-    graph_initial_candidate_k: int = 1024
+    graph_candidate_fusion_normalize: str = "atan"
+    infinity_graph_entity_table: str = "graph_entities"
+    infinity_graph_relationship_table: str = "graph_relationships"
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")

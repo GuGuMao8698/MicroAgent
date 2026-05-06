@@ -29,9 +29,9 @@ from ragflow_lite.infrastructure import (
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.evidence import (
-    GraphCandidateSidecar,
-    GraphEvidenceSidecarStore,
-    LocalJsonGraphEvidenceHybridIndex,
+    GraphEvidenceInfinityStore,
+    InfinityGraphCandidateIndex,
+    LocalJsonGraphEvidenceIndex,
 )
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
 
@@ -191,16 +191,17 @@ def test_build_services_uses_infinity_hybrid_retriever(
 def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> None:
     services = build_services(_build_settings(tmp_path))
 
+    # 图证据存储：GraphEvidenceInfinityStore 包装 JSON + Infinity candidates
     assert isinstance(
-        services.ingestion_pipeline.graph_store, GraphEvidenceSidecarStore
+        services.ingestion_pipeline.graph_store, GraphEvidenceInfinityStore
     )
     assert isinstance(
         services.ingestion_pipeline.graph_store._graph_store,
         LocalJsonGraphEvidenceStore,
     )
     assert isinstance(
-        services.ingestion_pipeline.graph_store._sidecar,
-        GraphCandidateSidecar,
+        services.ingestion_pipeline.graph_store._candidate_index,
+        InfinityGraphCandidateIndex,
     )
     assert isinstance(
         services.ingestion_pipeline.evidence_extractor,
@@ -256,27 +257,49 @@ def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None
     assert services.discorag_query_service.retriever is services.retriever
     # query_grounder 正确装配
     assert isinstance(services.retriever.query_grounder, DeepSeekChatQueryGrounder)
-    # 图证据混合索引正确装配，且 entity/relationship/path_expander 共用同一实例
+    # Infinity 图候选索引用于 entity/relationship 查询
+    assert isinstance(services.retriever.entity_index, InfinityGraphCandidateIndex)
     assert isinstance(
-        services.retriever.entity_index, LocalJsonGraphEvidenceHybridIndex
+        services.retriever.relationship_index, InfinityGraphCandidateIndex
     )
-    assert services.retriever.entity_index._canonicalize_cross_document is True
     assert services.retriever.entity_index is services.retriever.relationship_index
-    assert services.retriever.entity_index is services.retriever.path_expander
-    # 共享实例验证：sidecar 和 embedder 跨 pipeline 复用
-    assert (
-        services.retriever.entity_index.sidecar
-        is services.ingestion_pipeline.graph_store._sidecar
-    )
-    assert (
-        services.retriever.entity_index.embedder is services.ingestion_pipeline.embedder
-    )
+    # 本地 JSON 图证据索引用于拓扑路径扩展（path_expander）
+    assert isinstance(services.retriever.path_expander, LocalJsonGraphEvidenceIndex)
+    assert services.retriever.path_expander._canonicalize_cross_document is True
     # chunk_lookup 使用 vector_index
     assert services.retriever.chunk_lookup is services.ingestion_pipeline.vector_index
     # chunk_auxiliary_retriever 使用 InfinityHybridRetriever
     assert isinstance(
         services.retriever.chunk_auxiliary_retriever, InfinityHybridRetriever
     )
+
+
+def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> None:
+    """验证 Infinity 图候选索引作为 entity/relationship 查询路径。"""
+    services = build_services(_build_settings(tmp_path))
+    retriever = services.query_service.retriever
+    assert isinstance(retriever, MiniGraphFirstRetriever)
+    assert isinstance(retriever.entity_index, InfinityGraphCandidateIndex)
+    assert isinstance(retriever.relationship_index, InfinityGraphCandidateIndex)
+    # path_expander 使用本地 JSON 索引，不使用 Infinity 图候选索引
+    assert not isinstance(retriever.path_expander, InfinityGraphCandidateIndex)
+    assert isinstance(retriever.chunk_auxiliary_retriever, InfinityHybridRetriever)
+
+
+def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
+    """验证图候选 Infinity 设置的默认值与规格一致。"""
+    settings = _build_settings(tmp_path)
+    assert settings.answer_top_n_default == 6
+    assert settings.mini_internal_candidate_n == 60
+    assert settings.query_entity_limit == 5
+    assert settings.graph_initial_recall_n == 1024
+    assert settings.graph_candidate_text_weight == 0.05
+    assert settings.graph_candidate_dense_weight == 0.95
+    assert settings.graph_candidate_minimum_should_match == 0.3
+    assert settings.graph_candidate_dense_similarity_threshold == 0.2
+    assert settings.graph_candidate_fusion_normalize == "atan"
+    assert settings.infinity_graph_entity_table == "graph_entities"
+    assert settings.infinity_graph_relationship_table == "graph_relationships"
 
 
 def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
