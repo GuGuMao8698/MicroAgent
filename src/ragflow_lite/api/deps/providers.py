@@ -141,6 +141,7 @@ def build_services(settings: Settings) -> AppServices:
     # Infinity 图候选索引：entity/relationship 混合检索（文本 + 稠密向量融合）
     graph_candidate_index = InfinityGraphCandidateIndex(
         client=vector_index.client,
+        client_lock=vector_index.client_lock,
         database=settings.infinity_database,
         embedder=embedder,
         config=GraphCandidateInfinityConfig(

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import infinity
-from infinity.common import NetworkAddress
+from infinity.common import ConflictType, NetworkAddress
 
 from ragflow_lite.config import Settings
 
@@ -20,9 +20,15 @@ def select_eval_cleanup_tables(table_names: Iterable[str]) -> list[str]:
             "chunks",
             "documents_datasets",
             "documents_dataset_bindings",
+            "graph_entities",
+            "graph_relationships",
         }
         or name.startswith("documents_")
         or name.startswith("chunks_")
+        or name.startswith("graph_entities_")
+        or name.startswith("graph_relationships_")
+        or name.startswith("test_legacy_doc_")
+        or name.startswith("test_legacy_chunk_")
     }
     return sorted(selected)
 
@@ -45,12 +51,15 @@ def drop_tables(settings: Settings, table_names: Iterable[str]) -> None:
     try:
         database = client.get_database(settings.infinity_database)
         for name in table_names:
-            database.drop_table(name)
+            database.drop_table(name, ConflictType.Ignore)
     finally:
         client.disconnect()
 
 
 def _coerce_table_names(raw: Any) -> list[str]:
+    response_names = getattr(raw, "table_names", None)
+    if response_names is not None:
+        return [str(name) for name in response_names]
     if hasattr(raw, "to_pl"):
         raw = raw.to_pl().to_dicts()
     if isinstance(raw, list):
@@ -89,3 +98,7 @@ def main() -> None:
 
     drop_tables(settings, selected)
     print("\n".join(selected))
+
+
+if __name__ == "__main__":
+    main()

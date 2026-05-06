@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 import infinity
-from infinity.common import ConflictType, NetworkAddress, SortType
+from infinity.common import ConflictType, InfinityException, NetworkAddress, SortType
 from infinity.index import IndexInfo, IndexType
 
 from ragflow_lite.domain.errors import (
@@ -39,10 +41,17 @@ from ragflow_lite.infrastructure.vector_indexes.chunk_text_fields import (
 logger = logging.getLogger(__name__)
 
 EmbeddingSignature = dict[str, str | int | None]
+_DDL_RETRY_ATTEMPTS = 5
+_DDL_RETRY_DELAY_SECONDS = 0.05
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _is_resource_busy(exc: InfinityException) -> bool:
+    message = str(getattr(exc, "error_msg", "") or exc)
+    return "Resource busy" in message
 
 
 @dataclass(frozen=True)
@@ -111,26 +120,34 @@ class InfinityDenseVectorIndex:
         self._dimensions = embedding_dimensions
         self._embedding_signature = embedding_signature
         self._chunk_hybrid_config = chunk_hybrid_config or ChunkHybridRetrievalConfig()
+        self._lock = threading.RLock()
 
-        if client is not None:
-            self._client = client
-        else:
-            self._client = infinity.connect(
-                NetworkAddress(host, port),
-            )
-        self._db: Any = self._client.get_database(database)
+        with self._lock:
+            if client is not None:
+                self._client = client
+            else:
+                self._client = infinity.connect(
+                    NetworkAddress(host, port),
+                )
+            self._db: Any = self._client.get_database(database)
         self._datasets_table = f"{document_table}_datasets"
         self._dataset_bindings_table = f"{document_table}_dataset_bindings"
         self._ensure_tables()
 
     def disconnect(self) -> None:
         """断开与 Infinity 的连接。"""
-        self._client.disconnect()
+        with self._lock:
+            self._client.disconnect()
 
     @property
     def client(self) -> Any:
         """底层 Infinity client，供其他组件复用同一连接。"""
         return self._client
+
+    @property
+    def client_lock(self) -> threading.RLock:
+        """保护底层 Infinity SDK client 的共享锁。"""
+        return self._lock
 
     # ------------------------------------------------------------------
     # VectorIndex 协议实现
@@ -142,66 +159,69 @@ class InfinityDenseVectorIndex:
         embedded_chunks: list[EmbeddedChunk],
     ) -> None:
         """把文档元数据和 embedding 后的 chunk 写入 Infinity。"""
-        self._validate_embedding_signature(embedded_chunks)
+        with self._lock:
+            self._validate_embedding_signature(embedded_chunks)
 
-        # 先删后写文档行，保证重建同一 document_id 时不会残留旧元数据。
-        doc_row: dict[str, Any] = {
-            "document_id": asset.document_id,
-            "filename": asset.filename,
-            "file_type": asset.file_type,
-            "storage_path": str(asset.storage_path),
-            "size_bytes": asset.size_bytes,
-            "created_at": asset.created_at.isoformat(),
-            "embedding_provider": self._embedding_signature["provider"],
-            "embedding_model": self._embedding_signature["model"],
-            "embedding_dimensions": self._embedding_signature["dimensions"],
-            "parser_metadata_json": json.dumps(asset.metadata, ensure_ascii=False),
-        }
-        doc_table = self._db.get_table(self._document_table)
-        self._delete_document_rows(doc_table, asset.document_id)
-        doc_table.insert([doc_row])
+            # 先删后写文档行，保证重建同一 document_id 时不会残留旧元数据。
+            doc_row: dict[str, Any] = {
+                "document_id": asset.document_id,
+                "filename": asset.filename,
+                "file_type": asset.file_type,
+                "storage_path": str(asset.storage_path),
+                "size_bytes": asset.size_bytes,
+                "created_at": asset.created_at.isoformat(),
+                "embedding_provider": self._embedding_signature["provider"],
+                "embedding_model": self._embedding_signature["model"],
+                "embedding_dimensions": self._embedding_signature["dimensions"],
+                "parser_metadata_json": json.dumps(asset.metadata, ensure_ascii=False),
+            }
+            doc_table = self._db.get_table(self._document_table)
+            self._delete_document_rows(doc_table, asset.document_id)
+            doc_table.insert([doc_row])
 
-        # chunk 也按"先删旧再写新"处理，避免覆盖写入后混入旧 chunk。
-        chunk_table = self._db.get_table(self._chunk_table)
-        self._delete_chunk_rows(chunk_table, asset.document_id)
+            # chunk 也按"先删旧再写新"处理，避免覆盖写入后混入旧 chunk。
+            chunk_table = self._db.get_table(self._chunk_table)
+            self._delete_chunk_rows(chunk_table, asset.document_id)
 
-        if not embedded_chunks:
-            return
+            if not embedded_chunks:
+                return
 
-        chunk_rows = [self._chunk_to_row(chunk, asset) for chunk in embedded_chunks]
-        chunk_table.insert(chunk_rows)
+            chunk_rows = [self._chunk_to_row(chunk, asset) for chunk in embedded_chunks]
+            chunk_table.insert(chunk_rows)
 
     def delete_document(self, document_id: str) -> None:
         """删除文档及其对应的所有 chunk 和 dataset binding。"""
-        doc_table = self._db.get_table(self._document_table)
-        chunk_table = self._db.get_table(self._chunk_table)
-        self._delete_chunk_rows(chunk_table, document_id)
-        self._delete_document_rows(doc_table, document_id)
-        # 清理该文档的 dataset binding。
-        self._delete_binding_rows(document_id)
+        with self._lock:
+            doc_table = self._db.get_table(self._document_table)
+            chunk_table = self._db.get_table(self._chunk_table)
+            self._delete_chunk_rows(chunk_table, document_id)
+            self._delete_document_rows(doc_table, document_id)
+            # 清理该文档的 dataset binding。
+            self._delete_binding_rows(document_id)
 
     def search(self, query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         """使用内积在稠密向量上检索 chunk。"""
-        self._validate_query_dimensions(query_vector)
+        with self._lock:
+            self._validate_query_dimensions(query_vector)
 
-        chunk_table = self._db.get_table(self._chunk_table)
-        result_tuple = (
-            chunk_table.match_dense(
-                vector_column_name="vec",
-                embedding_data=query_vector,
-                embedding_data_type="float",
-                distance_type="ip",
-                topn=top_k,
+            chunk_table = self._db.get_table(self._chunk_table)
+            result_tuple = (
+                chunk_table.match_dense(
+                    vector_column_name="vec",
+                    embedding_data=query_vector,
+                    embedding_data_type="float",
+                    distance_type="ip",
+                    topn=top_k,
+                )
+                .output(self._dense_search_output_columns())
+                .to_pl()
             )
-            .output(self._chunk_output_columns("_distance"))
-            .to_pl()
-        )
 
-        return self._materialize_chunk_query_results(
-            result_tuple,
-            score_field="_distance",
-            validate_embedding_signature=True,
-        )
+            return self._materialize_dense_query_results(
+                result_tuple,
+                query_vector=query_vector,
+                validate_embedding_signature=True,
+            )
 
     def search_hybrid(
         self, query: str, query_vector: list[float], top_k: int
@@ -214,93 +234,100 @@ class InfinityDenseVectorIndex:
         fusion 结果在 top_k 裁剪前应用基于 ``chunk_index`` 的 bounded
         position prior，使文档前部 chunk 在近邻候选中稍获提升。
         """
-        self._validate_query_dimensions(query_vector)
+        with self._lock:
+            self._validate_query_dimensions(query_vector)
 
-        config = self._chunk_hybrid_config
-        initial_recall_n = config.initial_recall_n
+            config = self._chunk_hybrid_config
+            initial_recall_n = config.initial_recall_n
 
-        chunk_table = self._db.get_table(self._chunk_table)
-        result_tuple = (
-            chunk_table.match_text(
-                fields=config.match_text_fields,
-                matching_text=query,
-                topn=initial_recall_n,
-                extra_options={
-                    "minimum_should_match": _minimum_should_match_option(
-                        config.minimum_should_match
-                    ),
-                },
+            chunk_table = self._db.get_table(self._chunk_table)
+            result_tuple = (
+                chunk_table.match_text(
+                    fields=config.match_text_fields,
+                    matching_text=query,
+                    topn=initial_recall_n,
+                    extra_options={
+                        "minimum_should_match": _minimum_should_match_option(
+                            config.minimum_should_match
+                        ),
+                    },
+                )
+                .match_dense(
+                    vector_column_name="vec",
+                    embedding_data=query_vector,
+                    embedding_data_type="float",
+                    distance_type="ip",
+                    topn=initial_recall_n,
+                    knn_params=_dense_knn_params(config.dense_similarity_threshold),
+                )
+                .fusion(
+                    "weighted_sum",
+                    topn=initial_recall_n,
+                    fusion_params={
+                        "weights": config.fusion_weights,
+                        "normalize": config.fusion_normalize,
+                    },
+                )
+                .output(self._chunk_output_columns("_score", include_chunk_index=True))
+                .to_pl()
             )
-            .match_dense(
-                vector_column_name="vec",
-                embedding_data=query_vector,
-                embedding_data_type="float",
-                distance_type="ip",
-                topn=initial_recall_n,
-                knn_params=_dense_knn_params(config.dense_similarity_threshold),
-            )
-            .fusion(
-                "weighted_sum",
-                topn=initial_recall_n,
-                fusion_params={
-                    "weights": config.fusion_weights,
-                    "normalize": config.fusion_normalize,
-                },
-            )
-            .output(self._chunk_output_columns("_score", include_chunk_index=True))
-            .to_pl()
-        )
 
-        results = self._materialize_chunk_query_results(
-            result_tuple,
-            score_field="_score",
-            validate_embedding_signature=True,
-        )
-        if config.position_prior_enabled:
-            _apply_position_prior(results, boost=config.position_prior_weight)
-        else:
-            _drop_position_prior_metadata(results)
-        results.sort(key=lambda c: c.score, reverse=True)
-        return results[:top_k]
+            results = self._materialize_chunk_query_results(
+                result_tuple,
+                score_field="_score",
+                validate_embedding_signature=True,
+            )
+            if config.position_prior_enabled:
+                _apply_position_prior(results, boost=config.position_prior_weight)
+            else:
+                _drop_position_prior_metadata(results)
+            results.sort(key=lambda c: c.score, reverse=True)
+            return results[:top_k]
 
     def get_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
         """按 chunk_id 批量查找 chunk，不存在的 ID 静默跳过。"""
-        if not chunk_ids:
-            return []
-        unique_chunk_ids = list(dict.fromkeys(chunk_ids))
-        escaped_ids = [chunk_id.replace("'", "''") for chunk_id in unique_chunk_ids]
-        filter_expr = " OR ".join(
-            f"chunk_id = '{chunk_id}'" for chunk_id in escaped_ids
-        )
-        chunk_table = self._db.get_table(self._chunk_table)
-        rows = self._table_rows(
-            chunk_table,
-            self._chunk_output_columns("_score", include_embedding=False),
-            filter_expr=filter_expr,
-        )
-        chunks_by_id: dict[str, RetrievedChunk] = {}
-        for row in rows:
-            metadata = self._parse_json(row.get("chunk_metadata_json", ""))
-            metadata["filename"] = row.get("filename")
-            metadata["file_type"] = row.get("file_type")
-            chunks_by_id[row["chunk_id"]] = RetrievedChunk(
-                chunk_id=row["chunk_id"],
-                document_id=row["document_id"],
-                text=row["text"],
-                score=0.0,
-                metadata=metadata,
+        with self._lock:
+            if not chunk_ids:
+                return []
+            unique_chunk_ids = list(dict.fromkeys(chunk_ids))
+            escaped_ids = [chunk_id.replace("'", "''") for chunk_id in unique_chunk_ids]
+            filter_expr = " OR ".join(
+                f"chunk_id = '{chunk_id}'" for chunk_id in escaped_ids
             )
-        return [
-            chunks_by_id[chunk_id]
-            for chunk_id in unique_chunk_ids
-            if chunk_id in chunks_by_id
-        ]
+            chunk_table = self._db.get_table(self._chunk_table)
+            rows = self._table_rows(
+                chunk_table,
+                self._chunk_output_columns("_score", include_embedding=False),
+                filter_expr=filter_expr,
+            )
+            chunks_by_id: dict[str, RetrievedChunk] = {}
+            for row in rows:
+                metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+                metadata["filename"] = row.get("filename")
+                metadata["file_type"] = row.get("file_type")
+                chunks_by_id[row["chunk_id"]] = RetrievedChunk(
+                    chunk_id=row["chunk_id"],
+                    document_id=row["document_id"],
+                    text=row["text"],
+                    score=0.0,
+                    metadata=metadata,
+                )
+            return [
+                chunks_by_id[chunk_id]
+                for chunk_id in unique_chunk_ids
+                if chunk_id in chunks_by_id
+            ]
 
     # ------------------------------------------------------------------
     # 表管理
     # ------------------------------------------------------------------
 
     def _ensure_tables(self) -> None:
+        """确保文档表、chunk 表、dataset 表和 binding 表存在。"""
+        with self._lock:
+            self._ensure_tables_locked()
+
+    def _ensure_tables_locked(self) -> None:
         """确保文档表、chunk 表、dataset 表和 binding 表存在。"""
         doc_columns = {
             "document_id": {"type": "varchar", "constraints": ["primary key"]},
@@ -314,7 +341,12 @@ class InfinityDenseVectorIndex:
             "embedding_dimensions": {"type": "integer"},
             "parser_metadata_json": {"type": "varchar"},
         }
-        self._db.create_table(self._document_table, doc_columns, ConflictType.Ignore)
+        self._retry_ddl(
+            self._db.create_table,
+            self._document_table,
+            doc_columns,
+            ConflictType.Ignore,
+        )
 
         chunk_columns = {
             "chunk_id": {"type": "varchar", "constraints": ["primary key"]},
@@ -333,7 +365,12 @@ class InfinityDenseVectorIndex:
             "content_tks": {"type": "varchar"},
             "content_sm_tks": {"type": "varchar"},
         }
-        self._db.create_table(self._chunk_table, chunk_columns, ConflictType.Ignore)
+        self._retry_ddl(
+            self._db.create_table,
+            self._chunk_table,
+            chunk_columns,
+            ConflictType.Ignore,
+        )
 
         datasets_columns = {
             "dataset_id": {"type": "varchar", "constraints": ["primary key"]},
@@ -341,8 +378,11 @@ class InfinityDenseVectorIndex:
             "description": {"type": "varchar"},
             "created_at": {"type": "varchar"},
         }
-        self._db.create_table(
-            self._datasets_table, datasets_columns, ConflictType.Ignore
+        self._retry_ddl(
+            self._db.create_table,
+            self._datasets_table,
+            datasets_columns,
+            ConflictType.Ignore,
         )
 
         bindings_columns = {
@@ -350,8 +390,11 @@ class InfinityDenseVectorIndex:
             "dataset_id": {"type": "varchar"},
             "bound_at": {"type": "varchar"},
         }
-        self._db.create_table(
-            self._dataset_bindings_table, bindings_columns, ConflictType.Ignore
+        self._retry_ddl(
+            self._db.create_table,
+            self._dataset_bindings_table,
+            bindings_columns,
+            ConflictType.Ignore,
         )
 
         self._validate_chunk_table_dimensions()
@@ -359,96 +402,113 @@ class InfinityDenseVectorIndex:
 
     def _validate_chunk_table_dimensions(self) -> None:
         """校验 chunk 表中的 `vec` 列维度是否与当前配置一致。"""
-        chunk_table = self._db.get_table(self._chunk_table)
-        df = self._columns_dataframe(chunk_table.show_columns())
-        for row in df.iter_rows(named=True):
-            if row.get("column_name") == "vec" or row.get("name") == "vec":
-                col_type = str(row.get("column_type", row.get("type", "")))
-                if str(self._dimensions) not in col_type:
-                    raise RuntimeError(
-                        f"Chunk table '{self._chunk_table}' vector column has type "
-                        f"'{col_type}' which does not match expected "
-                        f"{self._dimensions} dimensions. "
-                        "Drop and recreate the table, or update the configuration."
-                    )
-                return
-        raise RuntimeError(
-            f"Chunk table '{self._chunk_table}' does not contain a 'vec' column. "
-            f"The existing table schema is incompatible. "
-            f"Drop and recreate the table to proceed."
-        )
+        with self._lock:
+            chunk_table = self._db.get_table(self._chunk_table)
+            df = self._columns_dataframe(chunk_table.show_columns())
+            for row in df.iter_rows(named=True):
+                if row.get("column_name") == "vec" or row.get("name") == "vec":
+                    col_type = str(row.get("column_type", row.get("type", "")))
+                    if str(self._dimensions) not in col_type:
+                        raise RuntimeError(
+                            f"Chunk table '{self._chunk_table}' vector column has type "
+                            f"'{col_type}' which does not match expected "
+                            f"{self._dimensions} dimensions. "
+                            "Drop and recreate the table, or update the configuration."
+                        )
+                    return
+            raise RuntimeError(
+                f"Chunk table '{self._chunk_table}' does not contain a 'vec' column. "
+                f"The existing table schema is incompatible. "
+                f"Drop and recreate the table to proceed."
+            )
 
     def _ensure_fulltext_index(self) -> None:
         """对 chunk 表的 text、filename 列幂等创建全文索引。"""
-        chunk_table = self._db.get_table(self._chunk_table)
-        required_indexes = {
-            f"{self._chunk_table}_text_fulltext_idx": "text",
-            f"{self._chunk_table}_filename_fulltext_idx": "filename",
-            f"{self._chunk_table}_filename_kwd_fulltext_idx": "filename_kwd",
-            f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
-            f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
-            f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
-        }
-        # 迁移窗口：只为表中实际存在的列创建全文索引。
-        available_columns = self._chunk_column_names()
-        required_indexes = {
-            index_name: column_name
-            for index_name, column_name in required_indexes.items()
-            if column_name in available_columns
-        }
-        existing_indexes = self._list_index_names(chunk_table)
+        with self._lock:
+            chunk_table = self._db.get_table(self._chunk_table)
+            required_indexes = {
+                f"{self._chunk_table}_text_fulltext_idx": "text",
+                f"{self._chunk_table}_filename_fulltext_idx": "filename",
+                f"{self._chunk_table}_filename_kwd_fulltext_idx": "filename_kwd",
+                f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
+                f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
+                f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
+            }
+            # 迁移窗口：只为表中实际存在的列创建全文索引。
+            available_columns = self._chunk_column_names()
+            required_indexes = {
+                index_name: column_name
+                for index_name, column_name in required_indexes.items()
+                if column_name in available_columns
+            }
+            existing_indexes = self._list_index_names(chunk_table)
 
-        for index_name, column_name in required_indexes.items():
-            if index_name in existing_indexes:
-                continue
-            chunk_table.create_index(
-                index_name,
-                IndexInfo(column_name, IndexType.FullText),
-                ConflictType.Ignore,
-            )
+            for index_name, column_name in required_indexes.items():
+                if index_name in existing_indexes:
+                    continue
+                self._retry_ddl(
+                    chunk_table.create_index,
+                    index_name,
+                    IndexInfo(column_name, IndexType.FullText),
+                    ConflictType.Ignore,
+                )
 
-        existing_indexes = self._list_index_names(chunk_table)
-        missing_indexes = [
-            index_name
-            for index_name in required_indexes
-            if index_name not in existing_indexes
-        ]
-        if missing_indexes:
-            raise RuntimeError(
-                f"Chunk table '{self._chunk_table}' is missing required fulltext "
-                f"indexes: {', '.join(sorted(missing_indexes))}. "
-                "Drop and recreate the indexes or repair the Infinity schema."
-            )
+            existing_indexes = self._list_index_names(chunk_table)
+            missing_indexes = [
+                index_name
+                for index_name in required_indexes
+                if index_name not in existing_indexes
+            ]
+            if missing_indexes:
+                raise RuntimeError(
+                    f"Chunk table '{self._chunk_table}' is missing required fulltext "
+                    f"indexes: {', '.join(sorted(missing_indexes))}. "
+                    "Drop and recreate the indexes or repair the Infinity schema."
+                )
 
     def _chunk_column_names(self) -> set[str]:
         """读取 chunk 表当前所有列名，用于迁移窗口兼容。"""
-        chunk_table = self._db.get_table(self._chunk_table)
-        df = self._columns_dataframe(chunk_table.show_columns())
-        names: set[str] = set()
-        for row in df.iter_rows(named=True):
-            name = row.get("column_name", row.get("name"))
-            if name:
-                names.add(str(name))
-        return names
+        with self._lock:
+            chunk_table = self._db.get_table(self._chunk_table)
+            df = self._columns_dataframe(chunk_table.show_columns())
+            names: set[str] = set()
+            for row in df.iter_rows(named=True):
+                name = row.get("column_name", row.get("name"))
+                if name:
+                    names.add(str(name))
+            return names
 
     def _list_index_names(self, table: Any) -> set[str]:
         """尽量读取 RemoteTable 上的索引列表；缺失接口时退化为空集合。"""
-        list_indexes = getattr(table, "list_indexes", None)
-        if not callable(list_indexes):
-            return set()
+        with self._lock:
+            list_indexes = getattr(table, "list_indexes", None)
+            if not callable(list_indexes):
+                return set()
 
-        response = list_indexes()
-        if response is None:
-            return set()
-        if isinstance(response, tuple):
-            response = response[0]
+            response = list_indexes()
+            if response is None:
+                return set()
+            if isinstance(response, tuple):
+                response = response[0]
 
-        names = getattr(response, "index_names", None)
-        if names is None and isinstance(response, dict):
-            names = response.get("index_names")
-        if names is None:
-            return set()
-        return {str(name) for name in names}
+            names = getattr(response, "index_names", None)
+            if names is None and isinstance(response, dict):
+                names = response.get("index_names")
+            if names is None:
+                return set()
+            return {str(name) for name in names}
+
+    @staticmethod
+    def _retry_ddl(operation: Any, *args: Any) -> Any:
+        """Retry transient Infinity schema DDL conflicts."""
+        for attempt in range(_DDL_RETRY_ATTEMPTS):
+            try:
+                return operation(*args)
+            except InfinityException as exc:
+                if not _is_resource_busy(exc) or attempt == _DDL_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(_DDL_RETRY_DELAY_SECONDS * (attempt + 1))
+        raise RuntimeError("unreachable DDL retry state")
 
     # ------------------------------------------------------------------
     # DocumentCatalog 协议实现
@@ -456,50 +516,52 @@ class InfinityDenseVectorIndex:
 
     def list_documents(self) -> list[IndexedDocument]:
         """列出所有文档，按 created_at 倒序返回。"""
-        doc_table = self._db.get_table(self._document_table)
-        result_tuple = (
-            doc_table.output(
-                [
-                    "document_id",
-                    "filename",
-                    "file_type",
-                    "size_bytes",
-                    "created_at",
-                    "parser_metadata_json",
-                ]
+        with self._lock:
+            doc_table = self._db.get_table(self._document_table)
+            result_tuple = (
+                doc_table.output(
+                    [
+                        "document_id",
+                        "filename",
+                        "file_type",
+                        "size_bytes",
+                        "created_at",
+                        "parser_metadata_json",
+                    ]
+                )
+                .sort([["_row_id", SortType.Desc]])
+                .to_pl()
             )
-            .sort([["_row_id", SortType.Desc]])
-            .to_pl()
-        )
-        df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
-        if df.is_empty():
-            return []
-        docs = [self._row_to_indexed_doc(row) for row in df.iter_rows(named=True)]
-        return self._enrich_docs_with_dataset_id(docs)
+            df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
+            if df.is_empty():
+                return []
+            docs = [self._row_to_indexed_doc(row) for row in df.iter_rows(named=True)]
+            return self._enrich_docs_with_dataset_id(docs)
 
     def get_document(self, document_id: str) -> IndexedDocument:
         """按 document_id 精确读取单个文档，未命中抛 DocumentNotFoundError。"""
-        doc_table = self._db.get_table(self._document_table)
-        result_tuple = (
-            doc_table.output(
-                [
-                    "document_id",
-                    "filename",
-                    "file_type",
-                    "size_bytes",
-                    "created_at",
-                    "parser_metadata_json",
-                ]
+        with self._lock:
+            doc_table = self._db.get_table(self._document_table)
+            result_tuple = (
+                doc_table.output(
+                    [
+                        "document_id",
+                        "filename",
+                        "file_type",
+                        "size_bytes",
+                        "created_at",
+                        "parser_metadata_json",
+                    ]
+                )
+                .filter(_doc_id_filter(document_id))
+                .to_pl()
             )
-            .filter(_doc_id_filter(document_id))
-            .to_pl()
-        )
-        df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
-        if df.is_empty():
-            raise DocumentNotFoundError(document_id)
-        doc = self._row_to_indexed_doc(df.row(0, named=True))
-        doc.dataset_id = self.get_dataset_id_for_document(document_id)
-        return doc
+            df = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
+            if df.is_empty():
+                raise DocumentNotFoundError(document_id)
+            doc = self._row_to_indexed_doc(df.row(0, named=True))
+            doc.dataset_id = self.get_dataset_id_for_document(document_id)
+            return doc
 
     # ------------------------------------------------------------------
     # DatasetStore 协议实现
@@ -507,122 +569,130 @@ class InfinityDenseVectorIndex:
 
     def create_dataset(self, name: str, description: str) -> Dataset:
         """创建 dataset，名称做精确唯一约束。"""
-        table = self._db.get_table(self._datasets_table)
-        # 名称唯一性检查
-        for row in self._table_rows(
-            table,
-            ["dataset_id", "name", "description", "created_at"],
-        ):
-            if row.get("name") == name:
-                raise DatasetAlreadyExistsError(name)
-        dataset_id = f"ds_{uuid4().hex}"
-        now = _utc_now_iso()
-        table.insert(
-            [
-                {
-                    "dataset_id": dataset_id,
-                    "name": name,
-                    "description": description,
-                    "created_at": now,
-                }
-            ]
-        )
-        return Dataset(
-            dataset_id=dataset_id,
-            name=name,
-            description=description,
-            created_at=now,
-        )
-
-    def list_datasets(self) -> list[Dataset]:
-        """列出所有 dataset。"""
-        table = self._db.get_table(self._datasets_table)
-        return [
-            Dataset(
-                dataset_id=row["dataset_id"],
-                name=row["name"],
-                description=row["description"],
-                created_at=row["created_at"],
-            )
+        with self._lock:
+            table = self._db.get_table(self._datasets_table)
+            # 名称唯一性检查
             for row in self._table_rows(
                 table,
                 ["dataset_id", "name", "description", "created_at"],
+            ):
+                if row.get("name") == name:
+                    raise DatasetAlreadyExistsError(name)
+            dataset_id = f"ds_{uuid4().hex}"
+            now = _utc_now_iso()
+            table.insert(
+                [
+                    {
+                        "dataset_id": dataset_id,
+                        "name": name,
+                        "description": description,
+                        "created_at": now,
+                    }
+                ]
             )
-        ]
+            return Dataset(
+                dataset_id=dataset_id,
+                name=name,
+                description=description,
+                created_at=now,
+            )
 
-    def get_dataset(self, dataset_id: str) -> Dataset:
-        """按 dataset_id 读取单个 dataset，未命中抛 DatasetNotFoundError。"""
-        table = self._db.get_table(self._datasets_table)
-        for row in self._table_rows(
-            table,
-            ["dataset_id", "name", "description", "created_at"],
-            filter_expr=_dataset_id_filter(dataset_id),
-        ):
-            if row.get("dataset_id") == dataset_id:
-                return Dataset(
+    def list_datasets(self) -> list[Dataset]:
+        """列出所有 dataset。"""
+        with self._lock:
+            table = self._db.get_table(self._datasets_table)
+            return [
+                Dataset(
                     dataset_id=row["dataset_id"],
                     name=row["name"],
                     description=row["description"],
                     created_at=row["created_at"],
                 )
-        raise DatasetNotFoundError(dataset_id)
+                for row in self._table_rows(
+                    table,
+                    ["dataset_id", "name", "description", "created_at"],
+                )
+            ]
+
+    def get_dataset(self, dataset_id: str) -> Dataset:
+        """按 dataset_id 读取单个 dataset，未命中抛 DatasetNotFoundError。"""
+        with self._lock:
+            table = self._db.get_table(self._datasets_table)
+            for row in self._table_rows(
+                table,
+                ["dataset_id", "name", "description", "created_at"],
+                filter_expr=_dataset_id_filter(dataset_id),
+            ):
+                if row.get("dataset_id") == dataset_id:
+                    return Dataset(
+                        dataset_id=row["dataset_id"],
+                        name=row["name"],
+                        description=row["description"],
+                        created_at=row["created_at"],
+                    )
+            raise DatasetNotFoundError(dataset_id)
 
     def delete_dataset(self, dataset_id: str) -> None:
         """删除空 dataset；仍有文档归属时抛 DatasetNotEmptyError。"""
-        # 先确认 dataset 存在
-        self.get_dataset(dataset_id)
-        # 检查是否仍有文档绑定
-        count = self.get_dataset_document_count(dataset_id)
-        if count > 0:
-            raise DatasetNotEmptyError(dataset_id)
-        table = self._db.get_table(self._datasets_table)
-        table.delete(_dataset_id_filter(dataset_id))
+        with self._lock:
+            # 先确认 dataset 存在
+            self.get_dataset(dataset_id)
+            # 检查是否仍有文档绑定
+            count = self.get_dataset_document_count(dataset_id)
+            if count > 0:
+                raise DatasetNotEmptyError(dataset_id)
+            table = self._db.get_table(self._datasets_table)
+            table.delete(_dataset_id_filter(dataset_id))
 
     def bind_document(self, document_id: str, dataset_id: str) -> None:
         """将文档绑定到 dataset，单归属语义（upsert）。"""
-        # 确认 dataset 存在
-        self.get_dataset(dataset_id)
-        table = self._db.get_table(self._dataset_bindings_table)
-        # 先删除旧绑定（单归属：一个 document_id 只能绑定一个 dataset）
-        table.delete(_doc_id_filter(document_id))
-        table.insert(
-            [
-                {
-                    "document_id": document_id,
-                    "dataset_id": dataset_id,
-                    "bound_at": _utc_now_iso(),
-                }
-            ]
-        )
+        with self._lock:
+            # 确认 dataset 存在
+            self.get_dataset(dataset_id)
+            table = self._db.get_table(self._dataset_bindings_table)
+            # 先删除旧绑定（单归属：一个 document_id 只能绑定一个 dataset）
+            table.delete(_doc_id_filter(document_id))
+            table.insert(
+                [
+                    {
+                        "document_id": document_id,
+                        "dataset_id": dataset_id,
+                        "bound_at": _utc_now_iso(),
+                    }
+                ]
+            )
 
     def unbind_document(self, document_id: str) -> None:
         """解除文档与 dataset 的绑定。"""
-        self._delete_binding_rows(document_id)
+        with self._lock:
+            self._delete_binding_rows(document_id)
 
     def get_dataset_id_for_document(self, document_id: str) -> str | None:
         """查询文档绑定的 dataset_id，未绑定返回 None。"""
-        table = self._db.get_table(self._dataset_bindings_table)
-        for row in self._table_rows(
-            table,
-            ["document_id", "dataset_id"],
-            filter_expr=_doc_id_filter(document_id),
-        ):
-            if row.get("document_id") == document_id:
-                return row["dataset_id"]
-        return None
-
-    def get_document_ids_for_dataset(self, dataset_id: str) -> list[str]:
-        """查询 dataset 下所有文档 ID。"""
-        table = self._db.get_table(self._dataset_bindings_table)
-        return [
-            row["document_id"]
+        with self._lock:
+            table = self._db.get_table(self._dataset_bindings_table)
             for row in self._table_rows(
                 table,
                 ["document_id", "dataset_id"],
-                filter_expr=_dataset_id_filter(dataset_id),
-            )
-            if row.get("dataset_id") == dataset_id
-        ]
+                filter_expr=_doc_id_filter(document_id),
+            ):
+                if row.get("document_id") == document_id:
+                    return row["dataset_id"]
+            return None
+
+    def get_document_ids_for_dataset(self, dataset_id: str) -> list[str]:
+        """查询 dataset 下所有文档 ID。"""
+        with self._lock:
+            table = self._db.get_table(self._dataset_bindings_table)
+            return [
+                row["document_id"]
+                for row in self._table_rows(
+                    table,
+                    ["document_id", "dataset_id"],
+                    filter_expr=_dataset_id_filter(dataset_id),
+                )
+                if row.get("dataset_id") == dataset_id
+            ]
 
     def get_dataset_document_count(self, dataset_id: str) -> int:
         """查询 dataset 下的文档数量。"""
@@ -634,21 +704,22 @@ class InfinityDenseVectorIndex:
 
     def search_text(self, query: str, top_k: int) -> list[RetrievedChunk]:
         """使用全文匹配在 chunk 的 text 列上检索。"""
-        chunk_table = self._db.get_table(self._chunk_table)
-        result_tuple = (
-            chunk_table.match_text(
-                fields="text",
-                matching_text=query,
-                topn=top_k,
+        with self._lock:
+            chunk_table = self._db.get_table(self._chunk_table)
+            result_tuple = (
+                chunk_table.match_text(
+                    fields="text",
+                    matching_text=query,
+                    topn=top_k,
+                )
+                .output(self._chunk_output_columns("_score", include_embedding=False))
+                .to_pl()
             )
-            .output(self._chunk_output_columns("_score", include_embedding=False))
-            .to_pl()
-        )
 
-        return self._materialize_chunk_query_results(
-            result_tuple,
-            score_field="_score",
-        )
+            return self._materialize_chunk_query_results(
+                result_tuple,
+                score_field="_score",
+            )
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -658,21 +729,23 @@ class InfinityDenseVectorIndex:
         self, docs: list[IndexedDocument]
     ) -> list[IndexedDocument]:
         """批量填充文档的 dataset_id 字段。"""
-        bindings_table = self._db.get_table(self._dataset_bindings_table)
-        doc_to_ds: dict[str, str] = {}
-        for row in self._table_rows(
-            bindings_table,
-            ["document_id", "dataset_id"],
-        ):
-            doc_to_ds[row["document_id"]] = row["dataset_id"]
-        for doc in docs:
-            doc.dataset_id = doc_to_ds.get(doc.document_id)
-        return docs
+        with self._lock:
+            bindings_table = self._db.get_table(self._dataset_bindings_table)
+            doc_to_ds: dict[str, str] = {}
+            for row in self._table_rows(
+                bindings_table,
+                ["document_id", "dataset_id"],
+            ):
+                doc_to_ds[row["document_id"]] = row["dataset_id"]
+            for doc in docs:
+                doc.dataset_id = doc_to_ds.get(doc.document_id)
+            return docs
 
     def _delete_binding_rows(self, document_id: str) -> None:
         """删除指定文档的 dataset binding 行。"""
-        table = self._db.get_table(self._dataset_bindings_table)
-        table.delete(_doc_id_filter(document_id))
+        with self._lock:
+            table = self._db.get_table(self._dataset_bindings_table)
+            table.delete(_doc_id_filter(document_id))
 
     @staticmethod
     def _columns_dataframe(columns_info: Any) -> Any:
@@ -681,19 +754,20 @@ class InfinityDenseVectorIndex:
             return columns_info[0]
         return columns_info
 
-    @staticmethod
     def _query_dataframe(
+        self,
         table: Any,
         columns: list[str],
         *,
         filter_expr: str | None = None,
     ) -> Any:
         """使用 Infinity query API 读取表数据，避免依赖非兼容的 `table.rows`。"""
-        query = table.output(columns)
-        if filter_expr is not None:
-            query = query.filter(filter_expr)
-        result = query.to_pl()
-        return result[0] if isinstance(result, tuple) else result
+        with self._lock:
+            query = table.output(columns)
+            if filter_expr is not None:
+                query = query.filter(filter_expr)
+            result = query.to_pl()
+            return result[0] if isinstance(result, tuple) else result
 
     def _table_rows(
         self,
@@ -745,6 +819,26 @@ class InfinityDenseVectorIndex:
         columns.append(score_field)
         return columns
 
+    def _dense_search_output_columns(self) -> list[str]:
+        """Return dense-only output columns without Infinity score functions.
+
+        Infinity 0.7 allows special score/distance functions only for specific
+        match modes. For IP vector search we materialize the row vector and
+        compute the same inner-product score locally.
+        """
+        return [
+            "chunk_id",
+            "document_id",
+            "text",
+            "filename",
+            "file_type",
+            "chunk_metadata_json",
+            "embedding_provider",
+            "embedding_model",
+            "embedding_dimensions",
+            "vec",
+        ]
+
     def _materialize_chunk_query_results(
         self,
         result_tuple: tuple[Any, Any],
@@ -762,6 +856,48 @@ class InfinityDenseVectorIndex:
                 self._check_row_embedding_signature(row)
 
         return self._rows_to_chunks(df, score_field=score_field)
+
+    def _materialize_dense_query_results(
+        self,
+        result_tuple: tuple[Any, Any],
+        *,
+        query_vector: list[float],
+        validate_embedding_signature: bool = False,
+    ) -> list[RetrievedChunk]:
+        """Map dense-only vector matches and compute IP scores locally."""
+        df, _extra = result_tuple
+        if df.is_empty():
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for row in df.iter_rows(named=True):
+            if validate_embedding_signature:
+                self._check_row_embedding_signature(row)
+            row_vec = row.get("vec") or []
+            row["_score"] = sum(
+                float(query_value) * float(row_value)
+                for query_value, row_value in zip(
+                    query_vector,
+                    row_vec,
+                    strict=False,
+                )
+            )
+            rows.append(row)
+        rows.sort(key=lambda row: row["_score"], reverse=True)
+        return [
+            RetrievedChunk(
+                chunk_id=row["chunk_id"],
+                document_id=row["document_id"],
+                text=row["text"],
+                score=float(row["_score"]),
+                metadata={
+                    **self._parse_json(row.get("chunk_metadata_json", "")),
+                    "filename": row.get("filename"),
+                    "file_type": row.get("file_type"),
+                },
+            )
+            for row in rows
+        ]
 
     def _rows_to_chunks(self, df: Any, *, score_field: str) -> list[RetrievedChunk]:
         """将 polars DataFrame 行映射为 `RetrievedChunk` 列表。"""

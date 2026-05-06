@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -95,8 +96,10 @@ def build_entity_candidate_row(
         "entity_description_tks": tokenize(entity.description),
         "embedding_text": build_entity_embedding_text(entity),
         "vec": vector,
-        "source_chunk_ids": list(entity.source_chunk_ids),
-        "metadata": dict(entity.metadata),
+        "source_chunk_ids": json.dumps(
+            list(entity.source_chunk_ids), ensure_ascii=False
+        ),
+        "metadata": json.dumps(dict(entity.metadata), ensure_ascii=False),
     }
 
 
@@ -128,8 +131,10 @@ def build_relationship_candidate_row(
         "relationship_description_tks": tokenize(relation.description),
         "embedding_text": build_relationship_embedding_text(relation),
         "vec": vector,
-        "keywords": list(relation.keywords),
+        "keywords": json.dumps(list(relation.keywords), ensure_ascii=False),
         "weight": relation.weight,
-        "source_chunk_ids": list(relation.source_chunk_ids),
-        "metadata": dict(relation.metadata),
+        "source_chunk_ids": json.dumps(
+            list(relation.source_chunk_ids), ensure_ascii=False
+        ),
+        "metadata": json.dumps(dict(relation.metadata), ensure_ascii=False),
     }

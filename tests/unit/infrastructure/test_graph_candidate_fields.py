@@ -9,14 +9,15 @@
 - canonical_id 优先取 metadata.canonical_id，无则回退到 entity_id / relation_id。
 """
 
+import json
+
+from ragflow_lite.domain.models.entities import EntityEvidence, RelationEvidence
 from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
     ENTITY_MATCH_TEXT_FIELDS,
     RELATIONSHIP_MATCH_TEXT_FIELDS,
     build_entity_candidate_row,
     build_relationship_candidate_row,
 )
-
-from ragflow_lite.domain.models.entities import EntityEvidence, RelationEvidence
 
 # ---------------------------------------------------------------------------
 # 测试用确定性分词器
@@ -130,20 +131,20 @@ class TestEntityCandidateRow:
         assert row["embedding_text"] == "Python"
 
     def test_entity_vec_and_source_chunk_ids(self):
-        """vec 和 source_chunk_ids 正确透传。"""
+        """vec 透传，source_chunk_ids 按 live Infinity varchar 契约写为 JSON。"""
         entity = _make_entity()
         row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
 
         assert row["vec"] == [0.1, 0.2, 0.3]
-        assert row["source_chunk_ids"] == ["chk-1", "chk-2"]
+        assert json.loads(row["source_chunk_ids"]) == ["chk-1", "chk-2"]
 
     def test_entity_metadata_copied(self):
-        """metadata 应被浅拷贝，不引用原始 dict。"""
+        """metadata 按 live Infinity varchar 契约写为 JSON。"""
         entity = _make_entity(metadata={"canonical_id": "c-xyz"})
         row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
 
-        assert row["metadata"] == {"canonical_id": "c-xyz"}
-        assert row["metadata"] is not entity.metadata
+        assert json.loads(row["metadata"]) == {"canonical_id": "c-xyz"}
+        assert row["metadata"] != entity.metadata
 
     def test_entity_canonical_id_from_metadata(self):
         """canonical_id 应优先取 metadata.canonical_id。"""
@@ -241,7 +242,7 @@ class TestRelationshipCandidateRow:
         assert row["embedding_text"] == expected
 
     def test_relationship_vec_weight_keywords_source_chunk_ids(self):
-        """vec, weight, keywords, source_chunk_ids 正确透传。"""
+        """数组字段按 live Infinity varchar 契约写为 JSON。"""
         rel = _make_relation(
             weight=0.85, keywords=["a", "b"], source_chunk_ids=["chk-3"]
         )
@@ -249,16 +250,16 @@ class TestRelationshipCandidateRow:
 
         assert row["vec"] == [0.1, 0.2, 0.3]
         assert row["weight"] == 0.85
-        assert row["keywords"] == ["a", "b"]
-        assert row["source_chunk_ids"] == ["chk-3"]
+        assert json.loads(row["keywords"]) == ["a", "b"]
+        assert json.loads(row["source_chunk_ids"]) == ["chk-3"]
 
     def test_relationship_metadata_copied(self):
-        """metadata 应被浅拷贝。"""
+        """metadata 按 live Infinity varchar 契约写为 JSON。"""
         rel = _make_relation(metadata={"canonical_id": "c-rel"})
         row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
 
-        assert row["metadata"] == {"canonical_id": "c-rel"}
-        assert row["metadata"] is not rel.metadata
+        assert json.loads(row["metadata"]) == {"canonical_id": "c-rel"}
+        assert row["metadata"] != rel.metadata
 
     def test_relationship_canonical_id_from_metadata(self):
         """canonical_id 应优先取 metadata.canonical_id。"""

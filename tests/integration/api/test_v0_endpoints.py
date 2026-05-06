@@ -9,12 +9,32 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from infinity_test_support import (
+    assign_isolated_infinity_tables,
+    register_infinity_table_cleanup,
+)
 
-from ragflow_lite.app import create_app
+from ragflow_lite.api.deps.providers import (
+    get_document_service,
+    get_ingestion_pipeline,
+    get_query_router,
+)
+from ragflow_lite.api.observability import install_observability
+from ragflow_lite.api.routes.v0 import router as v0_router
 from ragflow_lite.config import Settings
-from ragflow_lite.domain.errors import ProcessingError
+from ragflow_lite.domain.errors import (
+    DocumentNotFoundError,
+    IdempotencyKeyMissingError,
+    ProcessingError,
+    UnsupportedFileTypeError,
+)
+from ragflow_lite.domain.models import AnswerResult
 from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
+from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
+    _doc_id_filter,
+)
 
 API_LOGGER = "ragflow_lite.api.routes.v0.endpoints"
 APP_LOGGER = "ragflow_lite.app"
@@ -43,6 +63,23 @@ class FakeResponsesAPI:
         return type("FakeResponse", (), {"output_text": self.output_text})()
 
 
+class FakeDeepSeekChatClient:
+    def __init__(
+        self,
+        output_text: str = "默认回答",
+        error: Exception | None = None,
+    ) -> None:
+        self.output_text = output_text
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def complete(self, instructions: str, input_text: str) -> str:
+        self.calls.append({"instructions": instructions, "input": input_text})
+        if self.error is not None:
+            raise self.error
+        return self.output_text
+
+
 class FakeOpenAIClient:
     def __init__(
         self,
@@ -50,6 +87,17 @@ class FakeOpenAIClient:
         error: Exception | None = None,
     ) -> None:
         self.responses = FakeResponsesAPI(output_text=output_text, error=error)
+        self.answer_client: FakeDeepSeekChatClient | None = None
+
+
+class FakeJsonClient:
+    def __init__(self, output_text: str) -> None:
+        self.output_text = output_text
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def complete_json(self, *args: Any, **kwargs: Any) -> str:
+        self.calls.append((args, kwargs))
+        return self.output_text
 
 
 class FakeArkMultimodalEmbeddingsAPI:
@@ -116,11 +164,22 @@ def _install_fake_openai_client(
     client,
     fake_openai_client: FakeOpenAIClient,
 ) -> FakeOpenAIClient:
-    client.app.state.services.query_service.answerer.client = fake_openai_client
+    answer_client = FakeDeepSeekChatClient(
+        output_text=fake_openai_client.responses.output_text,
+        error=fake_openai_client.responses.error,
+    )
+    client.app.state.services.query_service.answerer.client = answer_client
+    client.app.state.services.discorag_query_service.answerer.client = answer_client
+    fake_openai_client.answer_client = answer_client
     extractor = client.app.state.services.ingestion_pipeline.evidence_extractor
     if extractor is not None:
-        extractor.client = FakeOpenAIClient(
-            output_text='{"entities":[],"relations":[]}',
+        extractor.client = FakeJsonClient('{"entities":[],"relations":[]}')
+    query_grounder = getattr(
+        client.app.state.services.retriever, "query_grounder", None
+    )
+    if query_grounder is not None:
+        query_grounder.client = FakeJsonClient(
+            '{"answer_type_keywords":[],"entities_from_query":[]}'
         )
     return fake_openai_client
 
@@ -141,9 +200,7 @@ def _patch_fake_evidence_extractor(app) -> None:
         app.state.services.ingestion_pipeline, "evidence_extractor", None
     )
     if extractor is not None:
-        extractor.client = FakeOpenAIClient(
-            output_text='{"entities":[],"relations":[]}',
-        )
+        extractor.client = FakeJsonClient('{"entities":[],"relations":[]}')
 
 
 def _unique_key() -> str:
@@ -205,7 +262,13 @@ def _wait_for_document_terminal_state(
 
 
 def _openai_input(fake_openai_client: FakeOpenAIClient) -> str:
-    return fake_openai_client.responses.calls[0]["input"]
+    assert fake_openai_client.answer_client is not None
+    return fake_openai_client.answer_client.calls[0]["input"]
+
+
+def _chunk_rows(vector_index, columns: list[str]) -> list[dict[str, Any]]:
+    table = vector_index._db.get_table(vector_index._chunk_table)
+    return vector_index._table_rows(table, columns)
 
 
 def _event_records(
@@ -237,24 +300,95 @@ def _build_settings(tmp_path: Path, *, metrics_enabled: bool = False) -> Setting
         temp_dir=tmp_path / "tmp",
         metrics_enabled=metrics_enabled,
     )
+    assign_isolated_infinity_tables(settings, tmp_path, salt=uuid4().hex[:8])
+    register_infinity_table_cleanup(settings)
     settings.ensure_directories()
     return settings
 
 
-def test_health_endpoint(client) -> None:
+class _LitePipeline:
+    def submit(
+        self,
+        idempotency_key: str | None,
+        filename: str,
+        content: bytes,
+        dataset_id: str | None = None,
+    ):
+        if not idempotency_key:
+            raise IdempotencyKeyMissingError()
+        if filename.endswith((".docx", ".exe")):
+            raise UnsupportedFileTypeError(filename)
+        raise AssertionError("lite pipeline should only cover validation paths")
+
+    def get_snapshot(self, document_id: str) -> None:
+        return None
+
+
+class _LiteDocumentService:
+    def list_documents(self, dataset_id: str | None = None) -> list[Any]:
+        return []
+
+    def get_document(self, document_id: str) -> Any:
+        raise DocumentNotFoundError(document_id)
+
+
+def _lite_test_app(*, metrics_enabled: bool = False) -> FastAPI:
+    app = FastAPI()
+    install_observability(app, enable_metrics=metrics_enabled)
+    app.include_router(v0_router, prefix="/api/v0")
+    app.dependency_overrides[get_ingestion_pipeline] = lambda: _LitePipeline()
+    app.dependency_overrides[get_document_service] = lambda: _LiteDocumentService()
+    return app
+
+
+@pytest.fixture
+def lite_client():
+    app = _lite_test_app()
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def lite_query_client():
+    app = _lite_test_app()
+    query_router = _RecordingQueryRouter()
+    app.dependency_overrides[get_query_router] = lambda: query_router
+    with TestClient(app) as test_client:
+        test_client.query_router = query_router
+        yield test_client
+
+
+@pytest.fixture
+def lite_metrics_client():
+    app = _lite_test_app(metrics_enabled=True)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def lite_metrics_no_raise_client():
+    app = _lite_test_app(metrics_enabled=True)
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
+
+
+def test_health_endpoint(lite_client) -> None:
+    client = lite_client
     response = client.get("/api/v0/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_health_response_includes_generated_trace_id(client) -> None:
+def test_health_response_includes_generated_trace_id(lite_client) -> None:
+    client = lite_client
     response = client.get("/api/v0/health")
 
     assert response.status_code == 200
     assert re.fullmatch(r"\d+", response.headers["X-Trace-Id"])
 
 
+@pytest.mark.live_infinity
 def test_upload_txt_then_query_returns_answer_and_contexts(
     client,
     fixture_documents_dir: Path,
@@ -288,12 +422,11 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     payload = query_response.json()
     assert payload["answer"] == "项目支持 txt 和 md 文件格式[1]。"
     assert payload["contexts"]
-    assert payload["metadata"] == {
-        "strategy": "openai_responses",
-        "model": "gpt-5.4-mini",
-        "reasoning_effort": "medium",
-        "store": False,
-    }
+    assert payload["metadata"]["strategy"] == "deepseek_chat"
+    assert payload["metadata"]["model"] == "deepseek-v4-flash"
+    assert payload["metadata"]["reasoning_effort"] == "high"
+    assert payload["metadata"]["answer_mode"] == "standard"
+    assert payload["metadata"]["blueprint_applied"] is False
     assert any(
         "txt" in context["text"] or "md" in context["text"]
         for context in payload["contexts"]
@@ -301,8 +434,8 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert all(
         context["metadata"]["file_type"] == "txt" for context in payload["contexts"]
     )
-    assert len(fake_openai_client.responses.calls) == 1
-    assert fake_openai_client.responses.calls[0]["model"] == "gpt-5.4-mini"
+    assert fake_openai_client.answer_client is not None
+    assert len(fake_openai_client.answer_client.calls) == 1
 
     # citation 编号契约：contexts[0] 对应 prompt 中 [1]
     openai_input = _openai_input(fake_openai_client)
@@ -310,6 +443,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert first_chunk_text in openai_input
 
 
+@pytest.mark.live_infinity
 def test_upload_returns_202_with_location_before_background_finishes(
     client,
     fixture_documents_dir: Path,
@@ -352,6 +486,7 @@ def test_upload_returns_202_with_location_before_background_finishes(
     assert final["status"] == "indexed"
 
 
+@pytest.mark.live_infinity
 def test_upload_retries_in_background_and_exposes_second_attempt(
     client,
     fixture_documents_dir: Path,
@@ -392,6 +527,7 @@ def test_upload_retries_in_background_and_exposes_second_attempt(
     assert retry_parser.calls == 2
 
 
+@pytest.mark.live_infinity
 def test_upload_markdown_then_query_uses_markdown_text(
     client,
     fixture_documents_dir: Path,
@@ -424,6 +560,7 @@ def test_upload_markdown_then_query_uses_markdown_text(
     assert "ragflowlite.app" not in openai_input
 
 
+@pytest.mark.live_infinity
 def test_query_with_empty_index_returns_fallback_answer(client) -> None:
     _install_fake_ark_client(client, FakeArkClient())
     response = _query_documents(client, "没有文档时怎么办")
@@ -432,12 +569,16 @@ def test_query_with_empty_index_returns_fallback_answer(client) -> None:
     assert response.json() == {
         "answer": FALLBACK_ANSWER,
         "contexts": [],
-        "metadata": {"strategy": "fallback"},
+        "metadata": {
+            "strategy": "fallback",
+            "answer_mode": "standard",
+            "blueprint_applied": False,
+        },
     }
 
 
-def test_uploading_unsupported_file_type_returns_415(client) -> None:
-    response = client.post(
+def test_uploading_unsupported_file_type_returns_415(lite_client) -> None:
+    response = lite_client.post(
         "/api/v0/documents",
         files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
         headers={"Idempotency-Key": _unique_key()},
@@ -447,8 +588,8 @@ def test_uploading_unsupported_file_type_returns_415(client) -> None:
     assert "Unsupported file type" in response.json()["detail"]
 
 
-def test_upload_without_idempotency_key_returns_400(client) -> None:
-    response = client.post(
+def test_upload_without_idempotency_key_returns_400(lite_client) -> None:
+    response = lite_client.post(
         "/api/v0/documents",
         files={"file": ("sample.txt", b"hello", "text/plain")},
     )
@@ -456,6 +597,7 @@ def test_upload_without_idempotency_key_returns_400(client) -> None:
     assert response.status_code == 400
 
 
+@pytest.mark.live_infinity
 def test_ingestion_failure_rolls_back_only_current_document(
     client,
     fixture_documents_dir: Path,
@@ -492,10 +634,12 @@ def test_ingestion_failure_rolls_back_only_current_document(
 
     # Infinity 的 chunk 表里应只保留第一份文档的分块数据。
     vector_index = services.ingestion_pipeline.vector_index
-    chunk_table = vector_index._db.get_table(vector_index._chunk_table)
-    assert all(row["document_id"] == first_document_id for row in chunk_table.rows)
+    rows = _chunk_rows(vector_index, ["document_id"])
+    assert rows
+    assert all(row["document_id"] == first_document_id for row in rows)
 
 
+@pytest.mark.live_infinity
 def test_query_returns_500_when_openai_request_fails(
     client,
     fixture_documents_dir: Path,
@@ -516,6 +660,7 @@ def test_query_returns_500_when_openai_request_fails(
     assert query_response.json()["detail"] == "Failed to answer query."
 
 
+@pytest.mark.live_infinity
 def test_query_returns_500_when_ark_query_embedding_fails(
     client,
     fixture_documents_dir: Path,
@@ -536,6 +681,7 @@ def test_query_returns_500_when_ark_query_embedding_fails(
     assert query_response.json()["detail"] == "Failed to answer query."
 
 
+@pytest.mark.live_infinity
 def test_query_returns_error_when_infinity_unreachable(
     client,
     fixture_documents_dir: Path,
@@ -552,7 +698,7 @@ def test_query_returns_error_when_infinity_unreachable(
     services = client.app.state.services
     vector_index = services.ingestion_pipeline.vector_index
     chunk_table = vector_index._db.get_table(vector_index._chunk_table)
-    chunk_table.rows.clear()
+    chunk_table.delete()
 
     query_response = _query_documents(client, "这个项目支持什么文件类型")
 
@@ -561,6 +707,7 @@ def test_query_returns_error_when_infinity_unreachable(
     assert query_response.json()["answer"] == FALLBACK_ANSWER
 
 
+@pytest.mark.live_infinity
 def test_upload_pdf_then_query_returns_answer_and_contexts(
     client,
     fixture_documents_dir: Path,
@@ -601,6 +748,7 @@ def test_upload_pdf_then_query_returns_answer_and_contexts(
     assert "page:" in openai_input
 
 
+@pytest.mark.live_infinity
 def test_query_returns_500_when_embedding_signature_mismatch(
     client,
     fixture_documents_dir: Path,
@@ -620,8 +768,10 @@ def test_query_returns_500_when_embedding_signature_mismatch(
     services = client.app.state.services
     vector_index = services.ingestion_pipeline.vector_index
     chunk_table = vector_index._db.get_table(vector_index._chunk_table)
-    for row in chunk_table.rows:
-        row["embedding_model"] = "stale-model"
+    chunk_table.update(
+        _doc_id_filter(upload_response.json()["document_id"]),
+        {"embedding_model": "stale-model"},
+    )
 
     query_response = _query_documents(client, "这个项目支持什么文件类型")
 
@@ -629,6 +779,7 @@ def test_query_returns_500_when_embedding_signature_mismatch(
     assert "Embedding signature mismatch" in query_response.json()["detail"]
 
 
+@pytest.mark.live_infinity
 def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> None:
     _install_fake_ark_client(client, FakeArkClient())
     response = _upload_fixture_document(
@@ -641,6 +792,7 @@ def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> No
     assert "empty" in final["error"].lower()
 
 
+@pytest.mark.live_infinity
 def test_upload_encrypted_pdf_returns_422(client) -> None:
     from io import BytesIO
 
@@ -671,12 +823,14 @@ def test_upload_encrypted_pdf_returns_422(client) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live_infinity
 def test_list_documents_returns_empty_before_upload(client) -> None:
     response = client.get("/api/v0/documents")
     assert response.status_code == 200
     assert response.json() == {"documents": []}
 
 
+@pytest.mark.live_infinity
 def test_list_documents_after_txt_upload(
     client,
     fixture_documents_dir: Path,
@@ -703,6 +857,7 @@ def test_list_documents_after_txt_upload(
     assert doc["metadata"] == {"parser_strategy": "plain_text"}
 
 
+@pytest.mark.live_infinity
 def test_get_document_after_txt_upload(
     client,
     fixture_documents_dir: Path,
@@ -726,6 +881,7 @@ def test_get_document_after_txt_upload(
     assert doc["progress_percent"] == 100
 
 
+@pytest.mark.live_infinity
 def test_get_document_after_pdf_upload(
     client,
     fixture_documents_dir: Path,
@@ -746,18 +902,21 @@ def test_get_document_after_pdf_upload(
     assert doc["metadata"]["page_count"] == 1
 
 
+@pytest.mark.live_infinity
 def test_get_nonexistent_document_returns_404(client) -> None:
     response = client.get("/api/v0/documents/doc_nonexistent")
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
 
 
+@pytest.mark.live_infinity
 def test_get_document_with_single_quote_in_id_returns_404(client) -> None:
     """URL 中带单引号的 document_id 应返回 404，不应 500。"""
     response = client.get("/api/v0/documents/doc_%27bad")
     assert response.status_code == 404
 
 
+@pytest.mark.live_infinity
 def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
     client,
     fixture_documents_dir: Path,
@@ -782,6 +941,7 @@ def test_list_documents_multiple_uploads_ordered_by_created_at_desc(
     assert docs[1]["document_id"] == ids[0]
 
 
+@pytest.mark.live_infinity
 def test_filename_sparse_recalls_when_text_misses(
     client,
     fixture_documents_dir: Path,
@@ -815,6 +975,7 @@ def test_filename_sparse_recalls_when_text_misses(
     )
 
 
+@pytest.mark.live_infinity
 def test_upload_two_page_pdf_then_query_returns_page_range(
     client,
     fixture_documents_dir: Path,
@@ -856,7 +1017,6 @@ class _RecordingQueryRouter:
         self.calls: list[tuple[str, int, str]] = []
 
     def query(self, query: str, top_k: int, *, mode: str = "standard"):
-        from ragflow_lite.domain.models import AnswerResult
 
         self.calls.append((query, top_k, mode))
         return AnswerResult(
@@ -864,33 +1024,37 @@ class _RecordingQueryRouter:
         )
 
 
-def test_query_endpoint_defaults_to_standard_mode(client) -> None:
-    recording_router = _RecordingQueryRouter()
-    client.app.state.services.query_router = recording_router
-
-    response = client.post("/api/v0/queries", json={"query": "What is MiniRAG?"})
+def test_query_endpoint_defaults_to_standard_mode(lite_query_client) -> None:
+    response = lite_query_client.post(
+        "/api/v0/queries", json={"query": "What is MiniRAG?"}
+    )
 
     assert response.status_code == 200
     assert response.json()["metadata"] == {"mode": "standard"}
-    assert recording_router.calls[-1] == ("What is MiniRAG?", 4, "standard")
+    assert lite_query_client.query_router.calls[-1] == (
+        "What is MiniRAG?",
+        6,
+        "standard",
+    )
 
 
-def test_query_endpoint_accepts_discorag_mode(client) -> None:
-    recording_router = _RecordingQueryRouter()
-    client.app.state.services.query_router = recording_router
-
-    response = client.post(
+def test_query_endpoint_accepts_discorag_mode(lite_query_client) -> None:
+    response = lite_query_client.post(
         "/api/v0/queries",
         json={"query": "What is MiniRAG?", "top_k": 3, "mode": "discorag"},
     )
 
     assert response.status_code == 200
     assert response.json()["metadata"] == {"mode": "discorag"}
-    assert recording_router.calls[-1] == ("What is MiniRAG?", 3, "discorag")
+    assert lite_query_client.query_router.calls[-1] == (
+        "What is MiniRAG?",
+        3,
+        "discorag",
+    )
 
 
-def test_query_endpoint_rejects_unknown_query_mode(client) -> None:
-    response = client.post(
+def test_query_endpoint_rejects_unknown_query_mode(lite_query_client) -> None:
+    response = lite_query_client.post(
         "/api/v0/queries",
         json={"query": "What is MiniRAG?", "mode": "rerank_only"},
     )
@@ -903,6 +1067,7 @@ def test_query_endpoint_rejects_unknown_query_mode(client) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live_infinity
 def test_ingest_success_produces_info_log(
     client,
     fixture_documents_dir: Path,
@@ -923,6 +1088,7 @@ def test_ingest_success_produces_info_log(
     assert events[0].document_id == response.json()["document_id"]
 
 
+@pytest.mark.live_infinity
 def test_ingest_trace_id_is_propagated_and_logged(
     client,
     fixture_documents_dir: Path,
@@ -950,6 +1116,7 @@ def test_ingest_trace_id_is_propagated_and_logged(
     assert event.request_id
 
 
+@pytest.mark.live_infinity
 def test_query_success_produces_info_log(
     client,
     fixture_documents_dir: Path,
@@ -969,18 +1136,18 @@ def test_query_success_produces_info_log(
     assert response.status_code == 200
     events = _event_records(caplog, "query_answered")
     assert len(events) == 1
-    assert events[0].top_k == 3
+    assert events[0].top_n == 3
     assert events[0].context_count >= 0
     assert events[0].trace_id == response.headers["X-Trace-Id"]
     assert events[0].request_id
 
 
 def test_domain_error_produces_warning_log(
-    client, caplog: pytest.LogCaptureFixture
+    lite_client, caplog: pytest.LogCaptureFixture
 ) -> None:
     """已知 domain error 映射 HTTP 时产生 request_error warning 日志。"""
     with caplog.at_level(logging.WARNING, logger=API_LOGGER):
-        response = client.post(
+        response = lite_client.post(
             "/api/v0/documents",
             files={"file": ("sample.docx", b"PK\x03\x04", "application/octet-stream")},
             headers={"Idempotency-Key": _unique_key()},
@@ -996,10 +1163,10 @@ def test_domain_error_produces_warning_log(
     assert events[0].request_id
 
 
-def test_error_response_body_unchanged(client) -> None:
+def test_error_response_body_unchanged(lite_client) -> None:
     """现有 415/422/404/500 响应 body 格式不变。"""
     # 415
-    resp = client.post(
+    resp = lite_client.post(
         "/api/v0/documents",
         files={"file": ("bad.exe", b"x", "application/octet-stream")},
         headers={"Idempotency-Key": _unique_key()},
@@ -1008,7 +1175,7 @@ def test_error_response_body_unchanged(client) -> None:
     assert set(resp.json().keys()) == {"detail"}
 
     # 404
-    resp = client.get("/api/v0/documents/doc_nonexistent")
+    resp = lite_client.get("/api/v0/documents/doc_nonexistent")
     assert resp.status_code == 404
     assert set(resp.json().keys()) == {"detail"}
 
@@ -1038,19 +1205,18 @@ def test_create_app_startup_failure_logs_and_reraises(
     assert len(events) == 1
 
 
-def test_metrics_route_disabled_returns_404(tmp_path: Path) -> None:
-    app = create_app(_build_settings(tmp_path, metrics_enabled=False))
-
-    with TestClient(app) as client:
-        response = client.get("/metrics")
-
+def test_metrics_route_disabled_returns_404(lite_client) -> None:
+    response = lite_client.get("/metrics")
     assert response.status_code == 404
 
 
+@pytest.mark.live_infinity
 def test_metrics_route_enabled_exposes_prometheus_metrics(
     tmp_path: Path,
     fixture_documents_dir: Path,
 ) -> None:
+    from ragflow_lite.app import create_app
+
     app = create_app(_build_settings(tmp_path, metrics_enabled=True))
 
     with TestClient(app) as metrics_client:
@@ -1097,10 +1263,13 @@ def test_metrics_route_enabled_exposes_prometheus_metrics(
     assert 'route="/metrics"' not in body
 
 
+@pytest.mark.live_infinity
 def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
     tmp_path: Path,
     fixture_documents_dir: Path,
 ) -> None:
+    from ragflow_lite.app import create_app
+
     first_app = create_app(_build_settings(tmp_path / "app_one", metrics_enabled=True))
     _patch_fake_evidence_extractor(first_app)
 
@@ -1137,12 +1306,11 @@ def test_metrics_registry_remains_scoped_to_first_app_after_second_app_creation(
     )
 
 
-def test_method_not_allowed_metrics_use_partial_route_label(tmp_path: Path) -> None:
-    app = create_app(_build_settings(tmp_path, metrics_enabled=True))
-
-    with TestClient(app) as test_client:
-        response = test_client.put("/api/v0/health")
-        metrics_response = test_client.get("/metrics")
+def test_method_not_allowed_metrics_use_partial_route_label(
+    lite_metrics_client,
+) -> None:
+    response = lite_metrics_client.put("/api/v0/health")
+    metrics_response = lite_metrics_client.get("/metrics")
 
     assert response.status_code == 405
     body = metrics_response.text
@@ -1154,19 +1322,18 @@ def test_method_not_allowed_metrics_use_partial_route_label(tmp_path: Path) -> N
 
 
 def test_unhandled_exception_is_logged_and_counted(
-    tmp_path: Path,
+    lite_metrics_no_raise_client,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    app = create_app(_build_settings(tmp_path, metrics_enabled=True))
-
-    @app.get("/boom")
+    @lite_metrics_no_raise_client.app.get("/boom")
     async def boom() -> dict[str, str]:
         raise RuntimeError("boom")
 
-    with TestClient(app, raise_server_exceptions=False) as test_client:
-        with caplog.at_level(logging.ERROR, logger=OBSERVABILITY_LOGGER):
-            response = test_client.get("/boom", headers={"X-Trace-Id": "trace-boom"})
-        metrics_response = test_client.get("/metrics")
+    with caplog.at_level(logging.ERROR, logger=OBSERVABILITY_LOGGER):
+        response = lite_metrics_no_raise_client.get(
+            "/boom", headers={"X-Trace-Id": "trace-boom"}
+        )
+    metrics_response = lite_metrics_no_raise_client.get("/metrics")
 
     assert response.status_code == 500
     assert response.text == "Internal Server Error"
@@ -1189,10 +1356,13 @@ def test_unhandled_exception_is_logged_and_counted(
     )
 
 
+@pytest.mark.live_infinity
 def test_logs_do_not_include_raw_query_or_document_content(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from ragflow_lite.app import create_app
+
     app = create_app(_build_settings(tmp_path, metrics_enabled=False))
     secret_query = "SECRET_QUERY_123"
     secret_document = "SECRET_DOC_CONTENT_123"

@@ -11,10 +11,13 @@
 
 from __future__ import annotations
 
+import json
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
-from infinity.common import ConflictType
+from infinity.common import ConflictType, InfinityException
 from infinity.index import IndexInfo, IndexType
 
 from ragflow_lite.domain.models.entities import (
@@ -32,6 +35,15 @@ from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
     build_relationship_candidate_row,
     build_relationship_embedding_text,
 )
+
+_DDL_RETRY_ATTEMPTS = 5
+_DDL_RETRY_DELAY_SECONDS = 0.05
+
+
+def _is_resource_busy(exc: InfinityException) -> bool:
+    message = str(getattr(exc, "error_msg", "") or exc)
+    return "Resource busy" in message
+
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -85,6 +97,23 @@ def _resolve_score(row: dict[str, Any], field_name: str = "_score") -> float:
     return 0.0
 
 
+def _parse_string_list(raw: Any) -> list[str]:
+    """Parse varchar-backed JSON arrays returned from live Infinity rows."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    if not isinstance(raw, str) or not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return [raw]
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    return []
+
+
 def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
     """Build Infinity SDK-compatible dense-match optional parameters."""
     return {"threshold": str(similarity_threshold)}
@@ -110,9 +139,12 @@ class InfinityGraphCandidateIndex:
         database: str,
         embedder: Any,
         config: GraphCandidateInfinityConfig | None = None,
+        client_lock: Any | None = None,
     ) -> None:
         self._client = client
-        self._db = client.get_database(database)
+        self._lock = client_lock or threading.RLock()
+        with self._lock:
+            self._db = client.get_database(database)
         self._embedder = embedder
         self._config = config or GraphCandidateInfinityConfig()
         self._ensure_tables()
@@ -123,69 +155,72 @@ class InfinityGraphCandidateIndex:
 
     def _ensure_tables(self) -> None:
         """确保 graph candidate 表和全文索引存在。"""
-        dimensions = self._embedding_dimensions()
-        entity_columns = {
-            "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
-            "canonical_id": {"type": "varchar"},
-            "document_id": {"type": "varchar"},
-            "candidate_kind": {"type": "varchar"},
-            "entity_name_kwd": {"type": "varchar"},
-            "entity_name_tks": {"type": "varchar"},
-            "entity_type_tks": {"type": "varchar"},
-            "entity_description_tks": {"type": "varchar"},
-            "embedding_text": {"type": "varchar"},
-            "vec": {"type": f"vector,{dimensions},float"},
-            "source_chunk_ids": {"type": "varchar"},
-            "metadata": {"type": "varchar"},
-        }
-        relationship_columns = {
-            "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
-            "canonical_id": {"type": "varchar"},
-            "document_id": {"type": "varchar"},
-            "candidate_kind": {"type": "varchar"},
-            "source_entity_id": {"type": "varchar"},
-            "target_entity_id": {"type": "varchar"},
-            "source_entity_name": {"type": "varchar"},
-            "target_entity_name": {"type": "varchar"},
-            "relationship_endpoint_kwd": {"type": "varchar"},
-            "relationship_endpoint_tks": {"type": "varchar"},
-            "relationship_keyword_tks": {"type": "varchar"},
-            "relationship_description_tks": {"type": "varchar"},
-            "embedding_text": {"type": "varchar"},
-            "vec": {"type": f"vector,{dimensions},float"},
-            "keywords": {"type": "varchar"},
-            "weight": {"type": "float"},
-            "source_chunk_ids": {"type": "varchar"},
-            "metadata": {"type": "varchar"},
-        }
-        self._db.create_table(
-            self._config.entity_table,
-            entity_columns,
-            ConflictType.Ignore,
-        )
-        self._db.create_table(
-            self._config.relationship_table,
-            relationship_columns,
-            ConflictType.Ignore,
-        )
-        self._ensure_fulltext_indexes(
-            self._config.entity_table,
-            [
-                "entity_name_kwd",
-                "entity_name_tks",
-                "entity_type_tks",
-                "entity_description_tks",
-            ],
-        )
-        self._ensure_fulltext_indexes(
-            self._config.relationship_table,
-            [
-                "relationship_endpoint_kwd",
-                "relationship_endpoint_tks",
-                "relationship_keyword_tks",
-                "relationship_description_tks",
-            ],
-        )
+        with self._lock:
+            dimensions = self._embedding_dimensions()
+            entity_columns = {
+                "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
+                "canonical_id": {"type": "varchar"},
+                "document_id": {"type": "varchar"},
+                "candidate_kind": {"type": "varchar"},
+                "entity_name_kwd": {"type": "varchar"},
+                "entity_name_tks": {"type": "varchar"},
+                "entity_type_tks": {"type": "varchar"},
+                "entity_description_tks": {"type": "varchar"},
+                "embedding_text": {"type": "varchar"},
+                "vec": {"type": f"vector,{dimensions},float"},
+                "source_chunk_ids": {"type": "varchar"},
+                "metadata": {"type": "varchar"},
+            }
+            relationship_columns = {
+                "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
+                "canonical_id": {"type": "varchar"},
+                "document_id": {"type": "varchar"},
+                "candidate_kind": {"type": "varchar"},
+                "source_entity_id": {"type": "varchar"},
+                "target_entity_id": {"type": "varchar"},
+                "source_entity_name": {"type": "varchar"},
+                "target_entity_name": {"type": "varchar"},
+                "relationship_endpoint_kwd": {"type": "varchar"},
+                "relationship_endpoint_tks": {"type": "varchar"},
+                "relationship_keyword_tks": {"type": "varchar"},
+                "relationship_description_tks": {"type": "varchar"},
+                "embedding_text": {"type": "varchar"},
+                "vec": {"type": f"vector,{dimensions},float"},
+                "keywords": {"type": "varchar"},
+                "weight": {"type": "float"},
+                "source_chunk_ids": {"type": "varchar"},
+                "metadata": {"type": "varchar"},
+            }
+            self._retry_ddl(
+                self._db.create_table,
+                self._config.entity_table,
+                entity_columns,
+                ConflictType.Ignore,
+            )
+            self._retry_ddl(
+                self._db.create_table,
+                self._config.relationship_table,
+                relationship_columns,
+                ConflictType.Ignore,
+            )
+            self._ensure_fulltext_indexes(
+                self._config.entity_table,
+                [
+                    "entity_name_kwd",
+                    "entity_name_tks",
+                    "entity_type_tks",
+                    "entity_description_tks",
+                ],
+            )
+            self._ensure_fulltext_indexes(
+                self._config.relationship_table,
+                [
+                    "relationship_endpoint_kwd",
+                    "relationship_endpoint_tks",
+                    "relationship_keyword_tks",
+                    "relationship_description_tks",
+                ],
+            )
 
     def _embedding_dimensions(self) -> int:
         signature = getattr(self._embedder, "signature", None)
@@ -205,35 +240,38 @@ class InfinityGraphCandidateIndex:
         )
 
     def _ensure_fulltext_indexes(self, table_name: str, columns: list[str]) -> None:
-        table = self._db.get_table(table_name)
-        existing_indexes = self._list_index_names(table)
-        for column in columns:
-            index_name = f"{table_name}_{column}_fulltext_idx"
-            if index_name in existing_indexes:
-                continue
-            table.create_index(
-                index_name,
-                IndexInfo(column, IndexType.FullText),
-                ConflictType.Ignore,
-            )
+        with self._lock:
+            table = self._db.get_table(table_name)
+            existing_indexes = self._list_index_names(table)
+            for column in columns:
+                index_name = f"{table_name}_{column}_fulltext_idx"
+                if index_name in existing_indexes:
+                    continue
+                self._retry_ddl(
+                    table.create_index,
+                    index_name,
+                    IndexInfo(column, IndexType.FullText),
+                    ConflictType.Ignore,
+                )
 
     def _list_index_names(self, table: Any) -> set[str]:
-        list_indexes = getattr(table, "list_indexes", None)
-        if not callable(list_indexes):
-            return set()
+        with self._lock:
+            list_indexes = getattr(table, "list_indexes", None)
+            if not callable(list_indexes):
+                return set()
 
-        response = list_indexes()
-        if response is None:
-            return set()
-        if isinstance(response, tuple):
-            response = response[0]
+            response = list_indexes()
+            if response is None:
+                return set()
+            if isinstance(response, tuple):
+                response = response[0]
 
-        names = getattr(response, "index_names", None)
-        if names is None and isinstance(response, dict):
-            names = response.get("index_names")
-        if names is None:
-            return set()
-        return {str(name) for name in names}
+            names = getattr(response, "index_names", None)
+            if names is None and isinstance(response, dict):
+                names = response.get("index_names")
+            if names is None:
+                return set()
+            return {str(name) for name in names}
 
     # ------------------------------------------------------------------
     # 实体查询
@@ -264,51 +302,52 @@ class InfinityGraphCandidateIndex:
             query_vector = self._embedder.embed_query(entity_text)
 
             # 2. 获取实体表并执行融合查询
-            table = self._db.get_table(self._config.entity_table)
-            recall_n = self._config.graph_initial_recall_n
+            with self._lock:
+                table = self._db.get_table(self._config.entity_table)
+                recall_n = self._config.graph_initial_recall_n
 
-            df, _extra = (
-                table.match_text(
-                    fields=",".join(ENTITY_MATCH_TEXT_FIELDS),
-                    matching_text=entity_text,
-                    topn=recall_n,
-                    extra_options={
-                        "minimum_should_match": _minimum_should_match_option(
-                            self._config.minimum_should_match
+                df, _extra = (
+                    table.match_text(
+                        fields=",".join(ENTITY_MATCH_TEXT_FIELDS),
+                        matching_text=entity_text,
+                        topn=recall_n,
+                        extra_options={
+                            "minimum_should_match": _minimum_should_match_option(
+                                self._config.minimum_should_match
+                            ),
+                        },
+                    )
+                    .match_dense(
+                        vector_column_name="vec",
+                        embedding_data=query_vector,
+                        embedding_data_type="float",
+                        distance_type="ip",
+                        topn=recall_n,
+                        knn_params=_dense_knn_params(
+                            self._config.dense_similarity_threshold
                         ),
-                    },
+                    )
+                    .fusion(
+                        "weighted_sum",
+                        topn=recall_n,
+                        fusion_params={
+                            "weights": f"{self._config.text_weight},{self._config.dense_weight}",
+                            "normalize": self._config.fusion_normalize,
+                        },
+                    )
+                    .output(
+                        [
+                            "candidate_id",
+                            "canonical_id",
+                            "document_id",
+                            "entity_name_kwd",
+                            "source_chunk_ids",
+                            "metadata",
+                            "_score",
+                        ]
+                    )
+                    .to_pl()
                 )
-                .match_dense(
-                    vector_column_name="vec",
-                    embedding_data=query_vector,
-                    embedding_data_type="float",
-                    distance_type="ip",
-                    topn=recall_n,
-                    knn_params=_dense_knn_params(
-                        self._config.dense_similarity_threshold
-                    ),
-                )
-                .fusion(
-                    "weighted_sum",
-                    topn=recall_n,
-                    fusion_params={
-                        "weights": f"{self._config.text_weight},{self._config.dense_weight}",
-                        "normalize": self._config.fusion_normalize,
-                    },
-                )
-                .output(
-                    [
-                        "candidate_id",
-                        "canonical_id",
-                        "document_id",
-                        "entity_name_kwd",
-                        "source_chunk_ids",
-                        "metadata",
-                        "_score",
-                    ]
-                )
-                .to_pl()
-            )
 
             if df.is_empty():
                 continue
@@ -375,7 +414,7 @@ class InfinityGraphCandidateIndex:
                     name=_entity_display_name(row, canonical_id),
                     entity_type="",
                     description="",
-                    source_chunk_ids=list(row.get("source_chunk_ids") or []),
+                    source_chunk_ids=_parse_string_list(row.get("source_chunk_ids")),
                     metadata=merged_metadata,
                 ),
                 score=score,
@@ -418,48 +457,51 @@ class InfinityGraphCandidateIndex:
             matching_text = f"{query} {' '.join(answer_type_keywords)}"
 
         # 3. 获取关系表并执行融合查询
-        table = self._db.get_table(self._config.relationship_table)
-        recall_n = self._config.graph_initial_recall_n
+        with self._lock:
+            table = self._db.get_table(self._config.relationship_table)
+            recall_n = self._config.graph_initial_recall_n
 
-        df, _extra = (
-            table.match_text(
-                fields=",".join(RELATIONSHIP_MATCH_TEXT_FIELDS),
-                matching_text=matching_text,
-                topn=recall_n,
-                extra_options={
-                    "minimum_should_match": _minimum_should_match_option(
-                        self._config.minimum_should_match
+            df, _extra = (
+                table.match_text(
+                    fields=",".join(RELATIONSHIP_MATCH_TEXT_FIELDS),
+                    matching_text=matching_text,
+                    topn=recall_n,
+                    extra_options={
+                        "minimum_should_match": _minimum_should_match_option(
+                            self._config.minimum_should_match
+                        ),
+                    },
+                )
+                .match_dense(
+                    vector_column_name="vec",
+                    embedding_data=query_vector,
+                    embedding_data_type="float",
+                    distance_type="ip",
+                    topn=recall_n,
+                    knn_params=_dense_knn_params(
+                        self._config.dense_similarity_threshold
                     ),
-                },
+                )
+                .fusion(
+                    "weighted_sum",
+                    topn=recall_n,
+                    fusion_params={
+                        "weights": f"{self._config.text_weight},{self._config.dense_weight}",
+                        "normalize": self._config.fusion_normalize,
+                    },
+                )
+                .output(
+                    [
+                        "candidate_id",
+                        "canonical_id",
+                        "document_id",
+                        "source_chunk_ids",
+                        "metadata",
+                        "_score",
+                    ]
+                )
+                .to_pl()
             )
-            .match_dense(
-                vector_column_name="vec",
-                embedding_data=query_vector,
-                embedding_data_type="float",
-                distance_type="ip",
-                topn=recall_n,
-                knn_params=_dense_knn_params(self._config.dense_similarity_threshold),
-            )
-            .fusion(
-                "weighted_sum",
-                topn=recall_n,
-                fusion_params={
-                    "weights": f"{self._config.text_weight},{self._config.dense_weight}",
-                    "normalize": self._config.fusion_normalize,
-                },
-            )
-            .output(
-                [
-                    "candidate_id",
-                    "canonical_id",
-                    "document_id",
-                    "source_chunk_ids",
-                    "metadata",
-                    "_score",
-                ]
-            )
-            .to_pl()
-        )
 
         if df.is_empty():
             return []
@@ -502,7 +544,9 @@ class InfinityGraphCandidateIndex:
                     description="",
                     keywords=[],
                     weight=0.0,
-                    source_chunk_ids=list(row_dict.get("source_chunk_ids") or []),
+                    source_chunk_ids=_parse_string_list(
+                        row_dict.get("source_chunk_ids")
+                    ),
                     metadata=metadata,
                 ),
                 score=score,
@@ -526,9 +570,6 @@ class InfinityGraphCandidateIndex:
         Args:
             batch: 包含实体和关系的图证据批次
         """
-        # 先删除该文档的旧行
-        self.delete_document(batch.document_id)
-
         # 构建并插入实体行
         entity_rows = [
             build_entity_candidate_row(
@@ -549,10 +590,14 @@ class InfinityGraphCandidateIndex:
             for relation in batch.relations
         ]
 
-        if entity_rows:
-            self._get_table(self._config.entity_table).insert(entity_rows)
-        if relationship_rows:
-            self._get_table(self._config.relationship_table).insert(relationship_rows)
+        with self._lock:
+            self.delete_document(batch.document_id)
+            if entity_rows:
+                self._get_table(self._config.entity_table).insert(entity_rows)
+            if relationship_rows:
+                self._get_table(self._config.relationship_table).insert(
+                    relationship_rows
+                )
 
     def delete_document(self, document_id: str) -> None:
         """删除一个文档在两张表中的全部行。
@@ -563,9 +608,23 @@ class InfinityGraphCandidateIndex:
         # 防止 SQL 注入：转义单引号
         escaped = document_id.replace("'", "\\'")
         filter_expr = f"document_id = '{escaped}'"
-        self._get_table(self._config.entity_table).delete(filter_expr)
-        self._get_table(self._config.relationship_table).delete(filter_expr)
+        with self._lock:
+            self._get_table(self._config.entity_table).delete(filter_expr)
+            self._get_table(self._config.relationship_table).delete(filter_expr)
 
     def _get_table(self, name: str) -> Any:
         """按名称获取 Infinity 表对象。"""
-        return self._db.get_table(name)
+        with self._lock:
+            return self._db.get_table(name)
+
+    @staticmethod
+    def _retry_ddl(operation: Any, *args: Any) -> Any:
+        """Retry transient Infinity schema DDL conflicts."""
+        for attempt in range(_DDL_RETRY_ATTEMPTS):
+            try:
+                return operation(*args)
+            except InfinityException as exc:
+                if not _is_resource_busy(exc) or attempt == _DDL_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(_DDL_RETRY_DELAY_SECONDS * (attempt + 1))
+        raise RuntimeError("unreachable DDL retry state")

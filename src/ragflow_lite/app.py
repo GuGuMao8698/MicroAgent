@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI
 
@@ -24,11 +24,34 @@ from ragflow_lite.shared.observability import (
 logger = logging.getLogger(__name__)
 
 
+class LazyApp:
+    """ASGI wrapper that creates the FastAPI app on first use."""
+
+    def __init__(self) -> None:
+        self._app: FastAPI | None = None
+
+    def _get_app(self) -> FastAPI:
+        if self._app is None:
+            self._app = create_app()
+        return self._app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await self._get_app()(scope, receive, send)
+
+
 def _disconnect_vector_index(app: FastAPI) -> None:
     services: AppServices = app.state.services
     disconnect = getattr(services.ingestion_pipeline.vector_index, "disconnect", None)
     if callable(disconnect):
-        disconnect()
+        try:
+            disconnect()
+        except Exception:
+            log_event(
+                logger,
+                logging.WARNING,
+                "vector_index_disconnect_failed",
+                exc_info=True,
+            )
 
 
 def _close_ingestion_runner(app: FastAPI) -> None:
@@ -87,4 +110,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise
 
 
-app = create_app()
+app = LazyApp()

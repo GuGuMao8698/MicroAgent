@@ -1146,6 +1146,10 @@ def test_select_eval_cleanup_tables_targets_eval_residue() -> None:
             "documents_dataset_bindings",
             "documents_liveeval",
             "chunks_liveeval",
+            "graph_entities_liveeval",
+            "graph_relationships_liveeval",
+            "test_legacy_doc_abcd_datasets",
+            "test_legacy_chunk_abcd",
             "other_table",
         ]
     ) == [
@@ -1155,6 +1159,10 @@ def test_select_eval_cleanup_tables_targets_eval_residue() -> None:
         "documents_dataset_bindings",
         "documents_datasets",
         "documents_liveeval",
+        "graph_entities_liveeval",
+        "graph_relationships_liveeval",
+        "test_legacy_chunk_abcd",
+        "test_legacy_doc_abcd_datasets",
     ]
 
 

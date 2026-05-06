@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import time
+from typing import Any
 from uuid import uuid4
+
+import pytest
+
+pytestmark = pytest.mark.live_infinity
 
 _CONTENT_TYPES = {
     ".txt": "text/plain",
@@ -49,6 +55,29 @@ def _upload_txt(client, content: bytes = b"hello world", name: str = "test.txt")
         "/api/v0/documents",
         files={"file": (name, content, "text/plain")},
         headers={"Idempotency-Key": _unique_key()},
+    )
+
+
+def _wait_for_document_terminal_state(
+    client,
+    document_id: str,
+    *,
+    timeout_seconds: float = 3.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_payload: dict[str, Any] | None = None
+
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/v0/documents/{document_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        last_payload = payload
+        if payload["status"] in {"indexed", "failed"}:
+            return payload
+        time.sleep(0.01)
+
+    raise AssertionError(
+        f"Document {document_id} did not reach terminal status. Last payload: {last_payload}"
     )
 
 
@@ -137,6 +166,7 @@ def test_delete_non_empty_dataset_returns_409(client) -> None:
     # 上传并绑定文档
     upload_response = _upload_txt(client)
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
     client.patch(
         f"/api/v0/documents/{document_id}/dataset",
         json={"dataset_id": dataset_id},
@@ -201,6 +231,7 @@ def test_rebind_document_to_different_dataset(client) -> None:
 
     upload_response = _upload_txt(client)
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
 
     # 绑定到 ds1
     client.patch(
@@ -227,6 +258,7 @@ def test_unbind_document_from_dataset(client) -> None:
 
     upload_response = _upload_txt(client)
     document_id = upload_response.json()["document_id"]
+    _wait_for_document_terminal_state(client, document_id)
 
     client.patch(
         f"/api/v0/documents/{document_id}/dataset",
@@ -256,7 +288,9 @@ def test_list_documents_filtered_by_dataset(client) -> None:
     r1 = _upload_txt(client, b"doc1 content", "a.txt")
     r2 = _upload_txt(client, b"doc2 content", "b.txt")
     doc1_id = r1.json()["document_id"]
-    _ = r2.json()["document_id"]
+    doc2_id = r2.json()["document_id"]
+    _wait_for_document_terminal_state(client, doc1_id)
+    _wait_for_document_terminal_state(client, doc2_id)
 
     client.patch(
         f"/api/v0/documents/{doc1_id}/dataset",
@@ -288,6 +322,7 @@ def test_document_list_response_includes_dataset_id(client) -> None:
 
     r = _upload_txt(client)
     doc_id = r.json()["document_id"]
+    _wait_for_document_terminal_state(client, doc_id)
     client.patch(
         f"/api/v0/documents/{doc_id}/dataset",
         json={"dataset_id": ds},
@@ -308,6 +343,7 @@ def test_document_detail_response_includes_dataset_id(client) -> None:
 
     r = _upload_txt(client)
     doc_id = r.json()["document_id"]
+    _wait_for_document_terminal_state(client, doc_id)
     client.patch(
         f"/api/v0/documents/{doc_id}/dataset",
         json={"dataset_id": ds},
@@ -322,6 +358,7 @@ def test_document_detail_unbound_has_null_dataset_id(client) -> None:
     _install_fake_ark_client(client)
     r = _upload_txt(client)
     doc_id = r.json()["document_id"]
+    _wait_for_document_terminal_state(client, doc_id)
 
     response = client.get(f"/api/v0/documents/{doc_id}")
     assert response.status_code == 200

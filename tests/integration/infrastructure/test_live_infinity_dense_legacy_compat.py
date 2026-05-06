@@ -20,6 +20,7 @@ from ragflow_lite.config import Settings
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
     InfinityDenseVectorIndex,
 )
+from tests.infinity_test_support import drop_infinity_tables
 
 pytestmark = pytest.mark.live_infinity
 
@@ -116,11 +117,15 @@ def test_legacy_chunk_table_creates_only_legacy_indexes(
             except Exception:
                 pass
         # Best-effort cleanup.
-        for table_name in (chunk_table, doc_table):
-            try:
-                db.drop_table(table_name, ConflictType.Ignore)
-            except Exception:
-                pass
+        drop_infinity_tables(
+            app_settings,
+            [
+                chunk_table,
+                doc_table,
+                f"{doc_table}_datasets",
+                f"{doc_table}_dataset_bindings",
+            ],
+        )
         try:
             client.disconnect()
         except Exception:

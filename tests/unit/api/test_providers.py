@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from infinity_test_support import (
+    assign_isolated_infinity_tables,
+    register_infinity_table_cleanup,
+)
 
 from ragflow_lite.api.deps.providers import build_services
 from ragflow_lite.app import create_app
@@ -43,8 +47,13 @@ def _build_settings(tmp_path: Path) -> Settings:
         local_index_dir=tmp_path / "local_index",
         temp_dir=tmp_path / "tmp",
     )
+    assign_isolated_infinity_tables(settings, tmp_path)
     settings.ensure_directories()
     return settings
+
+
+def _build_live_settings(tmp_path: Path) -> Settings:
+    return register_infinity_table_cleanup(_build_settings(tmp_path))
 
 
 def test_settings_reject_missing_required_runtime_configuration(
@@ -115,6 +124,7 @@ def test_settings_reads_optional_render_citations_env(
     assert deepseek_config.render_citations is False
 
 
+@pytest.mark.live_infinity
 def test_build_services_resolves_relative_answerer_prompt_path_from_project_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -131,20 +141,21 @@ def test_build_services_resolves_relative_answerer_prompt_path_from_project_root
     off_repo_dir.mkdir()
     monkeypatch.chdir(off_repo_dir)
 
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     answerer = services.query_service.answerer
     assert isinstance(answerer, DeepSeekChatAnswerer)
     assert answerer.instructions == "Runtime override instructions."
 
 
+@pytest.mark.live_infinity
 def test_build_services_threads_render_citations_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
 
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     answerer = services.query_service.answerer
     assert isinstance(answerer, DeepSeekChatAnswerer)
@@ -162,10 +173,11 @@ def test_create_app_rejects_missing_ark_embedding_model(
         create_app(settings)
 
 
+@pytest.mark.live_infinity
 def test_build_services_uses_infinity_hybrid_retriever(
     tmp_path: Path,
 ) -> None:
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     # 图优先检索器作为主检索器
     assert isinstance(services.query_service.retriever, MiniGraphFirstRetriever)
@@ -188,8 +200,9 @@ def test_build_services_uses_infinity_hybrid_retriever(
     assert answerer.reasoning_effort == "high"
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> None:
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     # 图证据存储：GraphEvidenceInfinityStore 包装 JSON + Infinity candidates
     assert isinstance(
@@ -242,9 +255,10 @@ def test_infrastructure_exports_current_runtime_components() -> None:
     assert not hasattr(retrievers_module, "InfinityFullTextRetriever")
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None:
     """验证 build_services 组装 MiniGraphFirstRetriever 并在两个 query service 间共享。"""
-    settings = _build_settings(tmp_path)
+    settings = _build_live_settings(tmp_path)
 
     services = build_services(settings)
 
@@ -272,9 +286,10 @@ def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None
     )
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> None:
     """验证 Infinity 图候选索引作为 entity/relationship 查询路径。"""
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
     retriever = services.query_service.retriever
     assert isinstance(retriever, MiniGraphFirstRetriever)
     assert isinstance(retriever.entity_index, InfinityGraphCandidateIndex)
@@ -286,7 +301,12 @@ def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> 
 
 def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     """验证图候选 Infinity 设置的默认值与规格一致。"""
-    settings = _build_settings(tmp_path)
+    settings = Settings(
+        project_root=tmp_path,
+        uploads_dir=tmp_path / "uploads",
+        local_index_dir=tmp_path / "local_index",
+        temp_dir=tmp_path / "tmp",
+    )
     assert settings.mini_internal_candidate_n == 60
     assert settings.query_entity_limit == 5
     assert settings.graph_initial_recall_n == 1024
@@ -312,8 +332,9 @@ def test_chunk_hybrid_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.chunk_position_prior_enabled is True
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     assert isinstance(services.discorag_query_service, DiscoRAGQueryService)
     assert services.discorag_query_service.retriever is services.retriever
@@ -332,18 +353,20 @@ def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_query_mode_router(tmp_path: Path) -> None:
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
 
     assert isinstance(services.query_router, QueryModeRouter)
     assert services.query_router.standard_service is services.query_service
     assert services.query_router.discorag_service is services.discorag_query_service
 
 
+@pytest.mark.live_infinity
 def test_build_services_embedder_dimensions_match_settings(
     tmp_path: Path,
 ) -> None:
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
     assert isinstance(services.ingestion_pipeline.embedder, ArkMultimodalTextEmbedder)
     assert services.ingestion_pipeline.embedder.signature["dimensions"] == 2048
 
@@ -359,10 +382,11 @@ def test_settings_rejects_legacy_retrieval_mode_env(
         _build_settings(tmp_path)
 
 
+@pytest.mark.live_infinity
 def test_build_services_provides_document_service(tmp_path: Path) -> None:
     from ragflow_lite.application import DocumentService
 
-    services = build_services(_build_settings(tmp_path))
+    services = build_services(_build_live_settings(tmp_path))
     assert isinstance(services.document_service, DocumentService)
     assert services.document_service.catalog is services.ingestion_pipeline.vector_index
 
@@ -406,8 +430,9 @@ def test_settings_rejects_invalid_metrics_env(
         _build_settings(tmp_path)
 
 
+@pytest.mark.live_infinity
 def test_build_services_wires_chunk_hybrid_config(tmp_path: Path) -> None:
-    settings = _build_settings(tmp_path)
+    settings = _build_live_settings(tmp_path)
     settings.chunk_initial_recall_n = 77
     settings.chunk_text_weight = 0.2
     settings.chunk_dense_weight = 0.8
@@ -432,8 +457,9 @@ def test_build_services_wires_chunk_hybrid_config(tmp_path: Path) -> None:
     assert config.position_prior_enabled is False
 
 
+@pytest.mark.live_infinity
 def test_chunk_and_graph_candidate_configs_are_separate(tmp_path: Path) -> None:
-    settings = _build_settings(tmp_path)
+    settings = _build_live_settings(tmp_path)
     settings.chunk_initial_recall_n = 77
     settings.graph_initial_recall_n = 88
 
