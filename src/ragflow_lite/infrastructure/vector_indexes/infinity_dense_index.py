@@ -78,6 +78,16 @@ class ChunkHybridRetrievalConfig:
         return f"{self.text_weight},{self.dense_weight}"
 
 
+def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
+    """Build Infinity SDK-compatible dense-match optional parameters."""
+    return {"threshold": str(similarity_threshold)}
+
+
+def _minimum_should_match_option(minimum_should_match: float) -> str:
+    """Build Infinity fulltext option using the server's percent format."""
+    return f"{int(minimum_should_match * 100)}%"
+
+
 class InfinityDenseVectorIndex:
     """基于 Infinity 的稠密向量索引，维护文档表、chunk 表、dataset 表和 binding 表。"""
 
@@ -216,7 +226,9 @@ class InfinityDenseVectorIndex:
                 matching_text=query,
                 topn=initial_recall_n,
                 extra_options={
-                    "minimum_should_match": config.minimum_should_match,
+                    "minimum_should_match": _minimum_should_match_option(
+                        config.minimum_should_match
+                    ),
                 },
             )
             .match_dense(
@@ -225,7 +237,7 @@ class InfinityDenseVectorIndex:
                 embedding_data_type="float",
                 distance_type="ip",
                 topn=initial_recall_n,
-                threshold=config.dense_similarity_threshold,
+                knn_params=_dense_knn_params(config.dense_similarity_threshold),
             )
             .fusion(
                 "weighted_sum",

@@ -649,9 +649,11 @@ class TestInfinityDenseVectorIndex:
         )
 
         assert chunk_table.last_hybrid_text_kwargs["extra_options"] == {
-            "minimum_should_match": 0.3
+            "minimum_should_match": "30%"
         }
-        assert chunk_table.last_hybrid_dense_kwargs["threshold"] == 0.2
+        assert chunk_table.last_hybrid_dense_kwargs["knn_params"] == {
+            "threshold": "0.2"
+        }
         assert chunk_table.last_fusion_kwargs["fusion_params"] == {
             "weights": "0.05,0.95",
             "normalize": "atan",
@@ -747,9 +749,7 @@ class TestInfinityDenseVectorIndex:
         assert len(results) == 1
         assert results[0].chunk_id == dual.chunk_id
 
-    def test_search_hybrid_text_fields_use_chunk_fielded_text(
-        self, make_index
-    ) -> None:
+    def test_search_hybrid_text_fields_use_chunk_fielded_text(self, make_index) -> None:
         """search_hybrid 的 text 分支使用 chunk fielded text 多字段。"""
         client, idx = make_index()
         asset = _make_asset()
