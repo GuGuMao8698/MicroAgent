@@ -31,6 +31,7 @@ from ragflow_lite.domain.models import (
     IndexedDocument,
     RetrievedChunk,
 )
+from ragflow_lite.infrastructure.vector_indexes import chunk_text_fields
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,10 @@ class InfinityDenseVectorIndex:
             "embedding_provider": {"type": "varchar"},
             "embedding_model": {"type": "varchar"},
             "embedding_dimensions": {"type": "integer"},
+            "filename_kwd": {"type": "varchar"},
+            "filename_tks": {"type": "varchar"},
+            "content_tks": {"type": "varchar"},
+            "content_sm_tks": {"type": "varchar"},
         }
         self._db.create_table(self._chunk_table, chunk_columns, ConflictType.Ignore)
 
@@ -364,6 +369,10 @@ class InfinityDenseVectorIndex:
         required_indexes = {
             f"{self._chunk_table}_text_fulltext_idx": "text",
             f"{self._chunk_table}_filename_fulltext_idx": "filename",
+            f"{self._chunk_table}_filename_kwd_fulltext_idx": "filename_kwd",
+            f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
+            f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
+            f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
         }
         existing_indexes = self._list_index_names(chunk_table)
 
@@ -808,6 +817,10 @@ class InfinityDenseVectorIndex:
     ) -> dict[str, Any]:
         """把 `EmbeddedChunk` 转成 Infinity 可写入的行数据。"""
         metadata_json = json.dumps(chunk.metadata, ensure_ascii=False)
+        text_fields = chunk_text_fields.build_chunk_text_fields(
+            filename=asset.filename,
+            text=chunk.text,
+        )
         return {
             "chunk_id": chunk.chunk_id,
             "document_id": chunk.document_id,
@@ -820,6 +833,10 @@ class InfinityDenseVectorIndex:
             "embedding_provider": self._embedding_signature["provider"],
             "embedding_model": self._embedding_signature["model"],
             "embedding_dimensions": self._embedding_signature["dimensions"],
+            "filename_kwd": text_fields["filename_kwd"],
+            "filename_tks": text_fields["filename_tks"],
+            "content_tks": text_fields["content_tks"],
+            "content_sm_tks": text_fields["content_sm_tks"],
         }
 
     @staticmethod

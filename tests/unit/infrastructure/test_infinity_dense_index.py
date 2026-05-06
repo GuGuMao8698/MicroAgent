@@ -107,6 +107,10 @@ def _create_existing_chunk_table_without_fulltext_indexes(db: Any) -> Any:
             "embedding_provider": {"type": "varchar"},
             "embedding_model": {"type": "varchar"},
             "embedding_dimensions": {"type": "integer"},
+            "filename_kwd": {"type": "varchar"},
+            "filename_tks": {"type": "varchar"},
+            "content_tks": {"type": "varchar"},
+            "content_sm_tks": {"type": "varchar"},
         },
     )
     return db.get_table("chunks")
@@ -381,6 +385,48 @@ class TestInfinityDenseVectorIndex:
         assert "chunks_text_fulltext_idx" in chunk_table._indexes
         assert "chunks_filename_fulltext_idx" in chunk_table._indexes
 
+    def test_creates_chunk_fielded_text_columns_and_indexes(self, make_index) -> None:
+        client, _ = make_index()
+        db = client.get_database("default_db")
+        chunk_table = db.get_table("chunks")
+
+        assert "filename_kwd" in chunk_table.columns
+        assert "filename_tks" in chunk_table.columns
+        assert "content_tks" in chunk_table.columns
+        assert "content_sm_tks" in chunk_table.columns
+        assert f"{chunk_table.name}_filename_kwd_fulltext_idx" in chunk_table._indexes
+        assert f"{chunk_table.name}_filename_tks_fulltext_idx" in chunk_table._indexes
+        assert f"{chunk_table.name}_content_tks_fulltext_idx" in chunk_table._indexes
+        assert f"{chunk_table.name}_content_sm_tks_fulltext_idx" in chunk_table._indexes
+
+    def test_index_document_writes_chunk_fielded_text(
+        self, make_index, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ragflow_lite.infrastructure.vector_indexes import chunk_text_fields
+
+        monkeypatch.setattr(
+            chunk_text_fields,
+            "build_chunk_text_fields",
+            lambda *, filename, text: {
+                "filename_kwd": filename,
+                "filename_tks": "filename tokens",
+                "content_tks": "content tokens",
+                "content_sm_tks": "content small tokens",
+            },
+        )
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world")
+
+        idx.index_document(asset, [chunk])
+
+        chunk_table = client.get_database("default_db").get_table("chunks")
+        row = chunk_table.rows[0]
+        assert row["filename_kwd"] == "test.txt"
+        assert row["filename_tks"] == "filename tokens"
+        assert row["content_tks"] == "content tokens"
+        assert row["content_sm_tks"] == "content small tokens"
+
     def test_init_repairs_missing_fulltext_indexes_on_existing_chunk_table(
         self,
         fake_infinity_client_factory,
@@ -404,6 +450,10 @@ class TestInfinityDenseVectorIndex:
         assert chunk_table.list_indexes().index_names == [
             "chunks_text_fulltext_idx",
             "chunks_filename_fulltext_idx",
+            "chunks_filename_kwd_fulltext_idx",
+            "chunks_filename_tks_fulltext_idx",
+            "chunks_content_tks_fulltext_idx",
+            "chunks_content_sm_tks_fulltext_idx",
         ]
 
     def test_init_fails_when_fulltext_index_creation_fails(
