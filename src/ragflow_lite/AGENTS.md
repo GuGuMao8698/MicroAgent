@@ -1,19 +1,35 @@
 # AGENTS.md
 
-## Purpose
-这个目录承接当前后端源码，实现上传、解析、切块、索引、查询、回答主链路，并保持清晰分层。
+## 概述
+这个目录是后端源码根，只维护分层边界和源码级导航。具体实现约束应写到最近的子目录 `AGENTS.md`。
 
-## Do Here
-- 保持 `api`、`application`、`domain`、`infrastructure` 的清晰分层。
-- 让实现围绕主链路演进，避免为未来阶段提前扩张默认运行路径。
-- 默认生产检索路径是 graph-first：`MiniGraphFirstRetriever` 先做 query grounding → graph index 查询 → path expansion → source chunk scoring（MiniRAG mini mode Counter/vote 对齐）→ source selection（budget 分配 `final_context_k` / `discourse_selection_n`），`InfinityHybridRetriever` 作为辅助 chunk 检索（auxiliary）按 MiniRAG `kwd2chunk` 候选路径放大参与评分。pure dense / pure fulltext 仅保留为 index 层内部诊断能力。最终回答预算公开 API 使用 `top_n`（默认 `6`），内部 `discourse_selection_n` 跟随 `answer_top_n`；MiniRAG 内部图候选预算为 `mini_internal_candidate_n`（默认 `60`）。
-- 保持基础 inline citation、文档目录读取和 grounded answer 主链路可用，但把实现细节放回各自子层，不在源码根重复项目阶段说明。
-- 仅允许把 cross-cutting observability helper 放进 `shared`，例如 logging formatter、request/trace context、Prometheus helper；不要把业务流程和 HTTP 逻辑塞进 `shared`。
-- 只在这里放后端源码，不把测试夹具、运行数据或临时脚本混进来。
-- `infrastructure/evidence` 承接 evidence 相关底层能力：ingestion 侧图证据提取与持久化，query-time canonical graph evidence view（跨文档同名实体/有向边合并）、graph entity/relationship candidate Infinity 混合检索（`InfinityGraphCandidateIndex`，独立表 `graph_entities` / `graph_relationships`，`match_text + match_dense + weighted_sum` 融合，信任 Infinity `_score`）、BFS path expansion（`LocalJsonGraphEvidenceIndex`），以及 query-time 块内语篇结构提取。`GraphEvidenceInfinityStore` 同步写入 JSON 图证据和 Infinity 候选行，失败时双向回滚。不要在源码根重复 provider 迁移状态或具体符号清单。
-- query-time 图检索已落地：`MiniGraphFirstRetriever`（无状态，安全共享）作为默认检索器，产出 `GraphFirstSourceSelection` 合约（显式 budget 分配 answer/discourse 候选 + 可解释 selection_reason），通过下游 `EvidencePackageBuilder` → discourse extractor（优先 selected_for_discourse）→ blueprint builder → answerer 全链路传递。`QueryModeRouter` 作为 `/queries` 的分发入口，根据请求 `mode` 调度到 `standard`（`QueryService`）或 `discorag`（`DiscoRAGQueryService`）路径。
+## 快速命令
+```bash
+rtk cx overview src/ragflow_lite --full
+rtk cx overview src/ragflow_lite/application/services --full
+rtk cx overview src/ragflow_lite/infrastructure --full
+```
 
-## Avoid Here
-- 不要把 OCR/layout/table/DeepDoc、外部 rerank、dataset-aware query filter 等尚未进入默认主链路的能力提前塞进当前实现。当前只允许已落地的基础 dataset 管理 baseline、异步 ingestion pipeline（任务状态、幂等、重试、进度、stage cache）、ingestion 侧图证据提取和 query-time 图检索（含拓扑检索），不允许顺手把 query filter / rerank / topology scoring / 新主路径一起带入。
-- 不要跨层放置代码，例如把路由逻辑写进 `domain`，或把业务流程塞进 `api`。
-- 不要把”暂时不知道放哪”的代码默认丢进 `shared`，尤其不要把业务编排、provider 调用或路由控制流塞进去。
+## 架构
+```text
+src/ragflow_lite/
+├── api/             # FastAPI routes, schemas, deps
+├── application/     # ingestion/query orchestration and services
+├── config/          # env-backed runtime settings
+├── domain/          # models, ports, domain errors
+├── infrastructure/  # parser/chunker/embedder/index/provider/storage adapters
+└── shared/          # cross-cutting logging/metrics/request helpers only
+```
+
+- 当前工程主线是 `MiniRAG + DiscoRAG` 的工程化实现；包名和环境变量前缀继续保持 `ragflow_lite` / `RAGFLOW_LITE_*`。
+- HTTP surface 只在 `api`；业务流程只在 `application`；稳定业务对象和 port 只在 `domain`；外部 SDK、Infinity、文件系统和 provider 细节只在 `infrastructure`。
+- `shared` 只能承接跨层 helper，例如日志格式化、request context、metrics helper；不能承接业务编排、provider 调用或路由控制流。
+- 默认查询主线是 application 层的 graph-first / DiscoRAG 编排，底层 Infinity hybrid chunk retrieval 只是辅助检索能力，不是 HTTP 可调策略。
+- 运行时 provider 配置来自宿主环境，不从源码目录读取或提交 secret。
+
+## 关键约定
+- 不要在源码根重复具体符号清单、provider 迁移状态或阶段流水账；这些内容会漂移，应下沉到最近子目录或阶段文档。
+- 不要跨层放置代码：route 不编排 parser/index/answer，domain 不依赖 FastAPI/SDK/文件系统，infrastructure 不反向决定业务流程。
+- 不要把尚未进入默认主链路的 OCR/layout/table/DeepDoc、外部 rerank、dataset-aware query filter 或新检索主路径顺手塞入当前实现。
+- 新增 abstraction 前先确认它表达稳定 port、消除真实重复或形成明确 extension point；不要为单一 provider 预建框架。
+- 后端源码目录不放测试夹具、运行数据、临时脚本或 compose 产物。
