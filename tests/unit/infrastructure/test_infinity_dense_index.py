@@ -558,25 +558,78 @@ class TestInfinityDenseVectorIndex:
         with pytest.raises(ProcessingError, match="Embedding signature mismatch"):
             idx.search_hybrid("chunk text", [1.0, 0.0, 0.0, 0.0], top_k=5)
 
-    def test_search_hybrid_uses_candidate_k_window(self, make_index) -> None:
-        """search_hybrid 内部对 text/dense/fusion 传入 candidate_k 而非 top_k。"""
+    def test_search_hybrid_uses_configured_initial_recall_window(
+        self, make_index
+    ) -> None:
+        """search_hybrid 内部 text/dense/fusion 都使用 chunk_initial_recall_n。"""
         client, idx = make_index()
         asset = _make_asset()
         chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
         idx.index_document(asset, [chunk])
 
-        top_k = 5
-        expected_candidate_k = max(30, top_k * 4)  # 30
         chunk_table = _search_hybrid_and_get_chunk_table(
             client,
             idx,
             query="hello",
             query_vector=[1.0, 0.0, 0.0, 0.0],
-            top_k=top_k,
+            top_k=5,
         )
-        assert chunk_table.last_hybrid_text_topn == expected_candidate_k
-        assert chunk_table.last_hybrid_dense_topn == expected_candidate_k
-        assert chunk_table.last_hybrid_fusion_topn == expected_candidate_k
+
+        assert chunk_table.last_hybrid_text_topn == 1024
+        assert chunk_table.last_hybrid_dense_topn == 1024
+        assert chunk_table.last_hybrid_fusion_topn == 1024
+
+    def test_search_hybrid_passes_text_dense_thresholds_and_fusion_config(
+        self, make_index
+    ) -> None:
+        client, idx = make_index()
+        asset = _make_asset()
+        chunk = _make_chunk(text="hello world", vector=[1.0, 0.0, 0.0, 0.0])
+        idx.index_document(asset, [chunk])
+
+        chunk_table = _search_hybrid_and_get_chunk_table(
+            client,
+            idx,
+            query="hello",
+            query_vector=[1.0, 0.0, 0.0, 0.0],
+            top_k=5,
+        )
+
+        assert chunk_table.last_hybrid_text_kwargs["extra_options"] == {
+            "minimum_should_match": 0.3
+        }
+        assert chunk_table.last_hybrid_dense_kwargs["threshold"] == 0.2
+        assert chunk_table.last_fusion_kwargs["fusion_params"] == {
+            "weights": "0.05,0.95",
+            "normalize": "atan",
+        }
+
+    def test_search_hybrid_can_disable_position_prior(self, make_index) -> None:
+        config = ChunkHybridRetrievalConfig(position_prior_enabled=False)
+        _, idx = make_index(chunk_hybrid_config=config)
+        asset = _make_asset()
+        chunks = [
+            _make_chunk(
+                document_id="doc_1",
+                index=0,
+                text="hello world",
+                vector=[0.0, 0.0, 0.0, 0.0],
+            ),
+            _make_chunk(
+                document_id="doc_1",
+                index=100,
+                text="no match",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            ),
+        ]
+        idx.index_document(asset, chunks)
+
+        results = idx.search_hybrid("hello", [1.0, 0.0, 0.0, 0.0], top_k=2)
+
+        assert [chunk.chunk_id for chunk in results] == [
+            "chunk_doc_1_100",
+            "chunk_doc_1_0",
+        ]
 
     def test_search_hybrid_trims_results_to_top_k(self, make_index) -> None:
         """search_hybrid 返回结果数量不超过请求的 top_k。"""

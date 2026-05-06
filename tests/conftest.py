@@ -94,6 +94,8 @@ class FakeInfinityTable:
         self.last_hybrid_dense_topn: int | None = None
         self.last_hybrid_fusion_topn: int | None = None
         self.last_hybrid_text_fields: str | None = None
+        self.last_hybrid_text_kwargs: dict[str, Any] | None = None
+        self.last_hybrid_dense_kwargs: dict[str, Any] | None = None
         self.last_fusion_kwargs: dict[str, Any] | None = None
 
     def insert(self, data: list[dict[str, Any]]) -> None:
@@ -344,6 +346,12 @@ class _FakeQueryBuilder:
         self._table.last_hybrid_fusion_topn = topn
         self._table.last_hybrid_text_fields = (
             self._text_kwargs.get("fields") if self._text_kwargs else None
+        )
+        self._table.last_hybrid_text_kwargs = (
+            dict(self._text_kwargs) if self._text_kwargs else None
+        )
+        self._table.last_hybrid_dense_kwargs = (
+            dict(self._dense_kwargs) if self._dense_kwargs else None
         )
         self._table.last_fusion_kwargs = (
             dict(self._fusion_kwargs) if self._fusion_kwargs else None

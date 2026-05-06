@@ -202,26 +202,34 @@ class InfinityDenseVectorIndex:
         """
         self._validate_query_dimensions(query_vector)
 
-        candidate_k = max(30, top_k * 4)
+        config = self._chunk_hybrid_config
+        initial_recall_n = config.initial_recall_n
 
         chunk_table = self._db.get_table(self._chunk_table)
         result_tuple = (
             chunk_table.match_text(
-                fields="filename^3,text",
+                fields=config.match_text_fields,
                 matching_text=query,
-                topn=candidate_k,
+                topn=initial_recall_n,
+                extra_options={
+                    "minimum_should_match": config.minimum_should_match,
+                },
             )
             .match_dense(
                 vector_column_name="vec",
                 embedding_data=query_vector,
                 embedding_data_type="float",
                 distance_type="ip",
-                topn=candidate_k,
+                topn=initial_recall_n,
+                threshold=config.dense_similarity_threshold,
             )
             .fusion(
                 "weighted_sum",
-                topn=candidate_k,
-                fusion_params={"weights": "0.05,0.95", "normalize": "atan"},
+                topn=initial_recall_n,
+                fusion_params={
+                    "weights": config.fusion_weights,
+                    "normalize": config.fusion_normalize,
+                },
             )
             .output(self._chunk_output_columns("_score", include_chunk_index=True))
             .to_pl()
@@ -232,7 +240,10 @@ class InfinityDenseVectorIndex:
             score_field="_score",
             validate_embedding_signature=True,
         )
-        _apply_position_prior(results)
+        if config.position_prior_enabled:
+            _apply_position_prior(results, boost=config.position_prior_weight)
+        else:
+            _drop_position_prior_metadata(results)
         results.sort(key=lambda c: c.score, reverse=True)
         return results[:top_k]
 
@@ -866,6 +877,12 @@ def _apply_position_prior(
         except (TypeError, ValueError):
             idx = 0
         chunk.score += boost / (1 + idx)
+
+
+def _drop_position_prior_metadata(chunks: list[RetrievedChunk]) -> None:
+    """Remove internal chunk index metadata when position prior is disabled."""
+    for chunk in chunks:
+        chunk.metadata.pop("_chunk_index", None)
 
 
 def _doc_id_filter(document_id: str) -> str:
