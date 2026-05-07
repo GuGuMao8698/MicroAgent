@@ -7,6 +7,9 @@ from ragflow_lite.application.services.discorag_query_service import (
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
+from ragflow_lite.application.services.inter_chunk_discourse_graph_builder import (
+    DeterministicInterChunkDiscourseGraphBuilder,
+)
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
@@ -18,6 +21,7 @@ from ragflow_lite.application.services.query_service import QueryService
 from ragflow_lite.application.services.text_normalization import normalize_text
 
 __all__ = [
+    "DeterministicInterChunkDiscourseGraphBuilder",
     "DiscoRAGAnswerBlueprintBuilder",
     "DiscoRAGQueryService",
     "EvidencePackageBuilder",

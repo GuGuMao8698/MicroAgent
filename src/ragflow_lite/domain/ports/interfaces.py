@@ -16,6 +16,7 @@ from ragflow_lite.domain.models import (
     GroundedQuery,
     IndexedDocument,
     IngestionTaskSnapshot,
+    InterChunkDiscourseGraph,
     IntraChunkDiscoursePackage,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
@@ -208,3 +209,17 @@ class Retriever(Protocol):
 
 class Answerer(Protocol):
     def answer(self, request: AnswerRequest) -> AnswerResult: ...
+
+
+# ---------------------------------------------------------------------------
+# Inter-chunk discourse graph builder port
+# ---------------------------------------------------------------------------
+
+
+class InterChunkDiscourseGraphBuilder(Protocol):
+    """从 IntraChunkDiscoursePackage 构建跨 chunk 话语图。"""
+
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+    ) -> InterChunkDiscourseGraph: ...
