@@ -257,3 +257,29 @@ def test_builder_ignores_invalid_explicit_relation_type() -> None:
     graph = DeterministicInterChunkDiscourseGraphBuilder().build(package)
 
     assert graph.relations == []
+
+
+@pytest.mark.parametrize(
+    "relation_type",
+    ["supports", "background_for", "elaborates", "example_of"],
+)
+def test_builder_accepts_non_promoting_relation_types(relation_type: str) -> None:
+    package = _package(
+        [
+            _item("chunk_answer", order=0, selected_for_answer=True),
+            _item(
+                "chunk_supplemental",
+                order=1,
+                selected_for_answer=False,
+                supplemental=True,
+                metadata={
+                    "inter_chunk_relation_type": relation_type,
+                    "inter_chunk_target_chunk_id": "chunk_answer",
+                },
+            ),
+        ]
+    )
+
+    graph = DeterministicInterChunkDiscourseGraphBuilder().build(package)
+
+    assert [relation.relation_type for relation in graph.relations] == [relation_type]
