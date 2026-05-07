@@ -365,6 +365,39 @@ def test_build_adds_graph_aware_constraints_for_qualification() -> None:
     assert blueprint.metadata["inter_chunk_relation_types"] == ["qualifies"]
 
 
+def test_build_marks_supplemental_chunk_for_promotion_when_it_contradicts_answer() -> (
+    None
+):
+    package = _package(
+        items=[
+            _evidence_item("chunk_answer", order=0),
+            _evidence_item("chunk_supplemental", order=1),
+        ]
+    )
+    package.evidence_package.items[0].metadata["selected_for_answer"] = True
+    package.evidence_package.items[1].metadata["selected_for_answer"] = False
+    package.evidence_package.items[1].metadata["supplemental_discourse"] = True
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_answer", "chunk_supplemental"],
+        relations=[
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_supplemental",
+                target_chunk_id="chunk_answer",
+                relation_type="contradicts",
+                rationale="supplemental changes the conclusion",
+            )
+        ],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    assert blueprint.metadata["promoted_chunk_ids"] == ["chunk_supplemental"]
+    assert "chunk_supplemental" in blueprint.ordered_chunk_ids
+    constraints = " ".join(blueprint.answer_constraints).lower()
+    assert "contradiction" in constraints
+
+
 def test_build_with_empty_inter_chunk_graph_preserves_existing_order() -> None:
     package = _package()
     graph = InterChunkDiscourseGraph(

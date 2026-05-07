@@ -62,6 +62,7 @@ class DiscoRAGAnswerBlueprintBuilder:
                     if graph is not None
                     else 0,
                     "inter_chunk_relation_types": self._graph_relation_types(graph),
+                    "promoted_chunk_ids": [],
                 },
             )
 
@@ -83,6 +84,10 @@ class DiscoRAGAnswerBlueprintBuilder:
         topology_relation_ids = self._unique_ids(
             relation_id for item in items for relation_id in item.topology_relation_ids
         )
+        promoted_chunk_ids = self._promoted_chunk_ids(package, graph)
+        for chunk_id in promoted_chunk_ids:
+            if chunk_id not in ordered_chunk_ids:
+                ordered_chunk_ids.append(chunk_id)
 
         return AnswerBlueprint(
             ordered_chunk_ids=ordered_chunk_ids,
@@ -109,6 +114,7 @@ class DiscoRAGAnswerBlueprintBuilder:
                 if graph is not None
                 else 0,
                 "inter_chunk_relation_types": self._graph_relation_types(graph),
+                "promoted_chunk_ids": promoted_chunk_ids,
             },
         )
 
@@ -252,6 +258,30 @@ class DiscoRAGAnswerBlueprintBuilder:
             relation.relation_type in {"qualifies", "contradicts"}
             for relation in graph.relations
         )
+
+    def _promoted_chunk_ids(
+        self,
+        package: IntraChunkDiscoursePackage,
+        graph: InterChunkDiscourseGraph | None,
+    ) -> list[str]:
+        """识别因 contradicts/qualifies 关系需要提升到最终证据的 supplemental chunk。"""
+        if graph is None:
+            return []
+        item_by_id = {
+            item.canonical_chunk_id: item for item in package.evidence_package.items
+        }
+        promoted: list[str] = []
+        for relation in graph.relations:
+            if relation.relation_type not in {"contradicts", "qualifies"}:
+                continue
+            source = item_by_id.get(relation.source_chunk_id)
+            if source is None:
+                continue
+            if source.metadata.get("supplemental_discourse") is not True:
+                continue
+            if relation.source_chunk_id not in promoted:
+                promoted.append(relation.source_chunk_id)
+        return promoted
 
     def _unique_ids(self, values: Iterable[str]) -> list[str]:
         seen: set[str] = set()
