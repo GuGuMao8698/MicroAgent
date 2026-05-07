@@ -11,6 +11,7 @@ from infinity_test_support import (
 from ragflow_lite.api.deps.providers import build_services
 from ragflow_lite.app import create_app
 from ragflow_lite.application.services import (
+    DeterministicInterChunkDiscourseGraphBuilder,
     DiscoRAGAnswerBlueprintBuilder,
     DiscoRAGQueryService,
     EvidencePackageBuilder,
@@ -350,6 +351,11 @@ def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
     assert isinstance(
         services.discorag_query_service.blueprint_builder,
         DiscoRAGAnswerBlueprintBuilder,
+    )
+    # inter-chunk graph builder 使用确定性实现
+    assert isinstance(
+        services.discorag_query_service.inter_chunk_graph_builder,
+        DeterministicInterChunkDiscourseGraphBuilder,
     )
 
 
