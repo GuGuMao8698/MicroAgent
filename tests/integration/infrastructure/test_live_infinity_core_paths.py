@@ -245,6 +245,18 @@ def test_live_graph_candidate_index_covers_table_lifecycle_query_and_delete(
         )
         assert relationship_candidates[0].metadata["candidate_kind"] == "relationship"
 
+        relation = relationship_candidates[0].relation
+        assert relation.source_entity_id == "entity_python"
+        assert relation.target_entity_id == "entity_django"
+        assert relation.source_entity_name == "Python"
+        assert relation.target_entity_name == "Django"
+        assert (
+            relation.description == "python us django"
+        )  # tks field: lowercased + tokenized
+        assert relation.keywords == ["framework"]
+        assert relation.weight == 1.0
+        assert relation.source_chunk_ids == ["chunk_python"]
+
         index.delete_document("graph_doc")
         assert index.query_entities(["Python"], top_k=3) == []
         assert index.query_relationships("Python Django framework", [], top_k=3) == []

@@ -983,3 +983,215 @@ def test_auxiliary_default_budget_is_at_least_one() -> None:
     retriever.retrieve_context("How does MiniRAG work?", top_k=2)
 
     assert auxiliary_retriever.calls[0][1] == 1
+
+
+def test_minirag_parity_edge_vote_uses_endpoint_pair_when_relation_id_differs() -> None:
+    """Endpoint pair vote must work when relation id canonicalization differs."""
+
+    class PairOnlyRelationshipIndex(RecordingRelationshipIndex):
+        def query_relationships(
+            self,
+            query: str,
+            answer_type_keywords: list[str],
+            top_k: int,
+        ) -> list[MiniRelationshipCandidate]:
+            self.calls.append((query, tuple(answer_type_keywords)))
+            return [
+                MiniRelationshipCandidate(
+                    relation=RelationEvidence(
+                        relation_id="relation_from_candidate",
+                        document_id="doc1",
+                        source_entity_id="entity_minirag",
+                        target_entity_id="entity_sources",
+                        source_entity_name="MiniRAG",
+                        target_entity_name="Sources",
+                        description="Endpoint pair should vote even if relation id differs.",
+                        keywords=["mechanism"],
+                        weight=1.0,
+                        source_chunk_ids=["chunk_pair_vote"],
+                    ),
+                    score=1.0,
+                    matched_terms=["mechanism"],
+                )
+            ]
+
+    class PairPathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return [
+                _path(
+                    "path_pair_vote",
+                    ["entity_minirag", "entity_sources"],
+                    ["relation_from_path"],
+                    ["chunk_pair_vote"],
+                    answer_hit_count=0,
+                    candidate_group_id="entity_minirag",
+                    candidate_rank=0,
+                ),
+                _path(
+                    "path_plain",
+                    ["entity_minirag", "entity_other"],
+                    ["relation_plain"],
+                    ["chunk_plain", "chunk_plain", "chunk_plain"],
+                    answer_hit_count=0,
+                    candidate_group_id="entity_minirag",
+                    candidate_rank=1,
+                ),
+            ]
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=PairOnlyRelationshipIndex(),
+        path_expander=PairPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG recover sources?", top_k=2)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == [
+        "chunk_pair_vote",
+        "chunk_plain",
+    ]
+    components = result.chunks[0].metadata["source_score_components"]
+    assert components["edge_vote_count"] == 1.0
+    assert components["path_chunk_base_weight"] == 2.0
+
+
+# ---------------------------------------------------------------------------
+# No-path candidate top-20% retention tests (TDD red phase — expected FAIL)
+# ---------------------------------------------------------------------------
+
+
+class ManyEntityIndex:
+    def query_entities(
+        self,
+        entity_texts: list[str],
+        top_k: int,
+    ) -> list[MiniEntityCandidate]:
+        return [
+            MiniEntityCandidate(
+                entity=EntityEvidence(
+                    entity_id=f"entity_no_path_{index}",
+                    document_id="doc1",
+                    name=f"NoPath{index}",
+                    entity_type="concept",
+                    description=f"No-path entity {index}",
+                    source_chunk_ids=[f"chunk_no_path_{index}"],
+                ),
+                score=float(10 - index),
+                matched_terms=[f"NoPath{index}"],
+            )
+            for index in range(10)
+        ] + [
+            MiniEntityCandidate(
+                entity=EntityEvidence(
+                    entity_id="entity_with_path",
+                    document_id="doc1",
+                    name="WithPath",
+                    entity_type="concept",
+                    description="Entity with relation-backed path",
+                    source_chunk_ids=["chunk_with_path_entity"],
+                ),
+                score=100.0,
+                matched_terms=["WithPath"],
+            )
+        ]
+
+
+def test_minirag_parity_keeps_top_20_percent_no_path_candidates() -> None:
+    class RelationBackedPathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return [
+                _path(
+                    "path_with_relation",
+                    ["entity_with_path", "entity_answer"],
+                    ["relation_with_path"],
+                    ["chunk_with_path"],
+                    candidate_group_id="entity_with_path",
+                    candidate_rank=0,
+                )
+            ]
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=ManyEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RelationBackedPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG recover sources?", top_k=4)
+
+    chunk_ids = [chunk.chunk_id for chunk in result.chunks]
+    assert "chunk_with_path" in chunk_ids
+    assert "chunk_no_path_0" in chunk_ids
+    assert "chunk_no_path_1" in chunk_ids
+    assert "chunk_no_path_2" not in chunk_ids
+    no_path_chunks = [
+        chunk
+        for chunk in result.chunks
+        if chunk.metadata["source_score_components"].get("no_path_candidate", 0.0)
+    ]
+    assert len(no_path_chunks) == 2
+    assert {chunk.metadata["supporting_path_ids"][0] for chunk in no_path_chunks} == {
+        "no_path_entity_no_path_0",
+        "no_path_entity_no_path_1",
+    }
+
+
+def test_minirag_parity_keeps_at_least_one_no_path_candidate() -> None:
+    class ThreeEntityIndex:
+        def query_entities(
+            self,
+            entity_texts: list[str],
+            top_k: int,
+        ) -> list[MiniEntityCandidate]:
+            return [
+                MiniEntityCandidate(
+                    entity=EntityEvidence(
+                        entity_id=f"entity_no_path_{index}",
+                        document_id="doc1",
+                        name=f"NoPath{index}",
+                        entity_type="concept",
+                        description=f"No-path entity {index}",
+                        source_chunk_ids=[f"chunk_no_path_{index}"],
+                    ),
+                    score=float(3 - index),
+                    matched_terms=[f"NoPath{index}"],
+                )
+                for index in range(3)
+            ]
+
+    class EmptyPathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return []
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=ThreeEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=EmptyPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG recover sources?", top_k=3)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_no_path_0"]
+    assert result.chunks[0].metadata["supporting_path_ids"] == [
+        "no_path_entity_no_path_0"
+    ]

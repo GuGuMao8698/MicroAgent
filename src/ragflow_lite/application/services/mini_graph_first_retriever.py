@@ -146,11 +146,16 @@ class MiniGraphFirstRetriever:
             top_k=relationship_candidate_n,
         )
 
-        # 第 4 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径
-        paths = self.path_expander.expand_paths(
+        # 第 4 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径，再补充无路径候选
+        relation_paths = self.path_expander.expand_paths(
             seed_entity_ids=_entity_ids(entity_candidates),
             seed_relation_ids=_relation_ids(relationship_candidates),
             max_hops=self.path_hop_limit,
+        )
+        paths = _merge_trimmed_no_path_candidates(
+            entity_candidates,
+            relation_paths,
+            relationship_candidates,
         )[: self.path_candidate_k]
 
         # 第 5 步: chunk 辅助检索（可选）—— 作为评分加成与兜底
@@ -438,6 +443,107 @@ def _path_candidate_rank(path: TopologyPath) -> int | None:
     return None
 
 
+def _relation_backed_candidate_groups(paths: list[TopologyPath]) -> set[str]:
+    """收集已有关系路径支撑的实体 ID。
+
+    判定方式：如果路径包含 relation_ids，则该路径上所有 entity_ids 和
+    candidate_group_id 都视为已覆盖。这样即使 path_expander 未设置
+    candidate_group_id（如默认 RecordingPathExpander），只要实体出现在
+    有关系边的路径上就不会被当作"无路径候选"重复引入。
+    """
+    groups: set[str] = set()
+    for path in paths:
+        if not path.relation_ids:
+            continue
+        if path.candidate_group_id:
+            groups.add(path.candidate_group_id)
+        for eid in path.entity_ids:
+            groups.add(eid)
+    return groups
+
+
+def _relation_endpoint_entity_ids(
+    relationship_candidates: list[MiniRelationshipCandidate],
+) -> set[str]:
+    """从关系候选中提取所有端点实体 ID。
+
+    如果一个实体作为关系端点出现，说明它已被关系索引覆盖，
+    不应再被当作"无路径候选"重复引入。
+    """
+    entity_ids: set[str] = set()
+    for candidate in relationship_candidates:
+        relation = candidate.relation
+        if relation.source_entity_id:
+            entity_ids.add(relation.source_entity_id)
+        if relation.target_entity_id:
+            entity_ids.add(relation.target_entity_id)
+    return entity_ids
+
+
+def _no_path_candidate_paths(
+    entity_candidates: list[MiniEntityCandidate],
+    relation_paths: list[TopologyPath],
+    relationship_candidates: list[MiniRelationshipCandidate] | None = None,
+) -> list[TopologyPath]:
+    """为没有关系路径支撑的实体候选生成合成 TopologyPath。
+
+    MiniRAG 的策略：先按 score 降序、path_id 升序对无路径候选排序，
+    再截取前 20%（至少保留 1 个），而非与关系路径全局混合排序。
+    这保证了低连通度但高相关性的实体不被关系路径淹没。
+
+    判定"已有支撑"的依据：实体出现在某条有关系边的路径上，
+    或实体是某条关系候选的端点。后者防止"实体已作为种子参与扩展
+    但扩展器未返回该实体路径"的场景误生成无路径候选。
+    """
+    relation_backed_groups = _relation_backed_candidate_groups(relation_paths)
+    # 补充：关系候选端点也视为已覆盖
+    if relationship_candidates is not None:
+        relation_backed_groups |= _relation_endpoint_entity_ids(relationship_candidates)
+    candidates: list[TopologyPath] = []
+    for rank, candidate in enumerate(entity_candidates):
+        entity = candidate.entity
+        if entity.entity_id in relation_backed_groups:
+            continue
+        if not entity.source_chunk_ids:
+            continue
+        candidates.append(
+            TopologyPath(
+                path_id=f"no_path_{entity.entity_id}",
+                document_id=entity.document_id,
+                entity_ids=[entity.entity_id],
+                relation_ids=[],
+                source_chunk_ids=list(entity.source_chunk_ids),
+                score=candidate.score,
+                candidate_group_id=entity.entity_id,
+                candidate_rank=rank,
+                metadata={
+                    "hop_count": 0,
+                    "no_path_candidate": True,
+                    "candidate_score": candidate.score,
+                    "answer_type_hit_count": 0,
+                },
+            )
+        )
+    # 内部排序后再截取：保证最高分的无路径候选优先保留
+    candidates.sort(key=lambda path: (-path.score, path.path_id))
+    if not candidates:
+        return []
+    # 至少保留 1 个，避免极端情况下所有无路径候选被丢弃
+    keep_n = max(1, int(len(candidates) * 0.2))
+    return candidates[:keep_n]
+
+
+def _merge_trimmed_no_path_candidates(
+    entity_candidates: list[MiniEntityCandidate],
+    relation_paths: list[TopologyPath],
+    relationship_candidates: list[MiniRelationshipCandidate] | None = None,
+) -> list[TopologyPath]:
+    """合并关系路径与截断后的无路径候选。关系路径保持原序在前，无路径候选追加在后。"""
+    return relation_paths + _no_path_candidate_paths(
+        entity_candidates, relation_paths, relationship_candidates
+    )
+
+
 def _first_candidate_multiplier(path: TopologyPath) -> float:
     """MiniRAG kwd2chunk first candidate multiplier：每个候选组 rank 0 为 2x。"""
     candidate_rank = _path_candidate_rank(path)
@@ -468,6 +574,7 @@ def _score_source_chunks(
             "first_candidate_multiplier": 1.0,
             "auxiliary_path_multiplier": 1.0,
             "auxiliary_chunk_hit": 0.0,
+            "no_path_candidate": 0.0,
         }
     )
     supporting_entity_ids: dict[str, list[str]] = defaultdict(list)
@@ -478,6 +585,7 @@ def _score_source_chunks(
         if not path.source_chunk_ids:
             continue
         answer_hit_count = _path_answer_hit_count(path)
+        no_path_candidate = bool(path.metadata.get("no_path_candidate"))
         edge_vote_count = _edge_vote_count(path, relationship_candidates)
         path_weight = _path_chunk_weight(answer_hit_count, edge_vote_count)
         candidate_multiplier = _first_candidate_multiplier(path)
@@ -514,6 +622,9 @@ def _score_source_chunks(
                 if chunk_id in auxiliary_hit_ids
                 else components["auxiliary_chunk_hit"]
             )
+            # 标记来自无路径候选的 chunk，供下游 score_components 识别
+            if no_path_candidate:
+                components["no_path_candidate"] = 1.0
             supporting_entity_ids[chunk_id].extend(path.entity_ids)
             supporting_relation_ids[chunk_id].extend(path.relation_ids)
             supporting_path_ids[chunk_id].append(path.path_id)

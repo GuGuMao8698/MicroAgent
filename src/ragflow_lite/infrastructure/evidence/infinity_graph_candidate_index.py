@@ -114,6 +114,59 @@ def _parse_string_list(raw: Any) -> list[str]:
     return []
 
 
+RELATIONSHIP_OUTPUT_FIELDS = [
+    "candidate_id",
+    "canonical_id",
+    "document_id",
+    "source_entity_id",
+    "target_entity_id",
+    "source_entity_name",
+    "target_entity_name",
+    "relationship_description_tks",
+    "keywords",
+    "weight",
+    "source_chunk_ids",
+    "metadata",
+    "_score",
+]
+
+
+def _parse_json_object(raw: Any) -> dict[str, Any]:
+    """Parse a varchar-backed JSON object from an Infinity row."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return dict(parsed)
+    return {}
+
+
+def _string_field(row: dict[str, Any], name: str) -> str:
+    """Extract a string field from a row, defaulting to empty string."""
+    value = row.get(name)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _float_field(row: dict[str, Any], name: str) -> float:
+    """Extract a float field from a row, defaulting to 0.0."""
+    value = row.get(name)
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
     """Build Infinity SDK-compatible dense-match optional parameters."""
     return {"threshold": str(similarity_threshold)}
@@ -122,6 +175,64 @@ def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
 def _minimum_should_match_option(minimum_should_match: float) -> str:
     """Build Infinity fulltext option using the server's percent format."""
     return f"{int(minimum_should_match * 100)}%"
+
+
+def _relationship_candidate_from_row(
+    row_dict: dict[str, Any],
+    config: GraphCandidateInfinityConfig,
+) -> MiniRelationshipCandidate:
+    """Map a single Infinity relationship row to a MiniRelationshipCandidate.
+
+    Args:
+        row_dict: A named row from the Infinity Polars result.
+        config: The index config used to record fusion parameters in metadata.
+
+    Returns:
+        A fully-populated MiniRelationshipCandidate with endpoint fields,
+        description, keywords, weight and source_chunk_ids filled from
+        the row data, plus retrieval metadata.
+    """
+    canonical_id = _string_field(row_dict, "canonical_id")
+    candidate_id = _string_field(row_dict, "candidate_id") or canonical_id
+    score = _resolve_score(row_dict)
+    metadata = _parse_json_object(row_dict.get("metadata"))
+    metadata.update(
+        {
+            "retrieval_mode": "graph_candidate_infinity_hybrid",
+            "candidate_kind": "relationship",
+            "candidate_id": candidate_id,
+            "canonical_id": canonical_id,
+            "score": score,
+            "fusion_method": "weighted_sum",
+            "fusion_weights": {
+                "text": config.text_weight,
+                "dense": config.dense_weight,
+            },
+            "minimum_should_match": config.minimum_should_match,
+            "dense_similarity_threshold": config.dense_similarity_threshold,
+            "graph_initial_recall_n": config.graph_initial_recall_n,
+            "field_boosts": RELATIONSHIP_MATCH_TEXT_FIELDS,
+        }
+    )
+    relation = RelationEvidence(
+        relation_id=canonical_id,
+        document_id=_string_field(row_dict, "document_id"),
+        source_entity_id=_string_field(row_dict, "source_entity_id"),
+        target_entity_id=_string_field(row_dict, "target_entity_id"),
+        source_entity_name=_string_field(row_dict, "source_entity_name"),
+        target_entity_name=_string_field(row_dict, "target_entity_name"),
+        description=_string_field(row_dict, "relationship_description_tks"),
+        keywords=_parse_string_list(row_dict.get("keywords")),
+        weight=_float_field(row_dict, "weight"),
+        source_chunk_ids=_parse_string_list(row_dict.get("source_chunk_ids")),
+        metadata=metadata,
+    )
+    return MiniRelationshipCandidate(
+        relation=relation,
+        score=score,
+        matched_terms=[],
+        metadata=metadata,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -490,16 +601,7 @@ class InfinityGraphCandidateIndex:
                         "normalize": self._config.fusion_normalize,
                     },
                 )
-                .output(
-                    [
-                        "candidate_id",
-                        "canonical_id",
-                        "document_id",
-                        "source_chunk_ids",
-                        "metadata",
-                        "_score",
-                    ]
-                )
+                .output(RELATIONSHIP_OUTPUT_FIELDS)
                 .to_pl()
             )
 
@@ -512,50 +614,7 @@ class InfinityGraphCandidateIndex:
             canonical_id = str(row_dict.get("canonical_id", ""))
             if not canonical_id:
                 continue
-
-            score = _resolve_score(row_dict)
-            candidate_id = str(row_dict.get("candidate_id", canonical_id))
-
-            metadata: dict[str, Any] = {
-                "retrieval_mode": "graph_candidate_infinity_hybrid",
-                "candidate_kind": "relationship",
-                "candidate_id": candidate_id,
-                "canonical_id": canonical_id,
-                "score": score,
-                "fusion_method": "weighted_sum",
-                "fusion_weights": {
-                    "text": self._config.text_weight,
-                    "dense": self._config.dense_weight,
-                },
-                "minimum_should_match": self._config.minimum_should_match,
-                "dense_similarity_threshold": self._config.dense_similarity_threshold,
-                "graph_initial_recall_n": self._config.graph_initial_recall_n,
-                "field_boosts": RELATIONSHIP_MATCH_TEXT_FIELDS,
-            }
-
-            candidate = MiniRelationshipCandidate(
-                relation=RelationEvidence(
-                    relation_id=canonical_id,
-                    document_id=str(row_dict.get("document_id", "")),
-                    source_entity_id="",
-                    target_entity_id="",
-                    source_entity_name="",
-                    target_entity_name="",
-                    description="",
-                    keywords=[],
-                    weight=0.0,
-                    source_chunk_ids=_parse_string_list(
-                        row_dict.get("source_chunk_ids")
-                    ),
-                    metadata=metadata,
-                ),
-                score=score,
-                matched_terms=[],
-                metadata=metadata,
-            )
-            candidates.append(candidate)
-
-        candidates.sort(key=lambda c: c.score, reverse=True)
+            candidates.append(_relationship_candidate_from_row(row_dict, self._config))
         return candidates[:top_k]
 
     # ------------------------------------------------------------------
