@@ -307,8 +307,10 @@ class MiniGraphFirstRetriever:
         sources: list[GraphFirstSource] = []
         for rank, support in enumerate(supports):
             selected_for_answer = rank < top_k
-            selected_for_discourse = (
-                selected_for_answer and rank < effective_discourse_n
+            selected_for_discourse = rank < effective_discourse_n
+            metadata = dict(support.metadata)
+            metadata["supplemental_discourse"] = (
+                selected_for_discourse and not selected_for_answer
             )
             sources.append(
                 GraphFirstSource(
@@ -323,7 +325,7 @@ class MiniGraphFirstRetriever:
                     selected_for_answer=selected_for_answer,
                     selected_for_discourse=selected_for_discourse,
                     selection_reason=self._selection_reason(support, fallback_reason),
-                    metadata=dict(support.metadata),
+                    metadata=metadata,
                 )
             )
         return GraphFirstSourceSelection(
@@ -375,6 +377,11 @@ class MiniGraphFirstRetriever:
                 source.chunk_id
                 for source in selection.sources
                 if source.selected_for_discourse
+            ],
+            "supplemental_discourse_chunk_ids": [
+                source.chunk_id
+                for source in selection.sources
+                if source.selected_for_discourse and not source.selected_for_answer
             ],
             "omitted_source_count": selection.omitted_source_count,
             "fallback_reason": selection.fallback_reason,

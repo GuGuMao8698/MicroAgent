@@ -1195,3 +1195,57 @@ def test_minirag_parity_keeps_at_least_one_no_path_candidate() -> None:
     assert result.chunks[0].metadata["supporting_path_ids"] == [
         "no_path_entity_no_path_0"
     ]
+
+
+def test_discourse_selection_includes_answer_chunks_and_supplemental_chunks() -> None:
+    paths = [
+        _path(
+            f"path_{index}",
+            [f"entity_{index}", f"entity_next_{index}"],
+            [f"relation_{index}"],
+            [f"chunk_{index}"],
+            answer_hit_count=0,
+            candidate_group_id=f"entity_{index}",
+            candidate_rank=index,
+        )
+        for index in range(5)
+    ]
+
+    class FivePathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return paths
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=FivePathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        discourse_selection_n=4,
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG organize evidence?", top_k=2)
+
+    summary = result.metadata["source_selection"]
+    assert summary["selected_answer_chunk_ids"] == ["chunk_0", "chunk_1"]
+    assert summary["selected_discourse_chunk_ids"] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+    ]
+    assert summary["supplemental_discourse_chunk_ids"] == ["chunk_2", "chunk_3"]
+
+    source_by_id = {
+        source.chunk_id: source for source in result.source_selection.sources
+    }
+    assert source_by_id["chunk_0"].selected_for_answer is True
+    assert source_by_id["chunk_0"].selected_for_discourse is True
+    assert source_by_id["chunk_2"].selected_for_answer is False
+    assert source_by_id["chunk_2"].selected_for_discourse is True
+    assert source_by_id["chunk_2"].metadata["supplemental_discourse"] is True
