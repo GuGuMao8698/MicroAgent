@@ -5,6 +5,7 @@ from ragflow_lite.application.services.evidence_package_builder import (
 )
 from ragflow_lite.domain.models import (
     EvidencePackage,
+    GraphFirstSource,
     GraphFirstSourceSelection,
     GroundedQuery,
     RetrievedChunk,
@@ -343,7 +344,6 @@ class TestSourceSelectionMetadata:
         self,
     ) -> None:
         from ragflow_lite.domain.models import (
-            GraphFirstSource,
             GraphFirstSourceSelection,
         )
 
@@ -407,3 +407,85 @@ class TestSourceSelectionMetadata:
         assert package.metadata["source_selection"]["selected_discourse_chunk_ids"] == [
             "c1",
         ]
+
+
+def test_build_includes_supplemental_discourse_items_from_source_selection() -> None:
+    answer_chunk = RetrievedChunk(
+        chunk_id="chunk_answer",
+        document_id="doc1",
+        text="Answer evidence",
+        score=2.0,
+        metadata={"filename": "doc.md"},
+    )
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc1",
+        text="Supplemental qualifier",
+        score=1.0,
+        metadata={"filename": "doc.md"},
+    )
+    selection = GraphFirstSourceSelection(
+        sources=[
+            GraphFirstSource(
+                chunk_id="chunk_answer",
+                rank=0,
+                score=2.0,
+                score_components={"minirag_counter_score": 2.0},
+                supporting_entity_ids=[],
+                supporting_relation_ids=[],
+                supporting_path_ids=[],
+                auxiliary_chunk_hit=False,
+                selected_for_answer=True,
+                selected_for_discourse=True,
+                selection_reason="graph_path_support",
+            ),
+            GraphFirstSource(
+                chunk_id="chunk_supplemental",
+                rank=1,
+                score=1.0,
+                score_components={"minirag_counter_score": 1.0},
+                supporting_entity_ids=[],
+                supporting_relation_ids=[],
+                supporting_path_ids=[],
+                auxiliary_chunk_hit=False,
+                selected_for_answer=False,
+                selected_for_discourse=True,
+                selection_reason="graph_relation_support",
+                metadata={"supplemental_discourse": True},
+            ),
+        ],
+        final_context_k=1,
+        discourse_selection_k=2,
+        context_token_budget=None,
+        omitted_source_count=0,
+    )
+    result = TopologyRetrievalResult(
+        query="q",
+        grounded_query=GroundedQuery(
+            query="q",
+            answer_type_keywords=[],
+            entities_from_query=[],
+        ),
+        chunks=[answer_chunk],
+        paths=[],
+        source_selection=selection,
+        metadata={
+            "supplemental_discourse_chunks": {"chunk_supplemental": supplemental_chunk}
+        },
+    )
+
+    package = EvidencePackageBuilder().build(result)
+
+    assert [item.canonical_chunk_id for item in package.items] == [
+        "chunk_answer",
+        "chunk_supplemental",
+    ]
+    answer_item, supplemental_item = package.items
+    assert answer_item.metadata["selected_for_answer"] is True
+    assert answer_item.metadata["selected_for_discourse"] is True
+    assert supplemental_item.metadata["selected_for_answer"] is False
+    assert supplemental_item.metadata["selected_for_discourse"] is True
+    assert supplemental_item.metadata["supplemental_discourse"] is True
+    assert package.metadata["source_selection"]["supplemental_discourse_chunk_ids"] == [
+        "chunk_supplemental"
+    ]

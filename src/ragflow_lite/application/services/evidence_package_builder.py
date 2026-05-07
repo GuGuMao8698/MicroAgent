@@ -6,6 +6,7 @@ from ragflow_lite.domain.models import (
     EvidenceProvenance,
     GraphFirstSource,
     GraphFirstSourceSelection,
+    RetrievedChunk,
     TopologyRetrievalResult,
 )
 
@@ -14,6 +15,27 @@ class EvidencePackageBuilder:
     def build(self, result: TopologyRetrievalResult) -> EvidencePackage:
         # 按 chunk_id 建立 source 查找表，用于后续元数据注入
         source_by_chunk = _source_by_chunk(result.source_selection)
+
+        # 从 metadata 中提取补充语篇 chunk 查找表
+        supplemental_chunks_by_id = result.metadata.get(
+            "supplemental_discourse_chunks", {}
+        )
+        if not isinstance(supplemental_chunks_by_id, dict):
+            supplemental_chunks_by_id = {}
+
+        # 补充语篇 chunk：selected_for_discourse 且未选入 answer 的 source 对应 chunk
+        chunks_for_evidence = list(result.chunks)
+        answer_chunk_ids = {chunk.chunk_id for chunk in result.chunks}
+        if result.source_selection is not None:
+            for source in result.source_selection.sources:
+                if not source.selected_for_discourse or source.selected_for_answer:
+                    continue
+                candidate = supplemental_chunks_by_id.get(source.chunk_id)
+                if (
+                    isinstance(candidate, RetrievedChunk)
+                    and source.chunk_id not in answer_chunk_ids
+                ):
+                    chunks_for_evidence.append(candidate)
 
         # Path refs to chunks not in result.chunks are silently ignored;
         # TopologyRetrievalResult guarantees all source_chunk_ids are present.
@@ -27,7 +49,7 @@ class EvidencePackageBuilder:
         seen: dict[str, int] = {}
         items: list[EvidenceItem] = []
         order = 0
-        for chunk in result.chunks:
+        for chunk in chunks_for_evidence:
             cid = chunk.chunk_id
             if cid in seen:
                 existing = items[seen[cid]]
@@ -127,6 +149,7 @@ def _source_metadata(source: GraphFirstSource | None) -> dict[str, object]:
     if source is None:
         return {}
     return {
+        **dict(source.metadata),
         "source_selection_rank": source.rank,
         "selected_for_answer": source.selected_for_answer,
         "selected_for_discourse": source.selected_for_discourse,
@@ -161,4 +184,9 @@ def _selection_summary(
         ],
         "omitted_source_count": selection.omitted_source_count,
         "fallback_reason": selection.fallback_reason,
+        "supplemental_discourse_chunk_ids": [
+            source.chunk_id
+            for source in selection.sources
+            if source.selected_for_discourse and not source.selected_for_answer
+        ],
     }
