@@ -51,14 +51,24 @@ class TestQueryRequestTopN:
         assert req.top_n == 8
 
     def test_top_n_below_minimum_raises(self) -> None:
-        """top_n < 1 时校验失败。"""
+        """top_n < 2 时校验失败。"""
         with pytest.raises(ValueError):
-            QueryRequest(query="test", top_n=0)
+            QueryRequest(query="test", top_n=1)
+
+    def test_top_k_below_minimum_raises(self) -> None:
+        """top_k < 2 时校验失败。"""
+        with pytest.raises(ValueError):
+            QueryRequest(query="test", top_k=1)
 
     def test_top_n_above_maximum_raises(self) -> None:
-        """top_n > 10 时校验失败。"""
+        """top_n > 8 时校验失败。"""
         with pytest.raises(ValueError):
-            QueryRequest(query="test", top_n=11)
+            QueryRequest(query="test", top_n=9)
+
+    def test_top_k_above_maximum_raises(self) -> None:
+        """top_k > 8 时校验失败。"""
+        with pytest.raises(ValueError):
+            QueryRequest(query="test", top_k=9)
 
     def test_answer_top_n_property_returns_top_n(self) -> None:
         """answer_top_n 属性返回 top_n 的值。"""

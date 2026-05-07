@@ -61,8 +61,8 @@ class QueryRequest(BaseModel):
 
     query: str = Field(min_length=1)
     # 回答预算：top_n 是正式字段，top_k 作为过渡别名
-    top_n: int = Field(default=6, ge=1, le=10)
-    top_k: int | None = Field(default=None, ge=1, le=10, exclude=True)
+    top_n: int = Field(default=6, ge=2, le=8)
+    top_k: int | None = Field(default=None, ge=2, le=8, exclude=True)
     mode: Literal["standard", "discorag"] = "standard"
 
     @field_validator("query")
