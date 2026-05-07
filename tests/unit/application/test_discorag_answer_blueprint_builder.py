@@ -410,3 +410,66 @@ def test_build_with_empty_inter_chunk_graph_preserves_existing_order() -> None:
 
     assert blueprint.ordered_chunk_ids == ["chunk_a", "chunk_b", "chunk_c"]
     assert blueprint.metadata["inter_chunk_relation_count"] == 0
+
+
+def test_blueprint_supports_relation_does_not_promote_supplemental_chunk() -> None:
+    package = _package(
+        items=[
+            _evidence_item("chunk_answer", order=0),
+            _evidence_item("chunk_supplemental", order=1),
+        ]
+    )
+    package.evidence_package.items[0].metadata["selected_for_answer"] = True
+    package.evidence_package.items[1].metadata["selected_for_answer"] = False
+    package.evidence_package.items[1].metadata["supplemental_discourse"] = True
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_answer", "chunk_supplemental"],
+        relations=[
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_supplemental",
+                target_chunk_id="chunk_answer",
+                relation_type="supports",
+                rationale="Supplemental reinforces answer.",
+                confidence=0.7,
+            )
+        ],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    assert blueprint.metadata["promoted_chunk_ids"] == []
+    assert "supports" in blueprint.metadata["inter_chunk_relation_types"]
+
+
+def test_blueprint_adds_caution_for_contradiction_relation() -> None:
+    package = _package(
+        items=[
+            _evidence_item("chunk_answer", order=0),
+            _evidence_item("chunk_supplemental", order=1),
+        ]
+    )
+    package.evidence_package.items[0].metadata["selected_for_answer"] = True
+    package.evidence_package.items[1].metadata["selected_for_answer"] = False
+    package.evidence_package.items[1].metadata["supplemental_discourse"] = True
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_answer", "chunk_supplemental"],
+        relations=[
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_supplemental",
+                target_chunk_id="chunk_answer",
+                relation_type="contradicts",
+                rationale="Supplemental changes the conclusion.",
+                confidence=0.8,
+            )
+        ],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    assert "chunk_supplemental" in blueprint.metadata["promoted_chunk_ids"]
+    assert any(
+        "contradiction" in constraint.lower() or "conflict" in constraint.lower()
+        for constraint in blueprint.answer_constraints
+    )
