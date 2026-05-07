@@ -25,6 +25,10 @@ from ragflow_lite.application.services import (
     QueryModeRouter,
 )
 from ragflow_lite.config import Settings
+from ragflow_lite.domain.models import (
+    InterChunkDiscourseGraph,
+    IntraChunkDiscoursePackage,
+)
 from ragflow_lite.domain.ports.interfaces import (
     IngestionStageCache,
     IngestionTaskStore,
@@ -105,6 +109,21 @@ def _build_retriever(
     vector_index: InfinityDenseVectorIndex,
 ) -> Retriever:
     return InfinityHybridRetriever(embedder=embedder, vector_index=vector_index)
+
+
+@dataclass
+class _NoOpInterChunkGraphBuilder:
+    """No-op graph builder returning empty relations; replaced when real impl lands."""
+
+    def build(self, package: IntraChunkDiscoursePackage) -> InterChunkDiscourseGraph:
+        return InterChunkDiscourseGraph(
+            query=package.query,
+            chunk_ids=[
+                item.canonical_chunk_id for item in package.evidence_package.items
+            ],
+            relations=[],
+            metadata={"builder": "no-op"},
+        )
 
 
 def build_services(settings: Settings) -> AppServices:
@@ -206,6 +225,7 @@ def build_services(settings: Settings) -> AppServices:
         retriever=retriever,
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=discourse_extractor,
+        inter_chunk_graph_builder=_NoOpInterChunkGraphBuilder(),
         blueprint_builder=DiscoRAGAnswerBlueprintBuilder(),
         answerer=answerer,
     )

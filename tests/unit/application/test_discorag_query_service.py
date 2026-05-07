@@ -19,6 +19,7 @@ from ragflow_lite.domain.models import (
     AnswerResult,
     EvidencePackage,
     GroundedQuery,
+    InterChunkDiscourseGraph,
     IntraChunkDiscoursePackage,
     RetrievedChunk,
     TopologyRetrievalResult,
@@ -80,8 +81,26 @@ class RecordingDiscourseExtractor:
 
 
 @dataclass
+class RecordingGraphBuilder:
+    last_package: IntraChunkDiscoursePackage | None = None
+    graph: InterChunkDiscourseGraph = field(
+        default_factory=lambda: InterChunkDiscourseGraph(
+            query="How does MiniRAG organize evidence?",
+            chunk_ids=["chunk_a"],
+            relations=[],
+            metadata={"builder": "fake"},
+        )
+    )
+
+    def build(self, package: IntraChunkDiscoursePackage) -> InterChunkDiscourseGraph:
+        self.last_package = package
+        return self.graph
+
+
+@dataclass
 class RecordingBlueprintBuilder:
     last_package: IntraChunkDiscoursePackage | None = None
+    last_graph: InterChunkDiscourseGraph | None = None
     blueprint: AnswerBlueprint = field(
         default_factory=lambda: AnswerBlueprint(
             ordered_chunk_ids=["chunk_a"],
@@ -92,8 +111,13 @@ class RecordingBlueprintBuilder:
         )
     )
 
-    def build(self, package: IntraChunkDiscoursePackage) -> AnswerBlueprint:
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+        graph: InterChunkDiscourseGraph | None = None,
+    ) -> AnswerBlueprint:
         self.last_package = package
+        self.last_graph = graph
         return self.blueprint
 
 
@@ -103,7 +127,11 @@ class FailingBlueprintBuilder:
         default_factory=lambda: ProcessingError("corrupt discourse plan")
     )
 
-    def build(self, package: IntraChunkDiscoursePackage) -> AnswerBlueprint:
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+        graph: InterChunkDiscourseGraph | None = None,
+    ) -> AnswerBlueprint:
         raise self.error
 
 
@@ -129,12 +157,14 @@ def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
     retriever = FakeTopologyRetriever()
     evidence_package_builder = EvidencePackageBuilder()
     discourse_extractor = RecordingDiscourseExtractor()
+    graph_builder = RecordingGraphBuilder()
     blueprint_builder = RecordingBlueprintBuilder()
     answerer = RecordingAnswerer()
     service = DiscoRAGQueryService(
         retriever=retriever,
         evidence_package_builder=evidence_package_builder,
         discourse_extractor=discourse_extractor,
+        inter_chunk_graph_builder=graph_builder,
         blueprint_builder=blueprint_builder,
         answerer=answerer,
     )
@@ -145,6 +175,8 @@ def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
     assert retriever.calls == [("How does MiniRAG organize evidence?", 3)]
     assert discourse_extractor.last_package is not None
     assert discourse_extractor.last_package.items[0].canonical_chunk_id == "chunk_a"
+    assert graph_builder.last_package is blueprint_builder.last_package
+    assert blueprint_builder.last_graph is graph_builder.graph
     assert blueprint_builder.last_package is not None
     assert answerer.last_request == AnswerRequest(
         query="How does MiniRAG organize evidence?",
@@ -161,6 +193,7 @@ def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=RecordingBlueprintBuilder(),
         answerer=answerer,
     )
@@ -181,6 +214,7 @@ def test_discorag_query_service_logs_started_and_succeeded_and_records_metric(
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=RecordingBlueprintBuilder(),
         answerer=RecordingAnswerer(),
     )
@@ -200,6 +234,7 @@ def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=FailingBlueprintBuilder(error=error),
         answerer=answerer,
     )
@@ -222,6 +257,7 @@ def test_discorag_query_service_logs_failed_and_records_metric_on_domain_error(
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=FailingBlueprintBuilder(error=error),
         answerer=RecordingAnswerer(),
     )
@@ -246,6 +282,7 @@ def test_discorag_query_service_logs_safe_failure_fields_on_unexpected_error(
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=RecordingBlueprintBuilder(),
         answerer=RecordingAnswerer(error=RuntimeError("unexpected")),
     )
@@ -293,6 +330,7 @@ def test_discorag_query_service_passes_source_selection_summary_to_answer_reques
         retriever=retriever,
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
         blueprint_builder=RecordingBlueprintBuilder(),
         answerer=answerer,
     )

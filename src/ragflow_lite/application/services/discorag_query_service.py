@@ -13,6 +13,7 @@ from ragflow_lite.domain.errors import RagflowLiteError
 from ragflow_lite.domain.models import AnswerRequest, AnswerResult
 from ragflow_lite.domain.ports import (
     Answerer,
+    InterChunkDiscourseGraphBuilder,
     IntraChunkDiscourseExtractor,
     TopologyContextRetriever,
 )
@@ -29,12 +30,14 @@ class DiscoRAGQueryService:
         retriever: TopologyContextRetriever,
         evidence_package_builder: EvidencePackageBuilder,
         discourse_extractor: IntraChunkDiscourseExtractor,
+        inter_chunk_graph_builder: InterChunkDiscourseGraphBuilder,
         blueprint_builder: DiscoRAGAnswerBlueprintBuilder,
         answerer: Answerer,
     ) -> None:
         self.retriever = retriever
         self.evidence_package_builder = evidence_package_builder
         self.discourse_extractor = discourse_extractor
+        self.inter_chunk_graph_builder = inter_chunk_graph_builder
         self.blueprint_builder = blueprint_builder
         self.answerer = answerer
 
@@ -51,7 +54,11 @@ class DiscoRAGQueryService:
             retrieval_result = self.retriever.retrieve_context(query, top_k)
             evidence_package = self.evidence_package_builder.build(retrieval_result)
             discourse_package = self.discourse_extractor.extract(evidence_package)
-            blueprint = self.blueprint_builder.build(discourse_package)
+            inter_chunk_graph = self.inter_chunk_graph_builder.build(discourse_package)
+            blueprint = self.blueprint_builder.build(
+                discourse_package,
+                graph=inter_chunk_graph,
+            )
             result = self.answerer.answer(
                 AnswerRequest(
                     query=query,
