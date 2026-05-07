@@ -14,6 +14,7 @@ from ragflow_lite.domain.models import (
     MiniRelationshipCandidate,
     RelationEvidence,
     RetrievedChunk,
+    SourceChunkSupport,
     TopologyPath,
 )
 
@@ -146,6 +147,25 @@ class RecordingAuxiliaryRetriever:
                 score=0.7,
                 metadata={},
             )
+        ]
+
+
+class ManyAuxiliaryRetriever:
+    def __init__(self, chunk_count: int) -> None:
+        self.chunk_count = chunk_count
+        self.calls: list[tuple[str, int]] = []
+
+    def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
+        self.calls.append((query, top_k))
+        return [
+            RetrievedChunk(
+                chunk_id=f"chunk_{index}",
+                document_id="doc1",
+                text=f"auxiliary hit {index}",
+                score=float(self.chunk_count - index),
+                metadata={},
+            )
+            for index in range(self.chunk_count)
         ]
 
 
@@ -394,6 +414,38 @@ def test_mini_graph_first_retriever_source_selection_records_empty_grounding_fal
     assert selection.sources[0].selected_for_answer is True
     assert selection.sources[0].selected_for_discourse is True
     assert result.chunks[0].metadata["fallback_reason"] == "empty_grounding"
+
+
+def test_empty_grounding_fallback_keeps_supplemental_discourse_out_of_answer_contexts() -> (
+    None
+):
+    auxiliary_retriever = ManyAuxiliaryRetriever(chunk_count=4)
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=EmptyGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=auxiliary_retriever,
+    )
+
+    result = retriever.retrieve_context("unknown", top_k=2)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_0", "chunk_1"]
+    assert result.source_selection is not None
+    assert result.source_selection.discourse_selection_k == 4
+    summary = result.metadata["source_selection"]
+    assert summary["selected_answer_chunk_ids"] == ["chunk_0", "chunk_1"]
+    assert summary["selected_discourse_chunk_ids"] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+    ]
+    supplemental = result.metadata["supplemental_discourse_chunks"]
+    assert list(supplemental) == ["chunk_2", "chunk_3"]
+    assert supplemental["chunk_2"].metadata["selected_for_answer"] is False
+    assert supplemental["chunk_2"].metadata["selected_for_discourse"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -795,15 +847,15 @@ def test_budget_defaults_derive_correctly_from_mini_internal_candidate_n() -> No
     assert len(auxiliary_retriever.calls) == 1
     assert auxiliary_retriever.calls[0][1] == 30
 
-    # 4. discourse_selection_n 默认等于 answer_top_n = 6
+    # 4. discourse_selection_n 默认等于 answer_top_n * 2 = 12
     # 通过 source_selection.discourse_selection_k 验证
     result = retriever.retrieve_context("test query", top_k=6)
     assert result.source_selection is not None
-    assert result.source_selection.discourse_selection_k == 6
+    assert result.source_selection.discourse_selection_k == 12
 
 
-def test_discourse_selection_defaults_to_answer_top_n() -> None:
-    """discourse_selection_n 未显式设置时，应默认等于 answer_top_n（即 top_k）。"""
+def test_discourse_selection_defaults_to_twice_answer_top_n() -> None:
+    """discourse_selection_n 未显式设置时，应默认给 DiscoRAG 暴露 2 倍答案候选。"""
     grounder = RecordingGrounder()
     entity_index = RecordingEntityIndex()
     relationship_index = RecordingRelationshipIndex()
@@ -821,7 +873,41 @@ def test_discourse_selection_defaults_to_answer_top_n() -> None:
 
     result = retriever.retrieve_context("How does MiniRAG work?", top_k=4)
     assert result.source_selection is not None
-    assert result.source_selection.discourse_selection_k == 4
+    assert result.source_selection.discourse_selection_k == 8
+
+
+def test_build_source_selection_defaults_to_twice_answer_top_n() -> None:
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+    )
+    supports = [
+        SourceChunkSupport(
+            chunk_id=f"chunk_{index}",
+            score=float(10 - index),
+            score_components={},
+            supporting_entity_ids=[],
+            supporting_relation_ids=[],
+            supporting_path_ids=[],
+            auxiliary_chunk_hit=False,
+        )
+        for index in range(6)
+    ]
+
+    selection = retriever._build_source_selection(supports, top_k=2)
+
+    assert retriever.discourse_selection_k is None
+    assert selection.final_context_k == 2
+    assert selection.discourse_selection_k == 4
+    assert [
+        source.chunk_id for source in selection.sources if source.selected_for_answer
+    ] == ["chunk_0", "chunk_1"]
+    assert [
+        source.chunk_id for source in selection.sources if source.selected_for_discourse
+    ] == ["chunk_0", "chunk_1", "chunk_2", "chunk_3"]
 
 
 def test_discourse_selection_n_explicit_overrides_answer_top_n() -> None:
@@ -1293,3 +1379,84 @@ def test_retrieve_context_keeps_supplemental_discourse_chunks_out_of_answer_cont
     assert supplemental["chunk_2"].chunk_id == "chunk_2"
     assert supplemental["chunk_2"].metadata["selected_for_answer"] is False
     assert supplemental["chunk_2"].metadata["selected_for_discourse"] is True
+
+
+def test_default_discourse_window_keeps_top_answer_chunks_separate_from_supplemental() -> (
+    None
+):
+    paths = [
+        _path(
+            f"path_{index:02d}",
+            [f"entity_{index}"],
+            [f"relation_{index}"],
+            [f"chunk_{index:02d}"],
+            answer_hit_count=11 - index,
+            candidate_group_id=f"entity_{index}",
+            candidate_rank=1,
+        )
+        for index in range(12)
+    ]
+
+    class TwelvePathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return paths
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=TwelvePathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG organize evidence?", top_k=6)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == [
+        "chunk_00",
+        "chunk_01",
+        "chunk_02",
+        "chunk_03",
+        "chunk_04",
+        "chunk_05",
+    ]
+    summary = result.metadata["source_selection"]
+    assert summary["selected_answer_chunk_ids"] == [
+        "chunk_00",
+        "chunk_01",
+        "chunk_02",
+        "chunk_03",
+        "chunk_04",
+        "chunk_05",
+    ]
+    assert summary["selected_discourse_chunk_ids"] == [
+        "chunk_00",
+        "chunk_01",
+        "chunk_02",
+        "chunk_03",
+        "chunk_04",
+        "chunk_05",
+        "chunk_06",
+        "chunk_07",
+        "chunk_08",
+        "chunk_09",
+        "chunk_10",
+        "chunk_11",
+    ]
+    supplemental = result.metadata["supplemental_discourse_chunks"]
+    assert list(supplemental) == [
+        "chunk_06",
+        "chunk_07",
+        "chunk_08",
+        "chunk_09",
+        "chunk_10",
+        "chunk_11",
+    ]
+    assert all(
+        chunk.metadata["selected_for_answer"] is False
+        for chunk in supplemental.values()
+    )

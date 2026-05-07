@@ -86,14 +86,14 @@ class MiniGraphFirstRetriever:
         self.path_hop_limit = path_hop_limit
         self.path_candidate_k = path_candidate_k
         self.chunk_auxiliary_candidate_n = chunk_auxiliary_candidate_n
-        # discourse_selection_n 为 None 时默认等于 answer_top_n（在 retrieve_context 中推导）
+        # discourse_selection_n 为 None 时默认等于 answer_top_n * 2（在 retrieve_context 中推导）
         self.discourse_selection_n = discourse_selection_n
         self.context_token_budget = context_token_budget
         # 保留旧属性名作为只读别名，避免下游引用立即断裂
         self.grounded_entity_k = self.mini_internal_candidate_n
         self.relationship_candidate_k = self.mini_internal_candidate_n
         self.chunk_auxiliary_retrieval_k = self.chunk_auxiliary_candidate_n
-        self.discourse_selection_k = self.discourse_selection_n or 0
+        self.discourse_selection_k = self.discourse_selection_n
 
     def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
         """仅返回检索到的 chunk 列表（不包含路径等上下文信息）。"""
@@ -109,8 +109,10 @@ class MiniGraphFirstRetriever:
 
         # 推导各阶段预算
         answer_top_n = top_k
-        # discourse_selection_n 未显式设置时默认等于 answer_top_n
-        discourse_selection_n = self.discourse_selection_n or answer_top_n
+        # discourse_selection_n 未显式设置时默认给 DiscoRAG 暴露一倍补充证据窗口
+        discourse_selection_n = self.discourse_selection_n or (
+            answer_top_n * _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER
+        )
 
         # 第 1 步: query grounding —— 提取实体与回答类型关键词
         grounded_query = self.query_grounder.ground(query)
@@ -240,6 +242,13 @@ class MiniGraphFirstRetriever:
             _with_fallback_metadata(chunk, "empty_grounding")
             for chunk in auxiliary_chunks[:top_k]
         ]
+        auxiliary_by_id = {chunk.chunk_id: chunk for chunk in auxiliary_chunks}
+        supplemental_chunks = {
+            chunk.chunk_id: _with_source_selection_metadata(chunk, source)
+            for source in selection.sources
+            if source.selected_for_discourse and not source.selected_for_answer
+            if (chunk := auxiliary_by_id.get(source.chunk_id)) is not None
+        }
         return TopologyRetrievalResult(
             query=query,
             grounded_query=grounded_query,
@@ -248,6 +257,7 @@ class MiniGraphFirstRetriever:
             metadata={
                 "retrieval_mode": "mini_graph_first",
                 "source_selection": self._source_selection_summary(selection),
+                "supplemental_discourse_chunks": supplemental_chunks,
             },
             source_selection=selection,
         )
@@ -336,9 +346,11 @@ class MiniGraphFirstRetriever:
     ) -> GraphFirstSourceSelection:
         """将评分后的 SourceChunkSupport 列表转为带选择决策的 GraphFirstSourceSelection。
 
-        discourse_selection_n 控制语篇候选数量上限；未传入时退化为 top_k。
+        discourse_selection_n 控制语篇候选数量上限；未传入时退化为 top_k * 2。
         """
-        effective_discourse_n = discourse_selection_n or top_k
+        effective_discourse_n = discourse_selection_n or (
+            top_k * _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER
+        )
         sources: list[GraphFirstSource] = []
         for rank, support in enumerate(supports):
             selected_for_answer = rank < top_k
@@ -427,6 +439,7 @@ class MiniGraphFirstRetriever:
 # MiniRAG mini-mode 评分对齐常量
 # ---------------------------------------------------------------------------
 _SCORING_POLICY = "minirag_counter_parity"
+_DEFAULT_DISCOURSE_SELECTION_MULTIPLIER = 2
 _MINIRAG_FIRST_CANDIDATE_MULTIPLIER = 2.0
 _MINIRAG_AUXILIARY_PATH_MULTIPLIER = 10.0
 _MINIRAG_PATH2CHUNK_BASE_BONUS = 1.0
