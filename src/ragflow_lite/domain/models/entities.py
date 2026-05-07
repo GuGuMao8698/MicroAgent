@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from ragflow_lite.domain.errors import ProcessingError
+
 Metadata = dict[str, Any]
 Vector = list[float]
 
@@ -311,6 +313,59 @@ class IntraChunkDiscoursePackage:
     evidence_package: EvidencePackage
     structures: list[ChunkDiscourseStructure] = field(default_factory=list)
     metadata: Metadata = field(default_factory=dict)
+
+
+# --- DiscoRAG inter-chunk discourse graph models ---
+# chunk 间稀疏话语关系，属于答案组织结构而非检索结构
+
+
+@dataclass(slots=True)
+class InterChunkDiscourseRelation:
+    """跨 chunk 话语关系 —— 表达 qualifies / contradicts 等稀疏语义连接。"""
+
+    source_chunk_id: str
+    target_chunk_id: str
+    relation_type: str
+    rationale: str | None = None
+    confidence: float | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.source_chunk_id == self.target_chunk_id:
+            raise ProcessingError(
+                "Inter-chunk discourse relation must use different chunks."
+            )
+        if not self.source_chunk_id.strip():
+            raise ProcessingError("Inter-chunk source chunk id is required.")
+        if not self.target_chunk_id.strip():
+            raise ProcessingError("Inter-chunk target chunk id is required.")
+        if not self.relation_type.strip():
+            raise ProcessingError("Inter-chunk relation type is required.")
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            raise ProcessingError(
+                "Inter-chunk relation confidence must be between 0 and 1."
+            )
+
+
+@dataclass(slots=True)
+class InterChunkDiscourseGraph:
+    """跨 chunk 话语图 —— 查询触发的 chunk 间稀疏关系集合。"""
+
+    query: str
+    chunk_ids: list[str]
+    relations: list[InterChunkDiscourseRelation] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        known_chunk_ids = set(self.chunk_ids)
+        for relation in self.relations:
+            if (
+                relation.source_chunk_id not in known_chunk_ids
+                or relation.target_chunk_id not in known_chunk_ids
+            ):
+                raise ProcessingError(
+                    "Inter-chunk discourse graph contains relation for unknown chunk."
+                )
 
 
 @dataclass(slots=True)
