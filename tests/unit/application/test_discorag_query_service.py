@@ -813,3 +813,55 @@ def test_discorag_query_service_passes_source_selection_summary_to_answer_reques
         "selected_discourse_chunk_ids": ["chunk_a"],
         "fallback_reason": None,
     }
+
+
+def test_discorag_query_service_does_not_promote_without_promoted_ids() -> None:
+    answer_chunks = [_chunk("chunk_a"), _chunk("chunk_b")]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supporting supplemental evidence",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental", "chunk_b"],
+        chunk_roles={
+            "chunk_a": "main",
+            "chunk_supplemental": "context",
+            "chunk_b": "detail",
+        },
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={"promoted_chunk_ids": []},
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_a",
+        "chunk_b",
+    ]
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_a",
+        "chunk_b",
+    ]
