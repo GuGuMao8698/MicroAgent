@@ -192,9 +192,20 @@ class DiscoRAGAnswerBlueprintBuilder:
             constraints.append(
                 "Mention contrast or conflict cautiously when discourse relations support it."
             )
-        if self._has_qualification_relation(graph):
+        if self._has_relation_type(graph, {"contradicts"}):
             constraints.append(
-                "Respect inter-chunk qualification or contradiction before stating final conclusions."
+                "Explicitly handle inter-chunk contradiction or conflict before giving a final conclusion."
+            )
+        elif self._has_relation_type(graph, {"qualifies"}):
+            constraints.append(
+                "Respect inter-chunk qualification before stating final conclusions."
+            )
+        if self._has_relation_type(
+            graph,
+            {"supports", "background_for", "elaborates", "example_of"},
+        ):
+            constraints.append(
+                "Use supporting, background, elaborating, or example relations only when grounded in provided contexts."
             )
         return constraints
 
@@ -247,6 +258,17 @@ class DiscoRAGAnswerBlueprintBuilder:
         if graph is None:
             return []
         return self._unique_ids(relation.relation_type for relation in graph.relations)
+
+    def _has_relation_type(
+        self,
+        graph: InterChunkDiscourseGraph | None,
+        relation_types: set[str],
+    ) -> bool:
+        if graph is None:
+            return False
+        return any(
+            relation.relation_type in relation_types for relation in graph.relations
+        )
 
     def _has_qualification_relation(
         self,
