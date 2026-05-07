@@ -19,6 +19,7 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 - Keep `GraphFirstSourceSelection` internal; downstream code may consume its metadata, but API responses must not depend on its full shape.
 - `QueryModeRouter` rejects unknown runtime modes and must not duplicate query business logic.
 - `MiniGraphFirstRetriever` scoring stays aligned with MiniRAG mini-mode Counter/vote behavior; do not reintroduce local weight tuning unless that task is explicit.
+- No-path entity candidates (those without relation-backed `TopologyPath`) are retained via `_merge_trimmed_no_path_candidates()` at top 20% (minimum 1) before path truncation; `no_path_candidate` is a recognized score component. Do not bypass this merge or move it after `_score_source_chunks()`.
 - `discourse_selection_n` defaults to answer budget semantics; do not confuse it with graph candidate or final context budgets.
 - Discourse extraction should consume `selected_for_discourse=True` evidence first, then fill from original order if needed.
 - `DocumentService` validates dataset existence before filtering, binding, or rebinding.
