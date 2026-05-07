@@ -312,6 +312,55 @@ def test_discorag_query_service_is_exported_from_application_services() -> None:
     assert Exported is DiscoRAGQueryService
 
 
+def test_discorag_query_service_replaces_answer_contexts_with_promoted_within_budget() -> (
+    None
+):
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental"],
+        chunk_roles={"chunk_a": "main", "chunk_supplemental": "context"},
+        answer_constraints=["Respect contradiction."],
+        plan_steps=["Use the supplemental qualifier."],
+        metadata={"promoted_chunk_ids": ["chunk_supplemental"]},
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    context_ids = [chunk.chunk_id for chunk in answerer.last_request.contexts]
+    assert len(context_ids) == 2  # bounded: 不超过原 answer context 数
+    assert "chunk_supplemental" in context_ids  # promoted 换入
+    assert "chunk_a" in context_ids  # 保留的原 answer chunk
+    # chunk_b 被挤掉，因为 promoted chunk 替换了最弱位置
+
+
 def test_discorag_query_service_passes_source_selection_summary_to_answer_request() -> (
     None
 ):
