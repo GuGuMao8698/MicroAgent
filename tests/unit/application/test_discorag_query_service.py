@@ -6,11 +6,17 @@ from dataclasses import dataclass, field
 import pytest
 
 from ragflow_lite.application.services import discorag_query_service as discorag_module
+from ragflow_lite.application.services.discorag_answer_blueprint_builder import (
+    DiscoRAGAnswerBlueprintBuilder,
+)
 from ragflow_lite.application.services.discorag_query_service import (
     DiscoRAGQueryService,
 )
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
+)
+from ragflow_lite.application.services.mini_graph_first_retriever import (
+    MiniGraphFirstRetriever,
 )
 from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
@@ -18,10 +24,13 @@ from ragflow_lite.domain.models import (
     AnswerRequest,
     AnswerResult,
     EvidencePackage,
+    GraphFirstSource,
+    GraphFirstSourceSelection,
     GroundedQuery,
     InterChunkDiscourseGraph,
     IntraChunkDiscoursePackage,
     RetrievedChunk,
+    TopologyPath,
     TopologyRetrievalResult,
 )
 from ragflow_lite.shared.observability import (
@@ -149,6 +158,66 @@ class RecordingAnswerer:
         )
 
 
+class _ServiceGrounder:
+    def ground(self, query: str) -> GroundedQuery:
+        return GroundedQuery(
+            query=query,
+            answer_type_keywords=["mechanism"],
+            entities_from_query=["MiniRAG"],
+        )
+
+
+class _ServiceEntityIndex:
+    def query_entities(self, entity_texts: list[str], top_k: int) -> list[object]:
+        return []
+
+
+class _ServiceRelationshipIndex:
+    def query_relationships(
+        self,
+        query: str,
+        answer_type_keywords: list[str],
+        top_k: int,
+    ) -> list[object]:
+        return []
+
+
+class _ServicePathExpander:
+    def expand_paths(
+        self,
+        seed_entity_ids: list[str],
+        seed_relation_ids: list[str],
+        max_hops: int,
+    ) -> list[TopologyPath]:
+        return [
+            TopologyPath(
+                path_id=f"path_{index}",
+                document_id="doc_alpha",
+                entity_ids=[f"entity_{index}"],
+                relation_ids=[f"relation_{index}"],
+                source_chunk_ids=[f"chunk_{index}"],
+                score=1.0,
+                candidate_group_id=f"entity_{index}",
+                candidate_rank=1,
+                metadata={"answer_type_hit_count": 11 - index},
+            )
+            for index in range(12)
+        ]
+
+
+class _ServiceChunkLookup:
+    def get_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
+        return [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                document_id="doc_alpha",
+                text=f"Evidence for {chunk_id}",
+                score=0.0,
+            )
+            for chunk_id in chunk_ids
+        ]
+
+
 def _event_names(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.event for record in caplog.records]
 
@@ -178,12 +247,17 @@ def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
     assert graph_builder.last_package is blueprint_builder.last_package
     assert blueprint_builder.last_graph is graph_builder.graph
     assert blueprint_builder.last_package is not None
-    assert answerer.last_request == AnswerRequest(
-        query="How does MiniRAG organize evidence?",
-        contexts=retriever.result.chunks,
-        mode="discorag",
-        blueprint=blueprint_builder.blueprint,
-        metadata={"source_selection": None},
+    assert answerer.last_request is not None
+    assert answerer.last_request.query == "How does MiniRAG organize evidence?"
+    assert answerer.last_request.contexts == retriever.result.chunks
+    assert answerer.last_request.mode == "discorag"
+    assert answerer.last_request.metadata == {"source_selection": None}
+    assert answerer.last_request.blueprint == AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a"],
+        chunk_roles={"chunk_a": "context"},
+        answer_constraints=["Follow ordered_chunk_ids."],
+        plan_steps=["Start from the first ordered chunk."],
+        metadata={"status": "ok", "answer_context_chunk_ids": ["chunk_a"]},
     )
 
 
@@ -359,6 +433,353 @@ def test_discorag_query_service_replaces_answer_contexts_with_promoted_within_bu
     assert "chunk_supplemental" in context_ids  # promoted 换入
     assert "chunk_a" in context_ids  # 保留的原 answer chunk
     # chunk_b 被挤掉，因为 promoted chunk 替换了最弱位置
+
+
+def test_discorag_query_service_blueprint_preserves_promoted_context_order() -> None:
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental", "chunk_b"],
+        chunk_roles={
+            "chunk_a": "main",
+            "chunk_supplemental": "context",
+            "chunk_b": "detail",
+        },
+        answer_constraints=["Respect qualification."],
+        plan_steps=["Use the supplemental qualifier."],
+        metadata={"promoted_chunk_ids": ["chunk_supplemental"]},
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_supplemental",
+        "chunk_a",
+    ]
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_supplemental",
+        "chunk_a",
+    ]
+
+
+def test_discorag_query_service_keeps_supplemental_discourse_out_of_answer_contexts() -> (
+    None
+):
+    answer_chunks = [
+        _chunk("chunk_0"),
+        _chunk("chunk_1"),
+        _chunk("chunk_2"),
+        _chunk("chunk_3"),
+        _chunk("chunk_4"),
+        _chunk("chunk_5"),
+    ]
+    supplemental_chunks = {
+        f"chunk_{index}": RetrievedChunk(
+            chunk_id=f"chunk_{index}",
+            document_id="doc_alpha",
+            text=f"Supplemental evidence {index}",
+            score=0.1,
+            metadata={
+                "selected_for_answer": False,
+                "selected_for_discourse": True,
+                "supplemental_discourse": True,
+            },
+        )
+        for index in range(6, 12)
+    }
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = supplemental_chunks
+    retrieval_result.metadata["source_selection"] = {
+        "selected_answer_chunk_ids": [chunk.chunk_id for chunk in answer_chunks],
+        "selected_discourse_chunk_ids": [
+            *(chunk.chunk_id for chunk in answer_chunks),
+            *supplemental_chunks,
+        ],
+        "supplemental_discourse_chunk_ids": list(supplemental_chunks),
+    }
+    retrieval_result.source_selection = GraphFirstSourceSelection(
+        sources=[
+            GraphFirstSource(
+                chunk_id=f"chunk_{index}",
+                rank=index,
+                score=float(12 - index),
+                score_components={"score": float(12 - index)},
+                supporting_entity_ids=[],
+                supporting_relation_ids=[],
+                supporting_path_ids=[],
+                auxiliary_chunk_hit=False,
+                selected_for_answer=index < 6,
+                selected_for_discourse=True,
+                selection_reason="graph_path_support",
+                metadata={"supplemental_discourse": index >= 6},
+            )
+            for index in range(12)
+        ],
+        final_context_k=6,
+        discourse_selection_k=12,
+        context_token_budget=None,
+        omitted_source_count=6,
+        fallback_reason=None,
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=6)
+
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
+
+
+def test_discorag_query_service_passes_blueprint_limited_to_final_contexts() -> None:
+    answer_chunks = [
+        _chunk("chunk_0"),
+        _chunk("chunk_1"),
+        _chunk("chunk_2"),
+        _chunk("chunk_3"),
+        _chunk("chunk_4"),
+        _chunk("chunk_5"),
+    ]
+    supplemental_chunks = {
+        f"chunk_{index}": RetrievedChunk(
+            chunk_id=f"chunk_{index}",
+            document_id="doc_alpha",
+            text=f"Supplemental evidence {index}",
+            score=0.1,
+            metadata={
+                "selected_for_answer": False,
+                "selected_for_discourse": True,
+                "supplemental_discourse": True,
+            },
+        )
+        for index in range(6, 12)
+    }
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = supplemental_chunks
+    retrieval_result.metadata["source_selection"] = {
+        "selected_answer_chunk_ids": [chunk.chunk_id for chunk in answer_chunks],
+        "selected_discourse_chunk_ids": [
+            *(chunk.chunk_id for chunk in answer_chunks),
+            *supplemental_chunks,
+        ],
+        "supplemental_discourse_chunk_ids": list(supplemental_chunks),
+    }
+    retrieval_result.source_selection = GraphFirstSourceSelection(
+        sources=[
+            GraphFirstSource(
+                chunk_id=f"chunk_{index}",
+                rank=index,
+                score=float(12 - index),
+                score_components={"score": float(12 - index)},
+                supporting_entity_ids=[],
+                supporting_relation_ids=[],
+                supporting_path_ids=[],
+                auxiliary_chunk_hit=False,
+                selected_for_answer=index < 6,
+                selected_for_discourse=True,
+                selection_reason="graph_path_support",
+                metadata={"supplemental_discourse": index >= 6},
+            )
+            for index in range(12)
+        ],
+        final_context_k=6,
+        discourse_selection_k=12,
+        context_token_budget=None,
+        omitted_source_count=6,
+        fallback_reason=None,
+    )
+    discourse_extractor = RecordingDiscourseExtractor()
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=discourse_extractor,
+        inter_chunk_graph_builder=RecordingGraphBuilder(
+            graph=InterChunkDiscourseGraph(
+                query="How does MiniRAG organize evidence?",
+                chunk_ids=[
+                    *(chunk.chunk_id for chunk in answer_chunks),
+                    *supplemental_chunks,
+                ],
+                relations=[],
+            )
+        ),
+        blueprint_builder=DiscoRAGAnswerBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=6)
+
+    assert discourse_extractor.last_package is not None
+    assert [
+        item.canonical_chunk_id for item in discourse_extractor.last_package.items
+    ] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+        "chunk_6",
+        "chunk_7",
+        "chunk_8",
+        "chunk_9",
+        "chunk_10",
+        "chunk_11",
+    ]
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
+    assert set(answerer.last_request.blueprint.chunk_roles) == {
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    }
+
+
+def test_discorag_query_service_uses_real_retriever_supplemental_handoff() -> None:
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=_ServiceGrounder(),
+        entity_index=_ServiceEntityIndex(),
+        relationship_index=_ServiceRelationshipIndex(),
+        path_expander=_ServicePathExpander(),
+        chunk_lookup=_ServiceChunkLookup(),
+    )
+    discourse_extractor = RecordingDiscourseExtractor()
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=discourse_extractor,
+        inter_chunk_graph_builder=RecordingGraphBuilder(
+            graph=InterChunkDiscourseGraph(
+                query="How does MiniRAG organize evidence?",
+                chunk_ids=[f"chunk_{index}" for index in range(12)],
+                relations=[],
+            )
+        ),
+        blueprint_builder=DiscoRAGAnswerBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=6)
+
+    assert discourse_extractor.last_package is not None
+    assert [
+        item.canonical_chunk_id for item in discourse_extractor.last_package.items
+    ] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+        "chunk_6",
+        "chunk_7",
+        "chunk_8",
+        "chunk_9",
+        "chunk_10",
+        "chunk_11",
+    ]
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
+    assert answerer.last_request.blueprint.metadata["selected_discourse_chunk_ids"] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+        "chunk_6",
+        "chunk_7",
+        "chunk_8",
+        "chunk_9",
+        "chunk_10",
+        "chunk_11",
+    ]
+    assert answerer.last_request.blueprint.metadata["answer_context_chunk_ids"] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
+    ]
 
 
 def test_discorag_query_service_passes_source_selection_summary_to_answer_request() -> (

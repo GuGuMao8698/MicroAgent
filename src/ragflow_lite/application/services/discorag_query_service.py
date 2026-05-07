@@ -64,6 +64,32 @@ def _contexts_with_bounded_promotion(
     return result[:budget]
 
 
+def _blueprint_for_contexts(
+    blueprint: AnswerBlueprint,
+    contexts: list[RetrievedChunk],
+) -> AnswerBlueprint:
+    """Limit answer-facing blueprint references to the final context set."""
+    context_ids = {context.chunk_id for context in contexts}
+    blueprint_ids = set(blueprint.ordered_chunk_ids)
+    ordered_chunk_ids = [
+        context.chunk_id for context in contexts if context.chunk_id in blueprint_ids
+    ]
+    chunk_roles = {
+        chunk_id: role
+        for chunk_id, role in blueprint.chunk_roles.items()
+        if chunk_id in context_ids
+    }
+    metadata = dict(blueprint.metadata)
+    metadata["answer_context_chunk_ids"] = [context.chunk_id for context in contexts]
+    return AnswerBlueprint(
+        ordered_chunk_ids=ordered_chunk_ids,
+        chunk_roles=chunk_roles,
+        answer_constraints=list(blueprint.answer_constraints),
+        plan_steps=list(blueprint.plan_steps),
+        metadata=metadata,
+    )
+
+
 class DiscoRAGQueryService:
     """Query-time DiscoRAG orchestration without changing the standard query path."""
 
@@ -106,12 +132,13 @@ class DiscoRAGQueryService:
                 retrieval_result,
                 blueprint,
             )
+            answer_blueprint = _blueprint_for_contexts(blueprint, answer_contexts)
             result = self.answerer.answer(
                 AnswerRequest(
                     query=query,
                     contexts=answer_contexts,
                     mode="discorag",
-                    blueprint=blueprint,
+                    blueprint=answer_blueprint,
                     metadata={
                         "source_selection": retrieval_result.metadata.get(
                             "source_selection"
