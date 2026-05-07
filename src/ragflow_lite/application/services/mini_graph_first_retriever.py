@@ -173,16 +173,26 @@ class MiniGraphFirstRetriever:
         selection = self._build_source_selection(
             supports, answer_top_n, discourse_selection_n=discourse_selection_n
         )
-        selected_chunk_ids = [
+        answer_chunk_ids = [
             source.chunk_id
             for source in selection.sources
             if source.selected_for_answer
         ]
+        discourse_only_chunk_ids = [
+            source.chunk_id
+            for source in selection.sources
+            if source.selected_for_discourse and not source.selected_for_answer
+        ]
         chunks = self._resolve_chunks_with_selection(
-            selected_chunk_ids,
+            answer_chunk_ids,
             auxiliary_chunks,
             selection,
             answer_top_n,
+        )
+        supplemental_chunks = self._resolve_supplemental_discourse_chunks(
+            discourse_only_chunk_ids,
+            auxiliary_chunks,
+            selection,
         )
         return TopologyRetrievalResult(
             query=query,
@@ -192,6 +202,7 @@ class MiniGraphFirstRetriever:
             metadata={
                 "retrieval_mode": "mini_graph_first",
                 "source_selection": self._source_selection_summary(selection),
+                "supplemental_discourse_chunks": supplemental_chunks,
             },
             source_selection=selection,
         )
@@ -273,6 +284,30 @@ class MiniGraphFirstRetriever:
             _with_fallback_metadata(chunk, "no_graph_source_chunks")
             for chunk in auxiliary_chunks[:top_k]
         ]
+
+    def _resolve_supplemental_discourse_chunks(
+        self,
+        supplemental_chunk_ids: list[str],
+        auxiliary_chunks: list[RetrievedChunk],
+        selection: GraphFirstSourceSelection,
+    ) -> dict[str, RetrievedChunk]:
+        """解析语篇候选中未进入 answer 的补充 chunk，附上选择决策元数据。"""
+        if not supplemental_chunk_ids:
+            return {}
+        chunks_by_id = {
+            chunk.chunk_id: chunk
+            for chunk in self.chunk_lookup.get_chunks(supplemental_chunk_ids)
+        }
+        auxiliary_by_id = {chunk.chunk_id: chunk for chunk in auxiliary_chunks}
+        source_by_id = {source.chunk_id: source for source in selection.sources}
+        resolved: dict[str, RetrievedChunk] = {}
+        for chunk_id in supplemental_chunk_ids:
+            base_chunk = chunks_by_id.get(chunk_id) or auxiliary_by_id.get(chunk_id)
+            source = source_by_id.get(chunk_id)
+            if base_chunk is None or source is None:
+                continue
+            resolved[chunk_id] = _with_source_selection_metadata(base_chunk, source)
+        return resolved
 
     def _retrieve_auxiliary_chunks(
         self,

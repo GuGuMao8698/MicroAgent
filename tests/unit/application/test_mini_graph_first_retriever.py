@@ -1249,3 +1249,47 @@ def test_discourse_selection_includes_answer_chunks_and_supplemental_chunks() ->
     assert source_by_id["chunk_2"].selected_for_answer is False
     assert source_by_id["chunk_2"].selected_for_discourse is True
     assert source_by_id["chunk_2"].metadata["supplemental_discourse"] is True
+
+
+def test_retrieve_context_keeps_supplemental_discourse_chunks_out_of_answer_contexts() -> (
+    None
+):
+    paths = [
+        _path(
+            f"path_{index}",
+            [f"entity_{index}", f"entity_next_{index}"],
+            [f"relation_{index}"],
+            [f"chunk_{index}"],
+            answer_hit_count=0,
+            candidate_group_id=f"entity_{index}",
+            candidate_rank=index,
+        )
+        for index in range(4)
+    ]
+
+    class FourPathExpander(RecordingPathExpander):
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return paths
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=FourPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        discourse_selection_n=4,
+    )
+
+    result = retriever.retrieve_context("q", top_k=2)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_0", "chunk_1"]
+    supplemental = result.metadata["supplemental_discourse_chunks"]
+    assert list(supplemental) == ["chunk_2", "chunk_3"]
+    assert supplemental["chunk_2"].chunk_id == "chunk_2"
+    assert supplemental["chunk_2"].metadata["selected_for_answer"] is False
+    assert supplemental["chunk_2"].metadata["selected_for_discourse"] is True
