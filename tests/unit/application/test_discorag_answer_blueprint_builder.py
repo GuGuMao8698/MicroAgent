@@ -13,6 +13,8 @@ from ragflow_lite.domain.models import (
     EvidencePackage,
     EvidenceProvenance,
     GroundedQuery,
+    InterChunkDiscourseGraph,
+    InterChunkDiscourseRelation,
     IntraChunkDiscoursePackage,
     IntraChunkDiscourseRelation,
 )
@@ -323,3 +325,55 @@ def test_build_records_source_selection_metadata() -> None:
     assert blueprint.metadata["selected_discourse_chunk_ids"] == ["chunk_a"]
     assert blueprint.metadata["source_selection_status"] == "source_selection"
     assert blueprint.metadata["source_selection_fallback_reason"] is None
+
+
+def test_build_adds_graph_aware_constraints_for_qualification() -> None:
+    package = _package(
+        items=[
+            _evidence_item(
+                "chunk_answer",
+                order=0,
+                topology_relation_ids=["rel_shared"],
+            ),
+            _evidence_item(
+                "chunk_supplemental",
+                order=1,
+                topology_relation_ids=["rel_shared"],
+            ),
+        ]
+    )
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_answer", "chunk_supplemental"],
+        relations=[
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_supplemental",
+                target_chunk_id="chunk_answer",
+                relation_type="qualifies",
+                rationale="supplemental limits answer",
+            )
+        ],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    constraints = " ".join(blueprint.answer_constraints).lower()
+    steps = " ".join(blueprint.plan_steps).lower()
+    assert "qualification" in constraints
+    assert "supplemental" in steps
+    assert blueprint.metadata["inter_chunk_relation_count"] == 1
+    assert blueprint.metadata["inter_chunk_relation_types"] == ["qualifies"]
+
+
+def test_build_with_empty_inter_chunk_graph_preserves_existing_order() -> None:
+    package = _package()
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_a", "chunk_b", "chunk_c"],
+        relations=[],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    assert blueprint.ordered_chunk_ids == ["chunk_a", "chunk_b", "chunk_c"]
+    assert blueprint.metadata["inter_chunk_relation_count"] == 0

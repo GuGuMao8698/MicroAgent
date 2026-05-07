@@ -8,6 +8,7 @@ from ragflow_lite.domain.models import (
     AnswerBlueprint,
     ChunkDiscourseStructure,
     EvidenceItem,
+    InterChunkDiscourseGraph,
     IntraChunkDiscoursePackage,
 )
 
@@ -15,7 +16,11 @@ from ragflow_lite.domain.models import (
 class DiscoRAGAnswerBlueprintBuilder:
     """Builds a deterministic DiscoRAG answer blueprint from structured evidence."""
 
-    def build(self, package: IntraChunkDiscoursePackage) -> AnswerBlueprint:
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+        graph: InterChunkDiscourseGraph | None = None,
+    ) -> AnswerBlueprint:
         items = package.evidence_package.items
         # 从 evidence_package.metadata 中提取 source_selection 摘要
         source_selection = package.evidence_package.metadata.get("source_selection")
@@ -53,6 +58,10 @@ class DiscoRAGAnswerBlueprintBuilder:
                     "selected_discourse_chunk_ids": [],
                     "source_selection_status": "empty",
                     "source_selection_fallback_reason": None,
+                    "inter_chunk_relation_count": len(graph.relations)
+                    if graph is not None
+                    else 0,
+                    "inter_chunk_relation_types": self._graph_relation_types(graph),
                 },
             )
 
@@ -78,8 +87,10 @@ class DiscoRAGAnswerBlueprintBuilder:
         return AnswerBlueprint(
             ordered_chunk_ids=ordered_chunk_ids,
             chunk_roles=chunk_roles,
-            answer_constraints=self._constraints(chunk_roles, package.structures),
-            plan_steps=self._plan_steps(package, chunk_roles),
+            answer_constraints=self._constraints(
+                chunk_roles, package.structures, graph
+            ),
+            plan_steps=self._plan_steps(package, chunk_roles, graph),
             metadata={
                 "planner": "discorag_answer_blueprint_builder",
                 "status": "ok",
@@ -94,6 +105,10 @@ class DiscoRAGAnswerBlueprintBuilder:
                     "selection_source", "unknown"
                 ),
                 "source_selection_fallback_reason": fallback_reason,
+                "inter_chunk_relation_count": len(graph.relations)
+                if graph is not None
+                else 0,
+                "inter_chunk_relation_types": self._graph_relation_types(graph),
             },
         )
 
@@ -157,6 +172,7 @@ class DiscoRAGAnswerBlueprintBuilder:
         self,
         chunk_roles: dict[str, str],
         structures: list[ChunkDiscourseStructure],
+        graph: InterChunkDiscourseGraph | None = None,
     ) -> list[str]:
         constraints = [
             "Follow ordered_chunk_ids when presenting evidence.",
@@ -169,6 +185,10 @@ class DiscoRAGAnswerBlueprintBuilder:
         if self._has_contrast_like_relation(structures):
             constraints.append(
                 "Mention contrast or conflict cautiously when discourse relations support it."
+            )
+        if self._has_qualification_relation(graph):
+            constraints.append(
+                "Respect inter-chunk qualification or contradiction before stating final conclusions."
             )
         return constraints
 
@@ -194,6 +214,7 @@ class DiscoRAGAnswerBlueprintBuilder:
         self,
         package: IntraChunkDiscoursePackage,
         chunk_roles: dict[str, str],
+        graph: InterChunkDiscourseGraph | None = None,
     ) -> list[str]:
         keywords = package.evidence_package.grounded_query.answer_type_keywords
         keyword_text = ", ".join(keywords) if keywords else "the user's answer type"
@@ -201,12 +222,36 @@ class DiscoRAGAnswerBlueprintBuilder:
             first_step = "Start from chunks marked main."
         else:
             first_step = "Start from the first ordered chunk."
-        return [
+        steps = [
             first_step,
             "Use support and context chunks to qualify or elaborate the main claim.",
             f"Preserve answer-type keywords: {keyword_text}.",
             "Do not add claims that are not grounded in the provided contexts.",
         ]
+        if graph is not None and graph.relations:
+            steps.append(
+                "Use supplemental discourse chunks to qualify, support, or constrain answer chunks when graph relations require it."
+            )
+        return steps
+
+    def _graph_relation_types(
+        self,
+        graph: InterChunkDiscourseGraph | None,
+    ) -> list[str]:
+        if graph is None:
+            return []
+        return self._unique_ids(relation.relation_type for relation in graph.relations)
+
+    def _has_qualification_relation(
+        self,
+        graph: InterChunkDiscourseGraph | None,
+    ) -> bool:
+        if graph is None:
+            return False
+        return any(
+            relation.relation_type in {"qualifies", "contradicts"}
+            for relation in graph.relations
+        )
 
     def _unique_ids(self, values: Iterable[str]) -> list[str]:
         seen: set[str] = set()
