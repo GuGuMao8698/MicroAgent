@@ -12,7 +12,7 @@ Owner: `MiniGraphFirstRetriever`, `DiscoRAGQueryService`
 
 Source of truth:
 - Public final answer context budget: normalized `QueryRequest.top_n` after `top_k` alias handling.
-- `MiniGraphFirstRetriever` derives and normalizes the effective discourse-visible budget as `discourse_selection_k`.
+- `MiniGraphFirstRetriever` derives the effective discourse-visible budget per request; the resulting `GraphFirstSourceSelection.discourse_selection_k` records that budget.
 
 Invariant:
 - `QueryRequest.top_n` is normalized before application services consume the request.
