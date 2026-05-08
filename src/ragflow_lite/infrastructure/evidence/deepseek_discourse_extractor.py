@@ -60,10 +60,13 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         model: str = "deepseek-v4-flash",
         reasoning_effort: str = "high",
         client: Any | None = None,
-        max_chunks: int = 5,
+        max_chunks: int | None = None,
         enabled: bool = True,
     ) -> None:
-        if max_chunks < 1:
+        # Contract reviewed 2026-05-08T12:56:51+08:00.
+        # default RST extraction consumes the retriever-selected discourse window;
+        # any local cap must be explicit and observable in metadata.
+        if max_chunks is not None and max_chunks < 1:
             raise ProcessingError("Intra-chunk discourse max_chunks must be positive.")
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -80,6 +83,13 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         selected_items, selection_source = self._select_items(evidence_package.items)
         if not selected_items:
             return self._empty_package(evidence_package, "empty")
+
+        selected_ids = [item.canonical_chunk_id for item in selected_items]
+        skipped_ids = [
+            item.canonical_chunk_id
+            for item in evidence_package.items
+            if item.canonical_chunk_id not in set(selected_ids)
+        ]
 
         client = self.client or self._build_client(self.api_key, self.base_url)
         response_text = client.complete_json(
@@ -99,36 +109,35 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 "structure_count": len(structures),
                 "status": "ok",
                 "selection_source": selection_source,
+                "max_chunks": self.max_chunks,
+                "selected_chunk_ids": selected_ids,
+                "skipped_chunk_ids": skipped_ids,
             },
         )
 
     def _select_items(
         self, items: list[EvidenceItem]
     ) -> tuple[list[EvidenceItem], str]:
-        """优先选择显式标记为 discourse 候选的 items，不足时按原序补充。"""
+        """Select discourse-visible evidence first, with no default local cap."""
         explicit = [
             item
             for item in items
             if item.metadata.get("selected_for_discourse") is True
         ]
+        source_items = explicit if explicit else items
+        selection_source = "source_selection" if explicit else "prefix"
+
         selected: list[EvidenceItem] = []
         seen: set[str] = set()
-        for item in explicit:
-            selected.append(item)
-            seen.add(item.canonical_chunk_id)
-            if len(selected) >= self.max_chunks:
-                return selected, "source_selection"
-
-        for item in items:
+        for item in source_items:
             if item.canonical_chunk_id in seen:
                 continue
             selected.append(item)
             seen.add(item.canonical_chunk_id)
-            if len(selected) >= self.max_chunks:
+            if self.max_chunks is not None and len(selected) >= self.max_chunks:
                 break
 
-        source = "source_selection" if explicit else "prefix"
-        return selected, source
+        return selected, selection_source
 
     def _empty_package(
         self,
@@ -146,6 +155,9 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 "structure_count": 0,
                 "status": status,
                 "selection_source": "none",
+                "max_chunks": self.max_chunks,
+                "selected_chunk_ids": [],
+                "skipped_chunk_ids": [],
             },
         )
 

@@ -82,6 +82,33 @@ def _package_with_two_items() -> EvidencePackage:
     return package
 
 
+def _package_with_discourse_items(count: int) -> EvidencePackage:
+    package = _package()
+    package.items = []
+    for index in range(count):
+        package.items.append(
+            EvidenceItem(
+                canonical_chunk_id=f"chunk_doc_alpha_{index}",
+                text=f"Discourse-visible chunk {index}.",
+                score=1.0 - (index * 0.01),
+                order=index,
+                provenance=EvidenceProvenance(
+                    document_id="doc_alpha",
+                    filename="alpha.md",
+                    file_type="markdown",
+                    chunk_index=index,
+                ),
+                retained_reasons=["discourse_selection"],
+                grounded_entities=["MiniRAG"],
+                answer_type_keywords=["mechanism"],
+                metadata={"selected_for_discourse": True},
+            )
+        )
+    package.metadata["evidence_count"] = count
+    package.metadata["source_selection"] = {"discourse_selection_k": count}
+    return package
+
+
 def _extractor_for_chunk_output(
     chunk_output: dict,
 ) -> DeepSeekChatIntraChunkDiscourseExtractor:
@@ -130,7 +157,6 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
         model="deepseek-v4-flash",
         reasoning_effort="high",
         client=client,
-        max_chunks=5,
     )
 
     package = extractor.extract(_package())
@@ -143,6 +169,9 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
         "structure_count": 1,
         "status": "ok",
         "selection_source": "prefix",
+        "max_chunks": None,
+        "selected_chunk_ids": ["chunk_doc_alpha_0"],
+        "skipped_chunk_ids": [],
     }
     structure = package.structures[0]
     assert structure.canonical_chunk_id == "chunk_doc_alpha_0"
@@ -160,7 +189,28 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
     assert "MiniRAG first retrieves chunks" in client.calls[0]["input_text"]
 
 
-def test_deepseek_discourse_extractor_respects_max_chunks() -> None:
+def test_deepseek_discourse_extractor_default_consumes_all_discourse_items() -> None:
+    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(client=client)
+
+    package = extractor.extract(_package_with_discourse_items(12))
+
+    assert package.metadata["selected_evidence_count"] == 12
+    assert package.metadata["max_chunks"] is None
+    assert package.metadata["selected_chunk_ids"] == [
+        f"chunk_doc_alpha_{index}" for index in range(12)
+    ]
+    assert package.metadata["skipped_chunk_ids"] == []
+    for index in range(12):
+        assert (
+            f"canonical_chunk_id: chunk_doc_alpha_{index}"
+            in client.calls[0]["input_text"]
+        )
+
+
+def test_deepseek_discourse_extractor_explicit_max_chunks_reports_skipped_items() -> (
+    None
+):
     client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
     extractor = DeepSeekChatIntraChunkDiscourseExtractor(
         client=client,
@@ -172,6 +222,9 @@ def test_deepseek_discourse_extractor_respects_max_chunks() -> None:
     assert package.metadata["selected_evidence_count"] == 1
     assert "canonical_chunk_id: chunk_doc_alpha_0" in client.calls[0]["input_text"]
     assert "canonical_chunk_id: chunk_doc_alpha_1" not in client.calls[0]["input_text"]
+    assert package.metadata["max_chunks"] == 1
+    assert package.metadata["selected_chunk_ids"] == ["chunk_doc_alpha_0"]
+    assert package.metadata["skipped_chunk_ids"] == ["chunk_doc_alpha_1"]
 
 
 def test_deepseek_discourse_extractor_disabled_path_skips_model_call() -> None:
