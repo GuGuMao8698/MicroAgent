@@ -7,7 +7,7 @@ contracts.
 
 ## Intra-Chunk Discourse Extraction Contract
 
-Reviewed at: `2026-05-08T12:56:51+08:00`
+Reviewed at: `2026-05-08T14:30:00+08:00`
 Status: Active
 Owner: `DeepSeekChatIntraChunkDiscourseExtractor`
 
@@ -19,7 +19,7 @@ Invariant:
 - Default extractor behavior has no local chunk cap.
 - All retriever-selected discourse-visible chunks are eligible for RST extraction.
 - Explicit caps are opt-in and must be visible in metadata.
-- Metadata exposes selected and skipped chunk ids when a cap is used.
+- Metadata always exposes selected and skipped chunk ids; explicit caps make skipped ids observable when chunks are excluded.
 
 Forbidden stale interpretations:
 - `max_chunks=5` is not a valid default.

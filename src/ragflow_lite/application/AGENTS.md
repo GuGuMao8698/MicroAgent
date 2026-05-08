@@ -28,15 +28,9 @@ application/
 - Application code talks to parser/chunker/embedder/index/retriever/answerer/document/dataset/evidence abstractions from `domain.ports`.
 - Route models and HTTP errors stay in `api`; provider clients, Infinity tables, JSON files and tokenizers stay in `infrastructure`.
 
-## 关键约定
-- `QueryService` stays generic: it depends on `Retriever` + `Answerer`, not graph/dense/hybrid/fusion details.
-- `QueryModeRouter` only dispatches `"standard"` / `"discorag"`; it must not grow retrieval, evidence, or answer logic.
-- `GraphFirstSourceSelection` is an internal application contract. Do not expose it or retrieval strategy knobs through HTTP.
-- `DocumentService` must validate dataset existence before dataset filtering or document rebinding.
-- `DatasetService` strips dataset names and rejects empty names.
-- Main-link logs and metrics may record safe outcome fields only. Do not log raw document bodies, full query text, filenames as labels, or high-cardinality identifiers in metrics labels.
-- Rollback remains best-effort and must not mask the original business exception.
-- If a rule is specific to `services/` or `pipelines/`, put it in that child `AGENTS.md` instead of expanding this overview.
+## 边界提示
+- Active runtime semantics live in [CONTRACTS.md](./CONTRACTS.md); child `AGENTS.md` files should only identify local owners, commands, and file-role pointers.
+- If a rule is specific to `services/` or `pipelines/`, keep the navigation hint in that child `AGENTS.md` and put the durable runtime contract in the nearest `CONTRACTS.md`, not here.
 
 ## 禁区
 - 不要在 application 层直接 import FastAPI, Infinity SDK, provider SDK, or local JSON storage.

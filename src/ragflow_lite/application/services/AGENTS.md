@@ -19,12 +19,6 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 - `DiscoRAGAnswerBlueprintBuilder` consumes the inter-chunk graph to produce relation-aware constraints and plan steps.
 - `DocumentService` and `DatasetService` are application wrappers around catalog/store semantics, not storage implementations.
 
-## 关键约定
-- Do not expose retrieval/fusion strategy knobs through HTTP or service DTOs.
-- Keep `GraphFirstSourceSelection` internal; downstream code may consume its metadata, but API responses must not depend on its full shape.
-- `QueryModeRouter` rejects unknown runtime modes and must not duplicate query business logic.
-- `MiniGraphFirstRetriever` scoring stays aligned with MiniRAG mini-mode Counter/vote behavior; do not reintroduce local weight tuning unless that task is explicit.
-- No-path entity candidates (those without relation-backed `TopologyPath`) are retained via `_merge_trimmed_no_path_candidates()` at top 20% (minimum 1) before path truncation; `no_path_candidate` is a recognized score component. Do not bypass this merge or move it after `_score_source_chunks()`.
-- `DocumentService` validates dataset existence before filtering, binding, or rebinding.
-- `DatasetService` strips names and rejects empty names.
-- Observability helpers log bounded outcome fields only; never log raw document bodies, full query text, or high-cardinality metrics labels.
+## 边界提示
+- Runtime behavior for these services lives in [../CONTRACTS.md](../CONTRACTS.md).
+- Keep this file for service ownership, code navigation, and "edit the right layer" warnings only.

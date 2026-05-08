@@ -17,12 +17,6 @@ rtk cx definition --name IngestionPipeline --from src/ragflow_lite/application/p
 - Async HTTP upload is expected to submit work and return quickly; background processing happens through the configured runner.
 - Stage cache covers parse/chunk only; embed/index/evidence writes are not cached.
 
-## 关键约定
-- Async ingestion requires `Idempotency-Key`; missing keys are API/client errors, not new task identities.
-- Retry semantics stay at most two attempts: first failure requeues once, second failure becomes terminal `failed`.
-- Task states must support polling through `queued`, `processing`, and terminal states.
-- Parser metadata, especially `parser_strategy`, must be preserved into indexed document metadata.
-- Dataset binding happens in the controlled ingestion flow; binding failure must clean binding state without hiding the original exception.
-- Rollback is best-effort across graph evidence, vector index, document store and dataset binding. Log rollback failure, but do not replace the original business error.
-- Do not turn the in-process runner into a cross-process or persistent queue unless the task explicitly opens that architecture.
-- Do not add OCR/layout/table parsing here; parser capability belongs in `infrastructure/parsers`.
+## 边界提示
+- Active runtime contracts for ingestion and task lifecycle live in [../CONTRACTS.md](../CONTRACTS.md).
+- Keep this file focused on pipeline entrypoints, local commands, and file-role navigation.
