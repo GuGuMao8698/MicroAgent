@@ -61,5 +61,5 @@ Logging boundary:
 ## Verification
 
 - Provider wiring: `tests/unit/api/test_providers.py`
-- Embedding signature guards: `tests/unit/infrastructure/test_ark_embedder.py`
-- Vector index: `tests/unit/infrastructure/test_infinity_dense_index.py`
+- Embedding signature guards: `tests/unit/infrastructure/` (check for embedder-related test files)
+- Vector index: `tests/unit/infrastructure/` (check for index-related test files)

@@ -39,6 +39,6 @@ Layering:
 ## Documentation Rule
 
 All active runtime contracts in this subtree follow the governance standard:
-source-backed, dated, owned, and verifiable. See root `docs/` for the full
-governance spec. AGENTS.md files in child directories must not duplicate
+source-backed, dated, owned, and verifiable. See `docs/agent-doc-governance.md`
+for the full governance standard. AGENTS.md files in child directories must not duplicate
 active semantics; they may only point to the nearest CONTRACTS.md.
