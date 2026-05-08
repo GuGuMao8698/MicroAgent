@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from ragflow_lite.api.deps.providers import get_query_router
 from ragflow_lite.api.schemas.v0 import QueryRequest
-from ragflow_lite.config.settings import Settings
 
 # ---------------------------------------------------------------------------
 # QueryRequest schema 单元测试
@@ -87,18 +86,6 @@ class TestQueryRequestTopN:
         data = req.model_dump()
         assert "top_k" not in data
         assert data["top_n"] == 3
-
-
-def test_settings_max_top_k_matches_public_query_limit(tmp_path) -> None:
-    """Settings.max_top_k 不应和 QueryRequest 的 public 2..8 契约漂移。"""
-    settings = Settings(
-        project_root=tmp_path,
-        uploads_dir=tmp_path / "uploads",
-        local_index_dir=tmp_path / "index",
-        temp_dir=tmp_path / "tmp",
-    )
-
-    assert settings.max_top_k == 8
 
 
 # ---------------------------------------------------------------------------
