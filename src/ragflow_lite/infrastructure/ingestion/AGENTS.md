@@ -2,12 +2,15 @@
 
 这个目录提供 ingestion task 的单进程内存实现。它是 runtime adapter，不是分布式队列。
 
-- `InMemoryTaskStore` tracks task state and idempotency key ownership.
-- `InMemoryStageCache` stores parse/chunk stage artifacts only.
-- `InlineTaskRunner` is synchronous and useful for tests.
-- `BackgroundTaskRunner` is the default in-process async runner for app wiring.
-- These implementations are thread-safe in-process helpers; they do not provide cross-process, durable, or distributed queue guarantees.
-- Keep idempotency reservation atomic from the application perspective.
-- Do not cache embed/index/provider side effects in stage cache.
-- Runner handlers must receive document ids and let `IngestionPipeline.process_task()` own business transitions.
-- Do not add database, broker, or persistence dependencies here without explicit approval.
+## Active Contracts
+Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
+
+## 文件说明
+- `InMemoryTaskStore` -- tracks task state and idempotency key ownership
+- `InMemoryStageCache` -- stores parse/chunk stage artifacts only
+- `InlineTaskRunner` -- synchronous, useful for tests
+- `BackgroundTaskRunner` -- in-process async runner
+
+## Avoid Here
+- 这些实现是 thread-safe in-process helpers；不提供跨进程、持久化或分布式队列保证。
+- 不要添加 database、broker 或 persistence 依赖。

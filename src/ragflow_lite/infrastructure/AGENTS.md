@@ -18,10 +18,10 @@ rtk cx overview src/ragflow_lite/infrastructure/vector_indexes --full
 infrastructure/
 ├── answerers/       # answerer adapters and prompt templates
 ├── chunkers/        # fixed/recursive chunking implementations
-├── embedders/       # Ark embedding adapter
+├── embedders/       # text embedding adapter
 ├── evidence/        # graph evidence extraction/store/index/discourse
 ├── ingestion/       # in-process task store/cache/runners
-├── llms/            # DeepSeek chat completion wrapper
+├── llms/            # chat completion client wrapper
 ├── loaders/         # currently empty compatibility package
 ├── nlp/             # RAGFlow tokenizer wrapper
 ├── parsers/         # txt/md/native-pdf parsers

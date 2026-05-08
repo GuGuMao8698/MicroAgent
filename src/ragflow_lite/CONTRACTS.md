@@ -8,6 +8,7 @@ contracts.
 
 Child modules that own their own CONTRACTS.md:
 
+- `api/CONTRACTS.md` -- HTTP surface, endpoints, schemas, status codes, observability
 - `application/CONTRACTS.md` -- DiscoRAG budget, service boundary
 - `infrastructure/CONTRACTS.md` -- adapter defaults, provider wiring, embedding/vector-index contracts
 

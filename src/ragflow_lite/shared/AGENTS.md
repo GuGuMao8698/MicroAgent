@@ -3,13 +3,19 @@
 ## Purpose
 这个目录只承接跨层复用、且不属于某一业务层的轻量基础能力。
 
-## Do Here
-- 放 request/trace context、logging formatter、结构化日志 helper、Prometheus helper 这类真正 cross-cutting 的 observability 代码。
-- ingestion task observability helper 放在这里：`ingest_task_accepted_total`、`ingest_task_retry_total`、`ingest_stage_cache_total`、`ingest_task_duration_seconds`、`ingest_task_queue_delay_seconds`，以及对应的 record helper 函数。
-- 保持 helper 小而稳定，优先服务现有主链路，而不是为未来抽象通用平台。
-- 让这里的 API 保持无业务语义，便于 `api` / `application` / `infrastructure` 共同复用。
+## Active Contracts
+Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
+
+## 快速命令
+```bash
+rtk cx overview src/ragflow_lite/shared --full
+```
+
+## 文件说明
+- `observability.py` -- Prometheus metrics helpers, structured logging, request/trace context
+  - Ingestion task metrics: `ingest_task_accepted_total`, `ingest_task_retry_total`, `ingest_stage_cache_total`, `ingest_task_duration_seconds`, `ingest_task_queue_delay_seconds`
+- `__init__.py` -- package marker
 
 ## Avoid Here
 - 不要把业务流程、路由编排、provider 调用或 repository 逻辑放进来。
-- 不要为了“方便复用”把半个 application 层搬进 `shared`。
-- 不要在这里引入重量级 observability framework 或新的公共运行时路径。
+- 不要在这里引入重量级 observability framework。

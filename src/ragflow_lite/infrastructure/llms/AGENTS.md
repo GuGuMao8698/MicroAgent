@@ -1,12 +1,14 @@
 # AGENTS.md
 
-这个目录封装 non-embedding LLM client。当前主路径是 DeepSeek Chat Completions。
+这个目录封装 non-embedding LLM client。
 
-- `DeepSeekChatCompletionsClient` provides text and JSON completion helpers for answerers, query grounders and evidence extractors.
-- JSON mode adds the required JSON instruction and uses a large JSON token budget contract.
-- Retry is limited and adapter-local.
-- Keep Chat Completions request shape centralized here; do not duplicate low-level DeepSeek request construction in callers.
-- Preserve structured JSON output handling; callers should validate domain schema after receiving text/JSON.
-- Retry only retryable provider failures and keep the attempt count bounded.
-- Do not log prompts, user query text, document chunks, response payloads, or API keys.
-- Do not reintroduce Ark/OpenAI as non-embedding runtime defaults unless explicitly requested.
+## Active Contracts
+Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
+
+## 文件说明
+- Chat Completions client wrapper -- text and JSON completion helpers for answerers, query grounders, evidence extractors
+- JSON mode adds required JSON instruction
+
+## Avoid Here
+- 不要在 callers 里重复低-level request construction。
+- 不要 log prompts、user query text、document chunks、response payloads 或 API keys。

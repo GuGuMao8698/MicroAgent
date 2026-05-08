@@ -2,12 +2,16 @@
 
 这个目录实现 document parser。它 turns stored bytes into `ParsedDocument` and parser metadata.
 
-- Supported parser baseline is `txt`, `md`, and native-text `pdf`.
-- Markdown parsing uses the existing CommonMark/markdown-it path and preserves meaningful text.
-- PDF parsing is digital-native text extraction and returns page text metadata where available.
-- `CompositeParser` dispatches by file type and raises unsupported-type errors.
-- Do not add OCR, layout analysis, table extraction, or DeepDoc-style parsing without an explicit task.
-- Preserve `parser_strategy` metadata so ingestion/indexed documents can record how text was parsed.
-- Empty/corrupted/encrypted PDF behavior is covered by tests; do not normalize all parser failures into empty text.
-- Parser code should not chunk, normalize for indexing, embed, index, or format citations.
-- Do not log raw document contents.
+## Active Contracts
+Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
+
+## 文件说明
+- Supported baseline: `txt`, `md`, native-text `pdf`
+- `CompositeParser` -- dispatches by file type, raises unsupported-type errors
+- Markdown uses CommonMark/markdown-it path
+- PDF uses digital-native text extraction with page metadata
+
+## Avoid Here
+- 不要添加 OCR、layout analysis、table extraction 或 DeepDoc-style parsing。
+- Parser code 不应该 chunk、normalize for indexing、embed、index 或 format citations。
+- 不要 log raw document contents。
