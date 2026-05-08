@@ -1,7 +1,7 @@
 # Infrastructure Active Contracts
 
 This file owns active runtime contracts for `src/ragflow_lite/infrastructure`.
-`AGENTS.md` in this subtree should link here instead of duplicating these
+[AGENTS.md](./AGENTS.md) in this subtree should link here instead of duplicating these
 contracts.
 
 ## Scope
@@ -12,23 +12,23 @@ JSON/file storage, parser, chunker, retriever, and answerer.
 Leaf adapter folders that do NOT get their own CONTRACTS.md (too small,
 single-purpose):
 
-- `answerers/`
-- `chunkers/`
-- `embedders/`
-- `ingestion/`
-- `llms/`
-- `loaders/`
-- `nlp/`
-- `parsers/`
-- `retrievers/`
-- `storage/`
-- `vector_indexes/`
+- [answerers/](answerers/)
+- [chunkers/](chunkers/)
+- [embedders/](embedders/)
+- [ingestion/](ingestion/)
+- [llms/](llms/)
+- [loaders/](loaders/)
+- [nlp/](nlp/)
+- [parsers/](parsers/)
+- [retrievers/](retrievers/)
+- [storage/](storage/)
+- [vector_indexes/](vector_indexes/)
 
 ## Adapter Boundary Contract
 
 Reviewed at: `2026-05-08T16:00:00+08:00`
 Status: Active
-Owner: `build_services` in `api/deps/providers.py`
+Owner: `build_services` in [../api/deps/providers.py](../api/deps/providers.py)
 
 Default vector index:
 - `InfinityDenseVectorIndex` is the default runtime vector index.
@@ -56,10 +56,10 @@ Logging boundary:
 
 ## Known Submodule Contracts
 
-- `evidence/CONTRACTS.md` -- graph evidence extraction, candidate indexing, storage, canonicalization, and intra-chunk discourse extraction.
+- [evidence/CONTRACTS.md](evidence/CONTRACTS.md) -- graph evidence extraction, candidate indexing, storage, canonicalization, and intra-chunk discourse extraction.
 
 ## Verification
 
-- Provider wiring: `tests/unit/api/test_providers.py`
-- Embedding signature guards: `tests/unit/infrastructure/` (check for embedder-related test files)
-- Vector index: `tests/unit/infrastructure/` (check for index-related test files)
+- Provider wiring: [tests/unit/api/test_providers.py](../../../tests/unit/api/test_providers.py)
+- Embedding signature guards: [tests/unit/infrastructure](../../../tests/unit/infrastructure) (check for embedder-related test files)
+- Vector index: [tests/unit/infrastructure](../../../tests/unit/infrastructure) (check for index-related test files)

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Unit-wide rules: see `../CONTRACTS.md`.
+Unit-wide rules: see [../CONTRACTS.md](../CONTRACTS.md).
 
 ## Directory role
 

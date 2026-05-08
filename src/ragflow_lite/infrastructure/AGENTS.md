@@ -36,4 +36,4 @@ infrastructure/
 - Do not log provider payloads, raw document/query text, filenames as metric labels, or full SDK responses.
 - Keep provider calls, persistence, validation, tokenization, and retry policy in their nearest adapter package.
 - Do not add OCR/layout/table/DeepDoc, rerank, extra embedding providers, or new primary retrieval paths unless the task explicitly opens that slice.
-- If a subpackage has its own `AGENTS.md`, follow that child file for concrete contracts.
+- If a subpackage has its own navigation file, follow that child file for local commands and file maps.

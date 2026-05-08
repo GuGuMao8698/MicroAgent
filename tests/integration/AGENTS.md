@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Integration contracts: see `CONTRACTS.md`.
+Integration contracts: see [CONTRACTS.md](./CONTRACTS.md).
 
 ## Directory role
 
@@ -20,5 +20,5 @@ tests/integration/
 
 ## Boundary rules
 
-- Keep integration tests narrow and purposeful; broad quality evaluation belongs in `tests/evals`.
+- Keep integration tests narrow and purposeful; broad quality evaluation belongs in [tests/evals](../evals).
 - These tests may require local services and exported runtime provider keys depending on the path under test.

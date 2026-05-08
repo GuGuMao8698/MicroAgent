@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Active test harness semantics: see `CONTRACTS.md`.
+Active test harness semantics: see [CONTRACTS.md](./CONTRACTS.md).
 
 ## Directory role
 
-Tests, fixtures, and optional evaluation. Root AGENTS covers cross-tree navigation; subtree-specific rules live in the nearest `AGENTS.md` or `CONTRACTS.md`.
+Tests, fixtures, and optional evaluation. Root AGENTS covers cross-tree navigation; subtree-specific rules live in the nearest [AGENTS.md](./AGENTS.md) or [CONTRACTS.md](./CONTRACTS.md).
 
 ## Quick commands
 ```bash
@@ -26,10 +26,10 @@ tests/
 
 ## File map notes
 
-- `unit/test_eval_gating.py` tests marker/option/env gating itself and must not require the `deepeval` package.
-- `fixtures/documents` holds committed sample documents only; runtime outputs and local screenshots stay out of fixtures.
-- Answerer prompt source of truth is the tracked templates under `src/ragflow_lite/infrastructure/answerers/`, not inline constants.
-- Manual smoke follows `docker/AGENTS.md`; do not copy compose output into tests.
+- [unit/test_eval_gating.py](unit/test_eval_gating.py) tests marker/option/env gating itself and must not require the `deepeval` package.
+- [fixtures/documents](fixtures/documents) holds committed sample documents only; runtime outputs and local screenshots stay out of fixtures.
+- Answerer prompt source of truth is the tracked templates under [src/ragflow_lite/infrastructure/answerers](../src/ragflow_lite/infrastructure/answerers), not inline constants.
+- Manual smoke follows [docker/AGENTS.md](../docker/AGENTS.md); do not copy compose output into tests.
 
 ## Boundary rules
 

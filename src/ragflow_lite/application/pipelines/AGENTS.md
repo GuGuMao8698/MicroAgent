@@ -12,8 +12,8 @@ rtk cx definition --name IngestionPipeline --from src/ragflow_lite/application/p
 ```
 
 ## 文件地图
-- `ingestion.py`: ingestion pipeline implementation.
-- `__init__.py`: pipeline exports.
+- [ingestion.py](ingestion.py): ingestion pipeline implementation.
+- [__init__.py](__init__.py): pipeline exports.
 
 ## 边界提示
 - 本文件只保留 pipeline 导航、本地命令、文件角色和错层提醒。

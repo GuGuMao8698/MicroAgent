@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Eval contracts: see `CONTRACTS.md`.
+Eval contracts: see [CONTRACTS.md](./CONTRACTS.md).
 
 ## Directory role
 
@@ -17,10 +17,10 @@ DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/
 
 ## File map
 
-- `test_rag_deepeval.py` — uploads fixtures, waits for terminal ingestion state, evaluates answers.
-- `generate_goldens.py` — synthetic golden generation (isolated `.venv-goldens`).
-- `optimize_prompt.py` — prompt optimization against committed goldens (main `.venv`).
-- `summarize_results.py` — post-processing of raw DeepEval exports.
+- [test_rag_deepeval.py](test_rag_deepeval.py) — uploads fixtures, waits for terminal ingestion state, evaluates answers.
+- [generate_goldens.py](generate_goldens.py) — synthetic golden generation (isolated `.venv-goldens`).
+- [optimize_prompt.py](optimize_prompt.py) — prompt optimization against committed goldens (main `.venv`).
+- [summarize_results.py](summarize_results.py) — post-processing of raw DeepEval exports.
 
 ## Boundary rules
 

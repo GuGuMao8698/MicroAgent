@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Unit-wide rules: see `../CONTRACTS.md`.
+Unit-wide rules: see [../CONTRACTS.md](../CONTRACTS.md).
 
 ## Directory role
 
@@ -14,8 +14,8 @@ Application orchestration contract tests. Uses fakes to verify collaboration ord
 
 ## File map
 
-- `test_ingestion.py` — idempotency, retry, task transitions, stage cache, rollback, progress, observability.
-- `test_mini_graph_first_retriever.py` — graph-first budget, scoring, fallback, source-selection.
+- [test_ingestion.py](test_ingestion.py) — idempotency, retry, task transitions, stage cache, rollback, progress, observability.
+- [test_mini_graph_first_retriever.py](test_mini_graph_first_retriever.py) — graph-first budget, scoring, fallback, source-selection.
 
 ## Boundary rules
 

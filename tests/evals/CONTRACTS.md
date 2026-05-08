@@ -1,11 +1,11 @@
 # tests/evals/CONTRACTS.md
 
-Eval-specific contracts. Navigation lives in `AGENTS.md`.
+Eval-specific contracts. Navigation lives in [AGENTS.md](./AGENTS.md).
 
 ## Gate requirements
 
 - deepeval tests require `@pytest.mark.deepeval` and explicit `--run-deepeval`.
-- Live evals also require live Infinity (`--run-deepeval` implies `--run-live-infinity`; see `tests/CONTRACTS.md`).
+- Live evals also require live Infinity (`--run-deepeval` implies `--run-live-infinity`; see [tests/CONTRACTS.md](../CONTRACTS.md)).
 
 ## Environment validation
 
@@ -21,7 +21,7 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 
 - Goldens generation: `.venv-goldens/bin/python tests/evals/generate_goldens.py`. Do not mix `.venv-goldens` dependencies into the main runtime `.venv`.
 - Prompt optimization: main `.venv/bin/python tests/evals/optimize_prompt.py` (imports repo runtime code, consumes committed goldens).
-- `_RAG_EVAL_GOLDENS_PATH = tests/fixtures/evals/synthetic_goldens.json` (eval_support.py).
+- `_RAG_EVAL_GOLDENS_PATH = tests/fixtures/evals/synthetic_goldens.json` ([eval_support.py](../eval_support.py)).
 
 ## Default deepeval model
 

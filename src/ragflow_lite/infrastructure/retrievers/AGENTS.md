@@ -11,7 +11,7 @@ Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航
 ```
 
 ## 文件说明
-- `query_analysis.py` -- NFKC/whitespace/lowercase/CJK-boundary/tech-token sparse query normalization
+- [query_analysis.py](query_analysis.py) -- NFKC/whitespace/lowercase/CJK-boundary/tech-token sparse query normalization
 - query grounding adapters -- produce structured JSON from raw queries
 - hybrid retriever -- auxiliary chunk retrieval for graph-first flow
 

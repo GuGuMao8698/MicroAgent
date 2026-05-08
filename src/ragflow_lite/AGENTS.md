@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## 概述
-这个目录是后端源码根，只维护分层边界和源码级导航。具体实现约束应写到最近的子目录 `AGENTS.md`。
+这个目录是后端源码根，只维护分层边界和源码级导航。具体实现约束应写到最近的子目录 [AGENTS.md](./AGENTS.md)。
 
 ## Active Contracts
 Runtime contracts: [CONTRACTS.md](./CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。

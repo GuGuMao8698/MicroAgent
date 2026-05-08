@@ -1,7 +1,7 @@
 # API Active Contracts
 
 This file owns active runtime contracts for `src/ragflow_lite/api`.
-`AGENTS.md` in this subtree should link here instead of duplicating these
+[AGENTS.md](./AGENTS.md) in this subtree should link here instead of duplicating these
 contracts.
 
 ## Scope
@@ -12,7 +12,7 @@ FastAPI HTTP interface layer: routes, schemas, dependency wiring, observability.
 
 Reviewed at: `2026-05-08T21:00:00+08:00`
 Status: Active
-Owner: `routes/v0` router
+Owner: [routes/v0](routes/v0) router
 
 Endpoints:
 - `health` -- liveness check
@@ -51,5 +51,5 @@ Response schemas:
 
 ## Verification
 
-- Route wiring: `tests/unit/api/`
-- Provider wiring: `tests/unit/api/test_providers.py`
+- Route wiring: [tests/unit/api](../../../tests/unit/api)
+- Provider wiring: [tests/unit/api/test_providers.py](../../../tests/unit/api/test_providers.py)

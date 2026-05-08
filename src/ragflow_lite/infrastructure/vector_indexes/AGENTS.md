@@ -14,7 +14,7 @@ rtk cx overview src/ragflow_lite/infrastructure/vector_indexes --full
 ## 文件说明
 - Infinity dense index -- document rows, chunk rows, dataset rows, document-dataset bindings
 - Local JSON vector index -- fallback/test-double with atomic replace
-- `chunk_text_fields.py` -- localized sparse fields for hybrid chunk retrieval
+- [chunk_text_fields.py](chunk_text_fields.py) -- localized sparse fields for hybrid chunk retrieval
 
 ## Avoid Here
 - 不要引入 rerank、tag API、dataset-aware query filtering 或新的 primary retrieval path。

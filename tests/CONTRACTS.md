@@ -1,6 +1,6 @@
 # tests/CONTRACTS.md
 
-Source-backed test harness semantics. Navigation lives in `AGENTS.md`.
+Source-backed test harness semantics. Navigation lives in [AGENTS.md](./AGENTS.md).
 
 ## CLI gates
 
@@ -43,7 +43,7 @@ conftest.py `_set_deepeval_plain_prompt_variant` monkeypatches `RAGFLOW_LITE_OPE
 
 ## Fixture document path
 
-`fixture_documents_dir` returns `tests/fixtures/documents`.
+`fixture_documents_dir` returns [tests/fixtures/documents](fixtures/documents).
 
 ## Scoped app settings and client fixtures
 
@@ -53,7 +53,7 @@ conftest.py `_set_deepeval_plain_prompt_variant` monkeypatches `RAGFLOW_LITE_OPE
 
 ## Live Infinity cleanup helpers
 
-Source: `infinity_test_support.py`.
+Source: [infinity_test_support.py](infinity_test_support.py).
 
 - `assign_isolated_infinity_tables(settings, tmp_path)`: uses `tmp_path` hash for table name suffix (6 tables per settings).
 - `register_infinity_table_cleanup(settings)`: registers settings + table names for session-end cleanup.
@@ -69,4 +69,4 @@ Source: `infinity_test_support.py`.
 
 ## Placeholder detection
 
-`eval_support.py` `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", "test-ark-api-key", "ep-test-model"}`. Used by `validate_deepeval_env` to reject placeholder credentials.
+[eval_support.py](eval_support.py) `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", "test-ark-api-key", "ep-test-model"}`. Used by `validate_deepeval_env` to reject placeholder credentials.

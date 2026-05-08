@@ -5,7 +5,7 @@ Status: Active
 
 This file owns active runtime contracts for
 `src/ragflow_lite/infrastructure/evidence`.
-`AGENTS.md` in this subtree should link here instead of duplicating these
+[AGENTS.md](./AGENTS.md) in this subtree should link here instead of duplicating these
 contracts.
 
 ## Qualification
@@ -22,7 +22,7 @@ It owns several implementation families:
 - graph evidence canonicalization;
 - intra-chunk discourse extraction for DiscoRAG.
 
-The parent `infrastructure/CONTRACTS.md` owns adapter-wide defaults. This file
+The parent [../CONTRACTS.md](../CONTRACTS.md) owns adapter-wide defaults. This file
 owns only evidence-submodule semantics.
 
 ## Graph Evidence Extraction Contract
@@ -41,14 +41,14 @@ Runtime boundary:
 - OpenAI Responses extraction remains a legacy adapter path.
 
 Verification:
-- `tests/unit/infrastructure/test_deepseek_evidence_extractor.py`
-- `tests/unit/infrastructure/test_openai_evidence_extractor.py`
-- provider wiring assertions in `tests/unit/api/test_providers.py`
+- [tests/unit/infrastructure/test_deepseek_evidence_extractor.py](../../../../tests/unit/infrastructure/test_deepseek_evidence_extractor.py)
+- [tests/unit/infrastructure/test_openai_evidence_extractor.py](../../../../tests/unit/infrastructure/test_openai_evidence_extractor.py)
+- provider wiring assertions in [tests/unit/api/test_providers.py](../../../../tests/unit/api/test_providers.py)
 
 ## Graph Candidate And Storage Contract
 
 Owners:
-- `graph_candidate_fields.py`
+- [graph_candidate_fields.py](graph_candidate_fields.py)
 - `InfinityGraphCandidateIndex`
 - `GraphEvidenceInfinityStore`
 - `LocalJsonGraphEvidenceStore`
@@ -69,14 +69,14 @@ Source of truth:
   not the default runtime candidate index.
 
 Verification:
-- `tests/unit/infrastructure/test_graph_candidate_fields.py`
-- `tests/unit/infrastructure/test_infinity_graph_candidate_index.py`
-- `tests/unit/infrastructure/test_graph_evidence_infinity_store.py`
-- provider wiring assertions in `tests/unit/api/test_providers.py`
+- [tests/unit/infrastructure/test_graph_candidate_fields.py](../../../../tests/unit/infrastructure/test_graph_candidate_fields.py)
+- [tests/unit/infrastructure/test_infinity_graph_candidate_index.py](../../../../tests/unit/infrastructure/test_infinity_graph_candidate_index.py)
+- [tests/unit/infrastructure/test_graph_evidence_infinity_store.py](../../../../tests/unit/infrastructure/test_graph_evidence_infinity_store.py)
+- provider wiring assertions in [tests/unit/api/test_providers.py](../../../../tests/unit/api/test_providers.py)
 
 ## Canonicalization Contract
 
-Owner: `graph_evidence_canonicalizer.py`
+Owner: [graph_evidence_canonicalizer.py](graph_evidence_canonicalizer.py)
 
 Source of truth:
 - Cross-document canonicalization merges same-name entities into canonical
@@ -86,7 +86,7 @@ Source of truth:
 - Relations with missing endpoints and entities with empty names are skipped.
 
 Verification:
-- `tests/unit/infrastructure/test_graph_evidence_canonicalizer.py`
+- [tests/unit/infrastructure/test_graph_evidence_canonicalizer.py](../../../../tests/unit/infrastructure/test_graph_evidence_canonicalizer.py)
 
 ## Intra-Chunk Discourse Extraction Contract
 
@@ -112,5 +112,5 @@ Forbidden stale interpretations:
 - RST extraction must not silently shrink MiniRAG's discourse-visible window.
 
 Verification:
-- `tests/unit/infrastructure/test_deepseek_discourse_extractor.py`
-- provider wiring assertions in `tests/unit/api/test_providers.py`
+- [tests/unit/infrastructure/test_deepseek_discourse_extractor.py](../../../../tests/unit/infrastructure/test_deepseek_discourse_extractor.py)
+- provider wiring assertions in [tests/unit/api/test_providers.py](../../../../tests/unit/api/test_providers.py)

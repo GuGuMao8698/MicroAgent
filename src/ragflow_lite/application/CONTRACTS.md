@@ -1,7 +1,7 @@
 # Application Active Contracts
 
 This file owns active runtime contracts for `src/ragflow_lite/application`.
-`AGENTS.md` files in this subtree should link here instead of duplicating these
+[AGENTS.md](./AGENTS.md) files in this subtree should link here instead of duplicating these
 contracts.
 
 ## DiscoRAG Budget Contract
@@ -27,11 +27,11 @@ Invariant:
 Forbidden stale interpretations:
 - Do not treat `discourse_selection_k` as equal to `top_n`.
 - Do not reintroduce extractor-local defaults such as `max_chunks=5`.
-- Do not use historical `docs/superpowers/plans` or `docs/superpowers/specs` as active runtime contracts.
+- Do not use historical [docs/superpowers/plans](../../../docs/superpowers/plans) or [docs/superpowers/specs](../../../docs/superpowers/specs) as active runtime contracts.
 
 Verification:
-- `tests/unit/application/test_mini_graph_first_retriever.py`
-- `tests/unit/application/test_discorag_query_service.py`
+- [tests/unit/application/test_mini_graph_first_retriever.py](../../../tests/unit/application/test_mini_graph_first_retriever.py)
+- [tests/unit/application/test_discorag_query_service.py](../../../tests/unit/application/test_discorag_query_service.py)
 - stale scan for `max_chunks: int = 5` and `discourse_selection_n == top_n`
 
 ## Application Service Boundary Contract

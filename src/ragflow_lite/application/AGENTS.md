@@ -24,14 +24,14 @@ application/
 ```
 
 ## 文件地图
-- `pipelines/`: ingestion 相关目录。
-- `services/`: query、document、dataset、DiscoRAG 相关目录。
-- `use_cases/`: 预留目录；只有在形成稳定 use-case 边界后再启用。
+- [pipelines/](pipelines/): ingestion 相关目录。
+- [services/](services/): query、document、dataset、DiscoRAG 相关目录。
+- [use_cases/](use_cases/): 预留目录；只有在形成稳定 use-case 边界后再启用。
 
 ## 边界提示
-- 子目录 `AGENTS.md` 只保留导航、命令、文件角色和错层提醒。
+- 子目录导航文件只保留导航、命令、文件角色和错层提醒。
 
 ## 禁区
 - 不要在 application 层直接 import FastAPI, Infinity SDK, provider SDK, or local JSON storage.
 - 不要在这里放 parser selection、provider retry policy、table/index DDL 之类的 adapter 细节。
-- 不要把 `use_cases/` 当成“暂时不知道放哪”的目录。
+- 不要把 [use_cases/](use_cases/) 当成“暂时不知道放哪”的目录。

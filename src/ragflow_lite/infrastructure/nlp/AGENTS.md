@@ -12,5 +12,5 @@ Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航
 
 ## Avoid Here
 - 不要为 sparse fields 静默 fallback 到其他 tokenizer。
-- Query normalization 规则属于 `infrastructure/retrievers/query_analysis.py`，不在这里。
+- Query normalization 规则属于 [../retrievers/query_analysis.py](../retrievers/query_analysis.py)，不在这里。
 - 不要 log raw user queries 或 document text。

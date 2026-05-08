@@ -1,16 +1,16 @@
 # Package-Level Active Contracts
 
 This file owns active runtime contracts for `src/ragflow_lite`.
-`AGENTS.md` in this subtree should link here instead of duplicating these
+[AGENTS.md](./AGENTS.md) in this subtree should link here instead of duplicating these
 contracts.
 
 ## Active Module Contracts
 
 Child modules that own their own CONTRACTS.md:
 
-- `api/CONTRACTS.md` -- HTTP surface, endpoints, schemas, status codes, observability
-- `application/CONTRACTS.md` -- DiscoRAG budget, service boundary
-- `infrastructure/CONTRACTS.md` -- adapter defaults, provider wiring, embedding/vector-index contracts
+- [api/CONTRACTS.md](api/CONTRACTS.md) -- HTTP surface, endpoints, schemas, status codes, observability
+- [application/CONTRACTS.md](application/CONTRACTS.md) -- DiscoRAG budget, service boundary
+- [infrastructure/CONTRACTS.md](infrastructure/CONTRACTS.md) -- adapter defaults, provider wiring, embedding/vector-index contracts
 
 ## Package Boundary Contract
 
@@ -23,7 +23,7 @@ Source of truth:
 - API prefix: `/api/v0` (configurable via `Settings.api_prefix`).
 
 Mode routing and provider wiring:
-- Default query path and dispatch semantics are owned by `application/CONTRACTS.md`.
+- Default query path and dispatch semantics are owned by [application/CONTRACTS.md](application/CONTRACTS.md).
 - Infinity hybrid chunk retrieval is an auxiliary retrieval capability, not an independently selectable HTTP strategy.
 - Retrieval mode is fixed to hybrid; `RAGFLOW_LITE_RETRIEVAL_MODE` is rejected at startup if set.
 - All runtime provider config comes from host environment (`DEEPSEEK_API_KEY`, `ARK_API_KEY`, `ARK_EMBEDDING_MODEL`); no secrets are read from or committed in the source tree.
@@ -39,6 +39,6 @@ Layering:
 ## Documentation Rule
 
 All active runtime contracts in this subtree follow the governance standard:
-source-backed, dated, owned, and verifiable. See `docs/agent-doc-governance.md`
+source-backed, dated, owned, and verifiable. See [docs/agent-doc-governance.md](../../docs/agent-doc-governance.md)
 for the full governance standard. AGENTS.md files in child directories must not duplicate
 active semantics; they may only point to the nearest CONTRACTS.md.

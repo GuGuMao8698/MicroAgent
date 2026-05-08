@@ -12,7 +12,7 @@ rtk cx definition --name Settings --from src/ragflow_lite/config/settings.py --k
 ```
 
 ## 文件说明
-- `settings.py` -- env-backed runtime configuration entrypoint. Active behavior belongs in `../CONTRACTS.md`.
+- [settings.py](settings.py) -- env-backed runtime configuration entrypoint. Active behavior belongs in [../CONTRACTS.md](../CONTRACTS.md).
 
 ## Avoid Here
 - 不要在这里编排业务流程或引入 provider SDK 依赖。
