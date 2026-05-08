@@ -22,8 +22,7 @@ Source of truth:
 - API prefix: `/api/v0` (configurable via `Settings.api_prefix`).
 
 Mode routing and provider wiring:
-- Default query path is graph-first / DiscoRAG orchestration via `MiniGraphFirstRetriever` -> `DiscoRAGQueryService`.
-- `QueryModeRouter` dispatches query mode only; retrieval, evidence, and answer logic stay in downstream services.
+- Default query path and dispatch semantics are owned by `application/CONTRACTS.md`.
 - Infinity hybrid chunk retrieval is an auxiliary retrieval capability, not an independently selectable HTTP strategy.
 - Retrieval mode is fixed to hybrid; `RAGFLOW_LITE_RETRIEVAL_MODE` is rejected at startup if set.
 - All runtime provider config comes from host environment (`DEEPSEEK_API_KEY`, `ARK_API_KEY`, `ARK_EMBEDDING_MODEL`); no secrets are read from or committed in the source tree.
