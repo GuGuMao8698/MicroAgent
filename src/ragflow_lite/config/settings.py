@@ -85,7 +85,7 @@ class Settings:
     temp_dir: Path
     chunk_size: int = 500
     chunk_overlap: int = 50
-    max_top_k: int = 10
+    max_top_k: int = 8
     app_name: str = "ragflow-lite"
     api_prefix: str = "/api/v0"
     log_level: str = field(
