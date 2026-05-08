@@ -78,9 +78,15 @@ class FakeTopologyRetriever:
 @dataclass
 class RecordingDiscourseExtractor:
     last_package: EvidencePackage | None = None
+    selected_chunk_ids: list[str] = field(default_factory=list)
 
     def extract(self, evidence_package: EvidencePackage) -> IntraChunkDiscoursePackage:
         self.last_package = evidence_package
+        self.selected_chunk_ids = [
+            item.canonical_chunk_id
+            for item in evidence_package.items
+            if item.metadata.get("selected_for_discourse") is True
+        ]
         return IntraChunkDiscoursePackage(
             query=evidence_package.query,
             evidence_package=evidence_package,
@@ -989,4 +995,59 @@ def test_discorag_query_service_filters_blueprint_metadata_to_final_contexts() -
     assert metadata["answer_context_chunk_ids"] == [
         "chunk_supplemental_1",
         "chunk_supplemental_2",
+    ]
+
+
+def test_discorag_rst_boundary_receives_all_default_discourse_visible_chunks() -> None:
+    chunks = [_chunk(f"chunk_{index}") for index in range(12)]
+    retrieval_result = _retrieval_result(chunks[:6])
+    retrieval_result.source_selection = GraphFirstSourceSelection(
+        sources=[],
+        final_context_k=6,
+        discourse_selection_k=12,
+        context_token_budget=None,
+        omitted_source_count=6,
+        fallback_reason=None,
+    )
+    supplemental: dict[str, RetrievedChunk] = {}
+    for index, chunk in enumerate(chunks):
+        selected_for_answer = index < 6
+        selected_for_discourse = index < 12
+        if not selected_for_answer:
+            chunk.metadata["selected_for_discourse"] = True
+            chunk.metadata["supplemental_discourse"] = True
+            supplemental[chunk.chunk_id] = chunk
+        retrieval_result.source_selection.sources.append(
+            GraphFirstSource(
+                chunk_id=chunk.chunk_id,
+                rank=index,
+                score=1.0 - (index * 0.01),
+                score_components={"score": 1.0 - (index * 0.01)},
+                supporting_entity_ids=[],
+                supporting_relation_ids=[],
+                supporting_path_ids=[],
+                auxiliary_chunk_hit=False,
+                selected_for_answer=selected_for_answer,
+                selected_for_discourse=selected_for_discourse,
+                selection_reason="graph_path_support",
+                metadata={"selected_for_discourse": selected_for_discourse},
+            )
+        )
+    retrieval_result.metadata["supplemental_discourse_chunks"] = supplemental
+
+    retriever = FakeTopologyRetriever(retrieval_result)
+    discourse_extractor = RecordingDiscourseExtractor()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=discourse_extractor,
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=RecordingAnswerer(),
+    )
+
+    service.query("How does the pipeline use discourse?", top_k=6)
+
+    assert discourse_extractor.selected_chunk_ids == [
+        f"chunk_{index}" for index in range(12)
     ]
