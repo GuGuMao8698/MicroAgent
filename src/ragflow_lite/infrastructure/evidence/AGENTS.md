@@ -22,5 +22,4 @@ Active contracts: [CONTRACTS.md](./CONTRACTS.md)。本文件保留 evidence 命�
 - `graph_candidate_fields.py`: candidate row field helpers.
 
 ## 边界提示
-- Active runtime contracts for discourse extraction and evidence persistence live in [CONTRACTS.md](./CONTRACTS.md).
 - 本文件只保留 evidence 目录导航、本地命令、文件角色和错层提醒。

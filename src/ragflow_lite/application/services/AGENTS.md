@@ -25,5 +25,4 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 - `_query_observability.py`: query observability helpers.
 
 ## 边界提示
-- Runtime behavior for these services lives in [../CONTRACTS.md](../CONTRACTS.md).
 - 本文件只保留服务导航、本地命令、文件角色和错层提醒。

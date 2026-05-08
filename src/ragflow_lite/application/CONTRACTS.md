@@ -11,10 +11,11 @@ Status: Active
 Owner: `MiniGraphFirstRetriever`, `DiscoRAGQueryService`
 
 Source of truth:
-- Public final answer context budget: `QueryRequest.top_n`.
+- Public final answer context budget: normalized `QueryRequest.top_n` after `top_k` alias handling.
 - `MiniGraphFirstRetriever` derives and normalizes the effective discourse-visible budget as `discourse_selection_k`.
 
 Invariant:
+- `QueryRequest.top_n` is normalized before application services consume the request.
 - `top_n` is the final answer context budget.
 - Default `top_n=6` means final answer contexts are bounded to 6.
 - When no explicit discourse budget override is provided, the effective `discourse_selection_k` defaults to `2 * top_n`.

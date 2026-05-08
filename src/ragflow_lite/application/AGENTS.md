@@ -29,7 +29,7 @@ application/
 - `use_cases/`: 预留目录；只有在形成稳定 use-case 边界后再启用。
 
 ## 边界提示
-- 运行契约统一看 [CONTRACTS.md](./CONTRACTS.md) 与子目录 `CONTRACTS.md`。
+- 运行契约统一看 [CONTRACTS.md](./CONTRACTS.md)。
 - 子目录 `AGENTS.md` 只保留导航、命令、文件角色和错层提醒。
 
 ## 禁区

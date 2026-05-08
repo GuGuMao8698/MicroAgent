@@ -16,5 +16,4 @@ rtk cx definition --name IngestionPipeline --from src/ragflow_lite/application/p
 - `__init__.py`: pipeline exports.
 
 ## 边界提示
-- Active runtime contracts for ingestion and task lifecycle live in [../CONTRACTS.md](../CONTRACTS.md).
 - 本文件只保留 pipeline 导航、本地命令、文件角色和错层提醒。

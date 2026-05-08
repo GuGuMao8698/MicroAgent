@@ -19,7 +19,8 @@ Invariant:
 - Default extractor behavior has no local chunk cap.
 - All retriever-selected discourse-visible chunks are eligible for RST extraction.
 - Explicit caps are opt-in and must be visible in metadata.
-- Metadata always exposes selected and skipped chunk ids; explicit caps make skipped ids observable when chunks are excluded.
+- Metadata always includes `selected_chunk_ids` and `skipped_chunk_ids`.
+- `skipped_chunk_ids` may be empty; explicit caps make non-empty skipped ids observable when chunks are excluded.
 
 Forbidden stale interpretations:
 - `max_chunks=5` is not a valid default.
