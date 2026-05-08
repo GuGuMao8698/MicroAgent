@@ -731,7 +731,7 @@ def _with_source_selection_metadata(
         {
             "retrieval_mode": "mini_graph_first",
             "source_chunk_score": source.score,
-            "source_selection_rank": source.rank,
+            "source_selection_index": source.rank,
             "selected_for_answer": source.selected_for_answer,
             "selected_for_discourse": source.selected_for_discourse,
             "selection_reason": source.selection_reason,

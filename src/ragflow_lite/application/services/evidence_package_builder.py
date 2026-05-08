@@ -150,7 +150,7 @@ def _source_metadata(source: GraphFirstSource | None) -> dict[str, object]:
         return {}
     return {
         **dict(source.metadata),
-        "source_selection_rank": source.rank,
+        "source_selection_index": source.rank,
         "selected_for_answer": source.selected_for_answer,
         "selected_for_discourse": source.selected_for_discourse,
         "selection_reason": source.selection_reason,

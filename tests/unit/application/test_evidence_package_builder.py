@@ -390,7 +390,8 @@ class TestSourceSelectionMetadata:
 
         package = EvidencePackageBuilder().build(result)
 
-        assert package.items[0].metadata["source_selection_rank"] == 0
+        assert package.items[0].metadata["source_selection_index"] == 0
+        assert "source_selection_rank" not in package.items[0].metadata
         assert package.items[0].metadata["selected_for_discourse"] is True
         assert package.items[0].metadata["selection_reason"] == (
             "graph_path_support+graph_relation_support"
