@@ -1,12 +1,12 @@
 # Project Overview
-`MicroRAG` 是一个结合了 `MiniRAG` 和 `DiscoRAG` 的个人项目；内部 Python 包名和运行时配置前缀暂保持 `ragflow_lite` / `RAGFLOW_LITE_*`。
+`MicroRAG` 是一个结合了 `MiniRAG` 和 `DiscoRAG` 的个人项目；内部包名和运行时前缀等活跃契约见 `src/ragflow_lite/CONTRACTS.md`。
 
 ## Current Stage
 现在对minirag和discorag进行实际工程化的改进
 
 ## Local Workflow
 - 仓库根 Python 命令默认使用本地 `.venv`。
-- 本地运行和 `docker/compose.local.yml` 都依赖宿主导出的 `DEEPSEEK_API_KEY`、`ARK_API_KEY`、`ARK_EMBEDDING_MODEL`；不要把 secret 写入仓库内 `.env`。
+- 本地运行、provider 环境和 Docker 契约见 `src/ragflow_lite/CONTRACTS.md` 与 `docker/CONTRACTS.md`；根文档只保留入口指针。
 - `AGENTS.md` / `CONTRACTS.md` 维护规范见 `docs/agent-doc-governance.md`；新增或移动契约前先按该文件判断模块边界。
 
 # cx — Semantic Code Navigation

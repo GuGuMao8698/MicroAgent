@@ -56,7 +56,7 @@ Logging boundary:
 
 ## Known Submodule Contracts
 
-- `evidence/CONTRACTS.md` -- intra-chunk discourse extraction contract.
+- `evidence/CONTRACTS.md` -- graph evidence extraction, candidate indexing, storage, canonicalization, and intra-chunk discourse extraction.
 
 ## Verification
 

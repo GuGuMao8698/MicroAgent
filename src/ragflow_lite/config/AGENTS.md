@@ -12,10 +12,7 @@ rtk cx definition --name Settings --from src/ragflow_lite/config/settings.py --k
 ```
 
 ## 文件说明
-- `settings.py` -- `Settings` class: env-backed runtime configuration
-  - `default()` chooses repo-local `data/` paths
-  - `require_runtime_provider_configs()` validates provider environment
-  - `ensure_directories()` creates local runtime directories
+- `settings.py` -- env-backed runtime configuration entrypoint. Active behavior belongs in `../CONTRACTS.md`.
 
 ## Avoid Here
 - 不要在这里编排业务流程或引入 provider SDK 依赖。
