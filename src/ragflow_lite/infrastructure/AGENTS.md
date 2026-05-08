@@ -3,6 +3,9 @@
 ## 概述
 这个目录实现 `domain.ports` 的底层 adapter：provider、Infinity、JSON/file storage、parser、chunker、retriever 和 answerer。
 
+## Active Contracts
+Runtime contracts: [CONTRACTS.md](./CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
+
 ## 快速命令
 ```bash
 rtk cx overview src/ragflow_lite/infrastructure --full
@@ -26,11 +29,6 @@ infrastructure/
 ├── storage/         # local document byte storage
 └── vector_indexes/  # Infinity and local JSON vector indexes
 ```
-
-- Default vector index is `InfinityDenseVectorIndex`; `LocalJsonVectorIndex` is fallback/test-double style storage, not the default runtime path.
-- Current embedding dimension contract is `2048`; embedding signatures are compatibility guards, not documentation-only metadata.
-- Non-embedding LLM calls use DeepSeek Chat Completions; OpenAI Responses adapters remain legacy where present.
-- Infrastructure may translate low-level exceptions and log bounded adapter outcomes, but application owns main workflow outcome logs.
 
 ## 关键约定
 - Do not define business flow here. Infrastructure implements ports; it does not decide API shape, query mode routing, or ingestion lifecycle.
