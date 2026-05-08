@@ -196,7 +196,7 @@ class DiscoRAGAnswerBlueprintBuilder:
             constraints.append(
                 "Explicitly handle inter-chunk contradiction or conflict before giving a final conclusion."
             )
-        elif self._has_relation_type(graph, {"qualifies"}):
+        if self._has_relation_type(graph, {"qualifies"}):
             constraints.append(
                 "Respect inter-chunk qualification before stating final conclusions."
             )
@@ -268,17 +268,6 @@ class DiscoRAGAnswerBlueprintBuilder:
             return False
         return any(
             relation.relation_type in relation_types for relation in graph.relations
-        )
-
-    def _has_qualification_relation(
-        self,
-        graph: InterChunkDiscourseGraph | None,
-    ) -> bool:
-        if graph is None:
-            return False
-        return any(
-            relation.relation_type in {"qualifies", "contradicts"}
-            for relation in graph.relations
         )
 
     def _promoted_chunk_ids(

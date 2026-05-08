@@ -442,6 +442,51 @@ def test_blueprint_supports_relation_does_not_promote_supplemental_chunk() -> No
     assert "supports" in blueprint.metadata["inter_chunk_relation_types"]
 
 
+def test_blueprint_adds_both_contradiction_and_qualification_constraints() -> None:
+    package = _package(
+        items=[
+            _evidence_item("chunk_answer", order=0),
+            _evidence_item("chunk_qualifier", order=1),
+            _evidence_item("chunk_contradiction", order=2),
+        ]
+    )
+    package.evidence_package.items[0].metadata["selected_for_answer"] = True
+    package.evidence_package.items[1].metadata["selected_for_answer"] = False
+    package.evidence_package.items[1].metadata["supplemental_discourse"] = True
+    package.evidence_package.items[2].metadata["selected_for_answer"] = False
+    package.evidence_package.items[2].metadata["supplemental_discourse"] = True
+    graph = InterChunkDiscourseGraph(
+        query=package.query,
+        chunk_ids=["chunk_answer", "chunk_qualifier", "chunk_contradiction"],
+        relations=[
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_qualifier",
+                target_chunk_id="chunk_answer",
+                relation_type="qualifies",
+                rationale="Qualifier narrows the answer.",
+                confidence=0.7,
+            ),
+            InterChunkDiscourseRelation(
+                source_chunk_id="chunk_contradiction",
+                target_chunk_id="chunk_answer",
+                relation_type="contradicts",
+                rationale="Contradiction changes the conclusion.",
+                confidence=0.8,
+            ),
+        ],
+    )
+
+    blueprint = DiscoRAGAnswerBlueprintBuilder().build(package, graph=graph)
+
+    constraints = " ".join(blueprint.answer_constraints).lower()
+    assert "contradiction" in constraints or "conflict" in constraints
+    assert "qualification" in constraints
+    assert blueprint.metadata["promoted_chunk_ids"] == [
+        "chunk_qualifier",
+        "chunk_contradiction",
+    ]
+
+
 def test_blueprint_adds_caution_for_contradiction_relation() -> None:
     package = _package(
         items=[
