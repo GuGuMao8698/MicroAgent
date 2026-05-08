@@ -1,9 +1,12 @@
 # AGENTS.md
 
-## 概述
-这个目录负责测试、夹具和可选评估。根文档只保留跨测试树规则；具体子树按最近 `AGENTS.md` 执行。
+Active test harness semantics: see `CONTRACTS.md`.
 
-## 快速命令
+## Directory role
+
+Tests, fixtures, and optional evaluation. Root AGENTS covers cross-tree navigation; subtree-specific rules live in the nearest `AGENTS.md` or `CONTRACTS.md`.
+
+## Quick commands
 ```bash
 ./.venv/bin/python -m pytest tests/unit/application tests/unit/infrastructure
 ./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval
@@ -11,7 +14,7 @@ DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/
 ./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all
 ```
 
-## 架构
+## Architecture
 ```text
 tests/
 ├── unit/          # module and boundary tests
@@ -21,16 +24,13 @@ tests/
 └── eval_support.py
 ```
 
+## File map notes
+
 - `unit/test_eval_gating.py` tests marker/option/env gating itself and must not require the `deepeval` package.
 - `fixtures/documents` holds committed sample documents only; runtime outputs and local screenshots stay out of fixtures.
 - Answerer prompt source of truth is the tracked templates under `src/ragflow_lite/infrastructure/answerers/`, not inline constants.
 - Manual smoke follows `docker/AGENTS.md`; do not copy compose output into tests.
 
-## 关键约定
-- Any test crossing `create_app()`, `build_services()`, `InfinityDenseVectorIndex`, `InfinityGraphCandidateIndex`, or the real retrieval path must use live Infinity and `@pytest.mark.live_infinity`.
-- Do not add fake/stub/mock Infinity clients, databases, tables, query builders, or monkeypatches of `infinity.connect`.
-- Default unit tests may fake Ark embedding and DeepSeek/OpenAI structured clients only at non-Infinity boundaries.
-- `deepeval` tests require `@pytest.mark.deepeval`, explicit `--run-deepeval`, and real `DEEPSEEK_API_KEY`, `ARK_API_KEY`, `ARK_EMBEDDING_MODEL`.
-- Goldens generation uses `./.venv-goldens/bin/python tests/evals/generate_goldens.py`; prompt optimization uses the main `./.venv/bin/python tests/evals/optimize_prompt.py`.
-- Local eval summaries are post-processing artifacts; pytest does not automatically write `latest.summary.json`.
+## Boundary rules
+
 - Prefer failure-path and boundary tests over happy-path-only coverage, especially provider failure mapping, startup failure, dimension guards, dataset/catalog behavior, async ingestion state, citation/PDF page metadata, and observability.

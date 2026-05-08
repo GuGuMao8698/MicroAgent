@@ -1,8 +1,12 @@
 # AGENTS.md
 
-这个目录承接 optional DeepEval workflow: goldens generation, prompt optimization, live RAG eval and result summarization.
+Eval contracts: see `CONTRACTS.md`.
 
-## 命令边界
+## Directory role
+
+Optional DeepEval workflow: goldens generation, prompt optimization, live RAG eval, and result summarization.
+
+## Quick commands
 ```bash
 ./.venv-goldens/bin/python tests/evals/generate_goldens.py
 ./.venv/bin/python tests/evals/optimize_prompt.py
@@ -11,15 +15,14 @@ DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/
 ./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all
 ```
 
-- Goldens generation is isolated in `.venv-goldens`.
-- Prompt optimization runs in the main `.venv` because it imports repo runtime code and consumes committed goldens.
-- `test_rag_deepeval.py` is both `live_infinity` and `deepeval`; it uploads fixtures, waits for terminal ingestion state, then evaluates answers.
-- Raw DeepEval exports and local summaries are separate artifact flows.
+## File map
 
-## 关键约定
-- Do not make deepeval part of default pytest; it always requires explicit `--run-deepeval`.
-- Real `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL` are required for live eval.
-- Pytest eval runs do not automatically write local summary artifacts; run `summarize_results.py` after raw export.
-- `summarize_results.py --export-all` writes rolling `latest.*` files and timestamped summary/failed/metrics history.
-- Keep goldens as generated artifacts; if quality is bad, regenerate rather than hand-patching rows.
-- Do not mix `.venv-goldens` dependencies into the main runtime `.venv`.
+- `test_rag_deepeval.py` — uploads fixtures, waits for terminal ingestion state, evaluates answers.
+- `generate_goldens.py` — synthetic golden generation (isolated `.venv-goldens`).
+- `optimize_prompt.py` — prompt optimization against committed goldens (main `.venv`).
+- `summarize_results.py` — post-processing of raw DeepEval exports.
+
+## Boundary rules
+
+- Keep goldens as generated artifacts; if quality is bad, regenerate rather than hand-patch rows.
+- Raw DeepEval exports and local summaries are separate artifact flows.
