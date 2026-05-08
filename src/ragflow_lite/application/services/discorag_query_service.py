@@ -64,6 +64,21 @@ def _contexts_with_bounded_promotion(
     return result[:budget]
 
 
+def _filter_metadata_chunk_ids(
+    metadata: dict[str, object],
+    key: str,
+    context_ids: set[str],
+) -> None:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return
+    metadata[key] = [
+        chunk_id
+        for chunk_id in value
+        if isinstance(chunk_id, str) and chunk_id in context_ids
+    ]
+
+
 def _blueprint_for_contexts(
     blueprint: AnswerBlueprint,
     contexts: list[RetrievedChunk],
@@ -80,6 +95,13 @@ def _blueprint_for_contexts(
         if chunk_id in context_ids
     }
     metadata = dict(blueprint.metadata)
+    for key in (
+        "selected_answer_chunk_ids",
+        "selected_discourse_chunk_ids",
+        "supplemental_discourse_chunk_ids",
+        "promoted_chunk_ids",
+    ):
+        _filter_metadata_chunk_ids(metadata, key, context_ids)
     metadata["answer_context_chunk_ids"] = [context.chunk_id for context in contexts]
     return AnswerBlueprint(
         ordered_chunk_ids=ordered_chunk_ids,

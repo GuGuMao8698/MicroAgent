@@ -765,6 +765,16 @@ def test_discorag_query_service_uses_real_retriever_supplemental_handoff() -> No
         "chunk_3",
         "chunk_4",
         "chunk_5",
+    ]
+    assert answerer.last_request.metadata["source_selection"][
+        "selected_discourse_chunk_ids"
+    ] == [
+        "chunk_0",
+        "chunk_1",
+        "chunk_2",
+        "chunk_3",
+        "chunk_4",
+        "chunk_5",
         "chunk_6",
         "chunk_7",
         "chunk_8",
@@ -864,4 +874,119 @@ def test_discorag_query_service_does_not_promote_without_promoted_ids() -> None:
     assert answerer.last_request.blueprint.ordered_chunk_ids == [
         "chunk_a",
         "chunk_b",
+    ]
+
+
+def test_discorag_query_service_filters_blueprint_metadata_to_final_contexts() -> None:
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunks = {
+        "chunk_supplemental_1": RetrievedChunk(
+            chunk_id="chunk_supplemental_1",
+            document_id="doc_alpha",
+            text="First supplemental qualifier",
+            score=0.4,
+            metadata={
+                "selected_for_answer": False,
+                "selected_for_discourse": True,
+                "supplemental_discourse": True,
+            },
+        ),
+        "chunk_supplemental_2": RetrievedChunk(
+            chunk_id="chunk_supplemental_2",
+            document_id="doc_alpha",
+            text="Second supplemental qualifier",
+            score=0.3,
+            metadata={
+                "selected_for_answer": False,
+                "selected_for_discourse": True,
+                "supplemental_discourse": True,
+            },
+        ),
+    }
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = supplemental_chunks
+    retrieval_result.metadata["source_selection"] = {
+        "selected_answer_chunk_ids": ["chunk_a", "chunk_b"],
+        "selected_discourse_chunk_ids": [
+            "chunk_a",
+            "chunk_b",
+            "chunk_supplemental_1",
+            "chunk_supplemental_2",
+        ],
+        "supplemental_discourse_chunk_ids": [
+            "chunk_supplemental_1",
+            "chunk_supplemental_2",
+        ],
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=[
+            "chunk_supplemental_1",
+            "chunk_supplemental_2",
+            "chunk_a",
+            "chunk_b",
+        ],
+        chunk_roles={
+            "chunk_supplemental_1": "context",
+            "chunk_supplemental_2": "context",
+            "chunk_a": "main",
+            "chunk_b": "detail",
+        },
+        answer_constraints=["Respect qualification."],
+        plan_steps=["Use promoted discourse evidence."],
+        metadata={
+            "selected_answer_chunk_ids": ["chunk_a", "chunk_b"],
+            "selected_discourse_chunk_ids": [
+                "chunk_a",
+                "chunk_b",
+                "chunk_supplemental_1",
+                "chunk_supplemental_2",
+            ],
+            "supplemental_discourse_chunk_ids": [
+                "chunk_supplemental_1",
+                "chunk_supplemental_2",
+            ],
+            "promoted_chunk_ids": [
+                "chunk_supplemental_1",
+                "chunk_supplemental_2",
+            ],
+        },
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_supplemental_1",
+        "chunk_supplemental_2",
+    ]
+    assert answerer.last_request.blueprint is not None
+    metadata = answerer.last_request.blueprint.metadata
+    assert metadata["selected_answer_chunk_ids"] == []
+    assert metadata["selected_discourse_chunk_ids"] == [
+        "chunk_supplemental_1",
+        "chunk_supplemental_2",
+    ]
+    assert metadata["supplemental_discourse_chunk_ids"] == [
+        "chunk_supplemental_1",
+        "chunk_supplemental_2",
+    ]
+    assert metadata["promoted_chunk_ids"] == [
+        "chunk_supplemental_1",
+        "chunk_supplemental_2",
+    ]
+    assert metadata["answer_context_chunk_ids"] == [
+        "chunk_supplemental_1",
+        "chunk_supplemental_2",
     ]
