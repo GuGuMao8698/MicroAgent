@@ -1,0 +1,51 @@
+# CONTRACTS.md
+
+## Scope
+Local-only development, observability, and smoke testing. Not for production, CI, or release.
+
+## Local Compose Entrypoint
+`docker/compose.local.yml`
+
+## Service Graph
+
+| Service | Profile | Image | Ports | Volumes | Depends On |
+|---|---|---|---|---|---|
+| `infinity` | (base) | `infiniflow/infinity:v0.7.0-dev5` | `127.0.0.1:23817`, `127.0.0.1:23820` | `/tmp/ragflow-lite-infinity-data:/var/infinity` (host tmpfs) | — |
+| `app` | `observability` | built from `docker/app/Dockerfile.dev` | `8000` | `..:/workspace` (bind mount) | `infinity` |
+| `prometheus` | `observability` | `prom/prometheus:v3.11.1` | `9090` | `./prometheus/prometheus.yml` (ro) | `app` |
+| `loki` | `observability` | `grafana/loki:3.6.3` | `3100` | `./loki/config.yml` (ro), named `loki-data` | — |
+| `alloy` | `observability` | `grafana/alloy:latest` | — | `./alloy/config.alloy` (ro), `/var/run/docker.sock` | `loki`, `app` |
+| `grafana` | `observability` | `grafana/grafana:latest` | `3000` | named `grafana-data`, `./grafana/provisioning/...` (ro) | `prometheus`, `loki` |
+
+## App Service Details
+
+- **Working dir:** `/workspace`
+- **Command:** `uvicorn ragflow_lite.app:app --host 0.0.0.0 --port 8000 --reload`
+
+## App Environment Variables (source: compose.local.yml)
+
+| Variable | Value | Source |
+|---|---|---|
+| `PYTHONPATH` | `/workspace/src` | hardcoded |
+| `OPENAI_API_KEY` | `${OPENAI_API_KEY}` | passthrough from host |
+| `ARK_API_KEY` | `${ARK_API_KEY}` | passthrough from host |
+| `ARK_EMBEDDING_MODEL` | `${ARK_EMBEDDING_MODEL}` | passthrough from host |
+| `RAGFLOW_LITE_LOG_LEVEL` | `INFO` | hardcoded |
+| `RAGFLOW_LITE_LOG_FORMAT` | `json` | hardcoded |
+| `RAGFLOW_LITE_METRICS_ENABLED` | `true` | hardcoded |
+| `RAGFLOW_LITE_INFINITY_HOST` | `infinity` | service name |
+| `RAGFLOW_LITE_INFINITY_PORT` | `23817` | hardcoded |
+
+### Provider Env Note
+`config/settings.py` reads `DEEPSEEK_API_KEY` (not `OPENAI_API_KEY`), but compose passes `OPENAI_API_KEY` and does not pass `DEEPSEEK_API_KEY`. This is a known discrepancy. If compose and `config/settings.py` disagree, update the implementation or document the mismatch here.
+
+## Grafana Defaults
+- Admin user/password: `admin` / `admin`
+- Sign-up disabled
+
+## Dockerfile.dev
+
+Local development image only. Based on `python:3.13-slim`, installs `build-essential`, `gfortran`, `libopenblas-dev`, `pkg-config`, copies `pyproject.toml` and `src`, runs `pip install -e .`.
+
+## Artifact/Secrets Rules
+Do not commit `.env`, secrets, compose runtime artifacts, screenshots, or local volume contents.
