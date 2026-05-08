@@ -348,6 +348,7 @@ def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
         services.discorag_query_service.discourse_extractor,
         DeepSeekChatIntraChunkDiscourseExtractor,
     )
+    assert services.discorag_query_service.discourse_extractor.max_chunks is None
     assert isinstance(
         services.discorag_query_service.blueprint_builder,
         DiscoRAGAnswerBlueprintBuilder,
