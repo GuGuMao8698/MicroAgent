@@ -138,7 +138,7 @@ class TestQueryRouteTopN:
     def test_route_uses_default_top_n_when_not_provided(
         self, client: TestClient, app
     ) -> None:
-        """POST /queries 不传 top_n/top_k 时使用默认值 6。"""
+        """POST /queries 不传 top_n/top_k 时，默认 final answer context budget 为 6。"""
         mock_router = MagicMock()
         mock_router.query.return_value = MagicMock(
             answer="test answer",

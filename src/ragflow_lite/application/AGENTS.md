@@ -1,7 +1,12 @@
 # AGENTS.md
+Last updated: 2026-05-08T14:30:00+08:00
 
 ## 概述
 这个目录是业务编排层，负责把 domain ports 连接成 ingestion/query 用例。它不拥有 HTTP、SDK、Infinity 或文件系统实现。
+
+## 契约
+
+Active contracts: [CONTRACTS.md](./CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
 
 ## 快速命令
 ```bash

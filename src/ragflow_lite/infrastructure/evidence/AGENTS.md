@@ -1,4 +1,7 @@
 # AGENTS.md
+Last updated: 2026-05-08T14:30:00+08:00
+
+Active contracts: [CONTRACTS.md](./CONTRACTS.md)。本文件保留 evidence 命令和导航；运行不变量见本地契约文件。
 
 这个目录实现 graph evidence extraction, canonical graph view, candidate indexing, path expansion and intra-chunk discourse extraction.
 
@@ -16,7 +19,6 @@
 - Keep provider calls, schema validation, persistence, candidate indexing and canonicalization separated.
 - `GraphEvidenceInfinityStore` writes JSON first, then Infinity; on candidate-index failure it restores previous JSON state and deletes current candidate rows.
 - Candidate rows consume existing `canonical_id`; do not move canonicalization into write-time without an explicit contract change.
-- `selected_for_discourse` evidence must be consumed first by discourse extraction.
 - Reject unknown chunk references and malformed provider JSON rather than repairing silently.
 - `RELATIONSHIP_OUTPUT_FIELDS` must include all fields needed for endpoint pair edge voting (`source_entity_id`, `target_entity_id`, `source_entity_name`, `target_entity_name`, `description`, `keywords`, `weight`, `source_chunk_ids`); missing fields break `_edge_vote_count()` pair fallback.
 - Do not log raw provider payloads, chunk text, graph extraction input, or full responses.

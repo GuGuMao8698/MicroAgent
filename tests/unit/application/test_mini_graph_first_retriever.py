@@ -831,7 +831,7 @@ def test_budget_defaults_derive_correctly_from_mini_internal_candidate_n() -> No
         chunk_auxiliary_retriever=auxiliary_retriever,
     )
 
-    # top_k=6 意味着 answer_top_n=6
+    # top_k=6 controls final answer contexts.
     retriever.retrieve_context("test query", top_k=6)
 
     # 1. 实体查询：entities_from_query 截断到 query_entity_limit=5，top_k=60
@@ -847,15 +847,15 @@ def test_budget_defaults_derive_correctly_from_mini_internal_candidate_n() -> No
     assert len(auxiliary_retriever.calls) == 1
     assert auxiliary_retriever.calls[0][1] == 30
 
-    # 4. discourse_selection_n 默认等于 answer_top_n * 2 = 12
+    # default discourse_selection_k=12 controls RST / inter-chunk graph visibility.
     # 通过 source_selection.discourse_selection_k 验证
     result = retriever.retrieve_context("test query", top_k=6)
     assert result.source_selection is not None
     assert result.source_selection.discourse_selection_k == 12
 
 
-def test_discourse_selection_defaults_to_twice_answer_top_n() -> None:
-    """discourse_selection_n 未显式设置时，应默认给 DiscoRAG 暴露 2 倍答案候选。"""
+def test_default_discourse_selection_exposes_two_times_final_context_window() -> None:
+    """discourse_selection_n 未显式设置时，默认 discourse 可见窗口为 2 * final context budget。"""
     grounder = RecordingGrounder()
     entity_index = RecordingEntityIndex()
     relationship_index = RecordingRelationshipIndex()
@@ -876,7 +876,7 @@ def test_discourse_selection_defaults_to_twice_answer_top_n() -> None:
     assert result.source_selection.discourse_selection_k == 8
 
 
-def test_build_source_selection_defaults_to_twice_answer_top_n() -> None:
+def test_build_source_selection_exposes_two_times_final_context_window() -> None:
     retriever = MiniGraphFirstRetriever(
         query_grounder=RecordingGrounder(),
         entity_index=RecordingEntityIndex(),

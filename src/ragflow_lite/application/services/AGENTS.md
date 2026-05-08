@@ -1,4 +1,7 @@
 # AGENTS.md
+Last updated: 2026-05-08T14:30:00+08:00
+
+Active contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只保留服务导航、本地命令和所有权指引；运行不变量见本地契约文件。
 
 这个目录承接 query、document、dataset 和 DiscoRAG 的 application service。它编排 domain ports，不拥有 HTTP 或底层 adapter。
 
@@ -10,10 +13,10 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 
 - `QueryService` is intentionally generic and knows only `Retriever` + `Answerer`.
 - `DiscoRAGQueryService` owns the DiscoRAG sequence (retrieval → evidence → intra-chunk discourse → inter-chunk graph → blueprint → answer) but delegates each step to a collaborator.
-- `MiniGraphFirstRetriever` owns query grounding, graph candidate lookup, path expansion, auxiliary chunk retrieval, scoring and `GraphFirstSourceSelection`. The default discourse window is `2 * top_k` (via `_DEFAULT_DISCOURSE_SELECTION_MULTIPLIER`); supplemental discourse chunks are retained in `result.metadata["supplemental_discourse_chunks"]`.
+- `MiniGraphFirstRetriever` owns graph-first retrieval and `GraphFirstSourceSelection`.
 - `EvidencePackageBuilder` carries source-selection metadata into evidence items and package metadata, including supplemental discourse chunks from retriever metadata.
-- `DeterministicInterChunkDiscourseGraphBuilder` builds a sparse chunk-level graph from explicit metadata (`inter_chunk_relation_type` / `inter_chunk_target_chunk_id`) and shared topology metadata. It supports 6 relation types via `_RELATION_TYPES` (`qualifies`, `supports`, `background_for`, `elaborates`, `example_of`, `contradicts`). Explicit metadata takes precedence over the shared-topology heuristic. It is the first implementation of the `InterChunkDiscourseGraphBuilder` port; LLM-backed builders may follow.
-- `DiscoRAGAnswerBlueprintBuilder` consumes the inter-chunk graph to add relation-type-aware constraints and plan steps. `contradicts` and `qualifies` each trigger independent constraints (both appear when both relation types are present); non-promoting types (`supports`, `background_for`, `elaborates`, `example_of`) add usage guidance only. Promotion (`promoted_chunk_ids`) is limited to `qualifies` and `contradicts`, and is bounded replacement, not append. The answer-facing blueprint (`_blueprint_for_contexts`) filters `ordered_chunk_ids`, `chunk_roles`, and chunk-id list metadata keys to only reference final answer context chunks.
+- `DeterministicInterChunkDiscourseGraphBuilder` builds a sparse chunk-level graph from explicit metadata and shared topology heuristics.
+- `DiscoRAGAnswerBlueprintBuilder` consumes the inter-chunk graph to produce relation-aware constraints and plan steps.
 - `DocumentService` and `DatasetService` are application wrappers around catalog/store semantics, not storage implementations.
 
 ## 关键约定
@@ -22,9 +25,6 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 - `QueryModeRouter` rejects unknown runtime modes and must not duplicate query business logic.
 - `MiniGraphFirstRetriever` scoring stays aligned with MiniRAG mini-mode Counter/vote behavior; do not reintroduce local weight tuning unless that task is explicit.
 - No-path entity candidates (those without relation-backed `TopologyPath`) are retained via `_merge_trimmed_no_path_candidates()` at top 20% (minimum 1) before path truncation; `no_path_candidate` is a recognized score component. Do not bypass this merge or move it after `_score_source_chunks()`.
-- `discourse_selection_n` defaults to `2 * top_k` when not explicitly set; supplemental chunks are stored in retriever metadata, not in answer contexts. Do not confuse it with graph candidate or final context budgets.
-- Discourse extraction should consume `selected_for_discourse=True` evidence first, then fill from original order if needed.
-- Promotion (`promoted_chunk_ids`) is bounded replacement: promoted supplemental chunks replace the weakest answer contexts within the original budget (`len(retrieval_result.chunks)`). It is NOT append. Only `qualifies` and `contradicts` are promotable; `supports`, `background_for`, `elaborates`, `example_of` affect constraints only.
 - `DocumentService` validates dataset existence before filtering, binding, or rebinding.
 - `DatasetService` strips names and rejects empty names.
 - Observability helpers log bounded outcome fields only; never log raw document bodies, full query text, or high-cardinality metrics labels.

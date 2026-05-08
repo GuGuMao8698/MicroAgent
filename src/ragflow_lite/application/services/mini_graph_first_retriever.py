@@ -107,9 +107,10 @@ class MiniGraphFirstRetriever:
         """
         _require_positive_top_k(top_k)
 
-        # 推导各阶段预算
+        # Contract reviewed 2026-05-08T12:56:51+08:00.
+        # top_k is final answer context budget; default discourse visibility is 2 * top_k.
+        # Do not collapse discourse_selection_n back to top_k.
         answer_top_n = top_k
-        # discourse_selection_n 未显式设置时默认给 DiscoRAG 暴露一倍补充证据窗口
         discourse_selection_n = self.discourse_selection_n or (
             answer_top_n * _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER
         )

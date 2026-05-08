@@ -1,4 +1,7 @@
 # AGENTS.md
+Last updated: 2026-05-08T14:30:00+08:00
+
+Active contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件保留 pipeline 命令和导航；运行不变量见本地契约文件。
 
 这个目录负责 ingestion pipeline 和异步任务生命周期。它连接 parser、chunker、embedder、index、evidence 和 dataset ports。
 
