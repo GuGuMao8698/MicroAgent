@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from infinity_test_support import (
@@ -55,6 +57,116 @@ def _build_settings(tmp_path: Path) -> Settings:
 
 def _build_live_settings(tmp_path: Path) -> Settings:
     return register_infinity_table_cleanup(_build_settings(tmp_path))
+
+
+@dataclass
+class _FakeVectorIndex:
+    client: object = object()
+    client_lock: object = object()
+
+
+def _fake_embedder(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace(signature={"dimensions": 2048})
+
+
+def _fake_answerer(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace()
+
+
+def _fake_graph_store(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace()
+
+
+def _fake_evidence_extractor(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace()
+
+
+def _fake_query_grounder(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace()
+
+
+def _fake_mini_graph_first_retriever(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace(**kwargs)
+
+
+def _fake_pipeline(*args: object, **kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace(**kwargs, process_task=lambda document_id: None)
+
+
+def _patch_non_live_build_services_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragflow_lite.api.deps import providers as providers_module
+
+    monkeypatch.setattr(providers_module, "ArkMultimodalTextEmbedder", _fake_embedder)
+    monkeypatch.setattr(providers_module, "_build_vector_index", lambda *_: _FakeVectorIndex())
+    monkeypatch.setattr(providers_module, "DeepSeekChatAnswerer", _fake_answerer)
+    monkeypatch.setattr(
+        providers_module,
+        "InfinityGraphCandidateIndex",
+        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LocalJsonGraphEvidenceStore",
+        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "GraphEvidenceInfinityStore",
+        _fake_graph_store,
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "DeepSeekChatEvidenceExtractor",
+        _fake_evidence_extractor,
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "_build_retriever",
+        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "DeepSeekChatQueryGrounder",
+        _fake_query_grounder,
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LocalJsonGraphEvidenceIndex",
+        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "MiniGraphFirstRetriever",
+        _fake_mini_graph_first_retriever,
+    )
+    monkeypatch.setattr(providers_module, "QueryService", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        providers_module,
+        "DiscoRAGQueryService",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "QueryModeRouter",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "IngestionPipeline",
+        _fake_pipeline,
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "DocumentService",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "DatasetService",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
 
 
 def test_settings_reject_missing_required_runtime_configuration(
@@ -331,6 +443,24 @@ def test_chunk_hybrid_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.chunk_fusion_normalize == "atan"
     assert settings.chunk_position_prior_weight == 0.03
     assert settings.chunk_position_prior_enabled is True
+
+
+def test_build_services_non_live_keeps_discourse_extractor_uncapped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
+    services = build_services(_build_settings(tmp_path))
+
+    assert isinstance(
+        services.discorag_query_service.discourse_extractor,
+        DeepSeekChatIntraChunkDiscourseExtractor,
+    )
+    assert services.discorag_query_service.discourse_extractor.max_chunks is None
 
 
 @pytest.mark.live_infinity

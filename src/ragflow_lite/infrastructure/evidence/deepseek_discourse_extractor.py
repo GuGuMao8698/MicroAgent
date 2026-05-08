@@ -85,10 +85,11 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             return self._empty_package(evidence_package, "empty")
 
         selected_ids = [item.canonical_chunk_id for item in selected_items]
+        selected_id_set = set(selected_ids)
         skipped_ids = [
             item.canonical_chunk_id
             for item in evidence_package.items
-            if item.canonical_chunk_id not in set(selected_ids)
+            if item.canonical_chunk_id not in selected_id_set
         ]
 
         client = self.client or self._build_client(self.api_key, self.base_url)

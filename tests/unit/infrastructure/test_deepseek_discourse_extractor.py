@@ -471,10 +471,10 @@ def test_extract_prefers_selected_discourse_items_before_prefix() -> None:
                         "canonical_chunk_id": "chunk_doc_alpha_1",
                         "units": [
                             {
-                                "text": "A second chunk should not be sent when max_chunks is one.",
+                                "text": "Discourse-visible chunk 1.",
                                 "role": "main",
                                 "start_char": 0,
-                                "end_char": 56,
+                                "end_char": 25,
                             }
                         ],
                         "relations": [],
@@ -499,3 +499,75 @@ def test_extract_prefers_selected_discourse_items_before_prefix() -> None:
     assert result.metadata["selection_source"] == "source_selection"
     assert "canonical_chunk_id: chunk_doc_alpha_1" in client.calls[0]["input_text"]
     assert "canonical_chunk_id: chunk_doc_alpha_0" not in client.calls[0]["input_text"]
+
+
+def test_extract_with_mixed_source_selection_skips_unselected_items_without_cap() -> (
+    None
+):
+    client = _FakeDeepSeekClient(
+        json.dumps(
+            {
+                "chunks": [
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_1",
+                        "units": [
+                            {
+                                "text": "Discourse-visible chunk 1.",
+                                "role": "main",
+                                "start_char": 0,
+                                "end_char": 25,
+                            }
+                        ],
+                        "relations": [],
+                        "main_unit_indexes": [0],
+                        "supporting_unit_indexes": [],
+                    },
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_2",
+                        "units": [
+                            {
+                                "text": "Discourse-visible chunk 2.",
+                                "role": "support",
+                                "start_char": 0,
+                                "end_char": 25,
+                            }
+                        ],
+                        "relations": [],
+                        "main_unit_indexes": [],
+                        "supporting_unit_indexes": [0],
+                    },
+                ]
+            }
+        )
+    )
+    package = _package_with_discourse_items(4)
+    package.items[0].metadata["selected_for_discourse"] = False
+    package.items[1].metadata["selected_for_discourse"] = True
+    package.items[2].metadata["selected_for_discourse"] = True
+    package.items[3].metadata.pop("selected_for_discourse")
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_chunks=None,
+    )
+
+    result = extractor.extract(package)
+
+    assert [s.canonical_chunk_id for s in result.structures] == [
+        "chunk_doc_alpha_1",
+        "chunk_doc_alpha_2",
+    ]
+    assert result.metadata["selected_evidence_count"] == 2
+    assert result.metadata["selection_source"] == "source_selection"
+    assert result.metadata["max_chunks"] is None
+    assert result.metadata["selected_chunk_ids"] == [
+        "chunk_doc_alpha_1",
+        "chunk_doc_alpha_2",
+    ]
+    assert result.metadata["skipped_chunk_ids"] == [
+        "chunk_doc_alpha_0",
+        "chunk_doc_alpha_3",
+    ]
+    assert "canonical_chunk_id: chunk_doc_alpha_1" in client.calls[0]["input_text"]
+    assert "canonical_chunk_id: chunk_doc_alpha_2" in client.calls[0]["input_text"]
+    assert "canonical_chunk_id: chunk_doc_alpha_0" not in client.calls[0]["input_text"]
+    assert "canonical_chunk_id: chunk_doc_alpha_3" not in client.calls[0]["input_text"]
