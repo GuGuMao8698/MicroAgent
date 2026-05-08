@@ -1,8 +1,8 @@
 # AGENTS.md
-Last updated: 2026-05-08T14:30:00+08:00
+Last updated: 2026-05-08T15:10:00+08:00
 
 ## 概述
-这个目录是业务编排层，负责把 domain ports 连接成 ingestion/query 用例。它不拥有 HTTP、SDK、Infinity 或文件系统实现。
+这个目录是业务编排层，存放 ingestion 与 query 相关的 application 代码。
 
 ## 契约
 
@@ -18,21 +18,21 @@ rtk cx definition --name IngestionPipeline --from src/ragflow_lite/application/p
 ## 架构
 ```text
 application/
-├── pipelines/   # ingestion state machine and async task lifecycle
-├── services/    # query/document/dataset/DiscoRAG orchestration
-└── use_cases/   # currently empty; do not use as a dumping ground
+├── pipelines/   # ingestion pipeline files
+├── services/    # application service files
+└── use_cases/   # reserved for a future stable use-case boundary
 ```
 
-- `pipelines/` owns ingestion lifecycle: parse, normalize, chunk, embed, index, optional graph evidence, dataset binding, rollback, task state.
-- `services/` owns query/document/dataset orchestration: standard query, DiscoRAG query, graph-first retrieval, evidence package, blueprint building, router dispatch.
-- Application code talks to parser/chunker/embedder/index/retriever/answerer/document/dataset/evidence abstractions from `domain.ports`.
-- Route models and HTTP errors stay in `api`; provider clients, Infinity tables, JSON files and tokenizers stay in `infrastructure`.
+## 文件地图
+- `pipelines/`: ingestion 相关目录。
+- `services/`: query、document、dataset、DiscoRAG 相关目录。
+- `use_cases/`: 预留目录；只有在形成稳定 use-case 边界后再启用。
 
 ## 边界提示
-- Active runtime semantics live in [CONTRACTS.md](./CONTRACTS.md); child `AGENTS.md` files should only identify local owners, commands, and file-role pointers.
-- If a rule is specific to `services/` or `pipelines/`, keep the navigation hint in that child `AGENTS.md` and put the durable runtime contract in the nearest `CONTRACTS.md`, not here.
+- 运行契约统一看 [CONTRACTS.md](./CONTRACTS.md) 与子目录 `CONTRACTS.md`。
+- 子目录 `AGENTS.md` 只保留导航、命令、文件角色和错层提醒。
 
 ## 禁区
 - 不要在 application 层直接 import FastAPI, Infinity SDK, provider SDK, or local JSON storage.
-- 不要在这里做 parser selection, citation rendering, provider retry policy, or table/index DDL.
-- 不要把 `use_cases/` 当成“暂时不知道放哪”的目录；没有稳定用例边界前保持空。
+- 不要在这里放 parser selection、provider retry policy、table/index DDL 之类的 adapter 细节。
+- 不要把 `use_cases/` 当成“暂时不知道放哪”的目录。

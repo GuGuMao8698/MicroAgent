@@ -1,9 +1,9 @@
 # AGENTS.md
-Last updated: 2026-05-08T14:30:00+08:00
+Last updated: 2026-05-08T15:10:00+08:00
 
 Active contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只保留服务导航、本地命令和所有权指引；运行不变量见本地契约文件。
 
-这个目录承接 query、document、dataset 和 DiscoRAG 的 application service。它编排 domain ports，不拥有 HTTP 或底层 adapter。
+这个目录存放 query、document、dataset 和 DiscoRAG 相关的 application service 文件。
 
 ## 关键命令
 ```bash
@@ -11,14 +11,19 @@ rtk cx definition --name MiniGraphFirstRetriever --from src/ragflow_lite/applica
 rtk cx references --name QueryService --file src/ragflow_lite/application/services/query_service.py --unique
 ```
 
-- `QueryService` is intentionally generic and knows only `Retriever` + `Answerer`.
-- `DiscoRAGQueryService` owns the DiscoRAG sequence (retrieval → evidence → intra-chunk discourse → inter-chunk graph → blueprint → answer) but delegates each step to a collaborator.
-- `MiniGraphFirstRetriever` owns graph-first retrieval and `GraphFirstSourceSelection`.
-- `EvidencePackageBuilder` carries source-selection metadata into evidence items and package metadata, including supplemental discourse chunks from retriever metadata.
-- `DeterministicInterChunkDiscourseGraphBuilder` builds a sparse chunk-level graph from explicit metadata and shared topology heuristics.
-- `DiscoRAGAnswerBlueprintBuilder` consumes the inter-chunk graph to produce relation-aware constraints and plan steps.
-- `DocumentService` and `DatasetService` are application wrappers around catalog/store semantics, not storage implementations.
+## 文件地图
+- `query_service.py`: standard query service.
+- `discorag_query_service.py`: DiscoRAG query service.
+- `query_mode_router.py`: query mode router.
+- `mini_graph_first_retriever.py`: graph-first retriever service.
+- `evidence_package_builder.py`: evidence package helper.
+- `inter_chunk_discourse_graph_builder.py`: inter-chunk discourse graph helper.
+- `discorag_answer_blueprint_builder.py`: DiscoRAG answer blueprint helper.
+- `document_service.py`: document service.
+- `dataset_service.py`: dataset service.
+- `text_normalization.py`: text normalization helpers.
+- `_query_observability.py`: query observability helpers.
 
 ## 边界提示
 - Runtime behavior for these services lives in [../CONTRACTS.md](../CONTRACTS.md).
-- Keep this file for service ownership, code navigation, and "edit the right layer" warnings only.
+- 本文件只保留服务导航、本地命令、文件角色和错层提醒。
