@@ -282,6 +282,9 @@ class DiscourseUnit:
     role: str
     start_char: int | None = None
     end_char: int | None = None
+    nuclearity: str | None = None
+    rst_relation: str | None = None
+    planning_role: str | None = None
     metadata: Metadata = field(default_factory=dict)
 
 

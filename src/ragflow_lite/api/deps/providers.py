@@ -18,14 +18,15 @@ from ragflow_lite.application import (
     normalize_text,
 )
 from ragflow_lite.application.services import (
-    DeterministicInterChunkDiscourseGraphBuilder,
-    DiscoRAGAnswerBlueprintBuilder,
     DiscoRAGQueryService,
     EvidencePackageBuilder,
     MiniGraphFirstRetriever,
     QueryModeRouter,
 )
-from ragflow_lite.config import Settings
+from ragflow_lite.config import (
+    DiscoRAGStructurerRuntimeConfig,
+    Settings,
+)
 from ragflow_lite.domain.ports.interfaces import (
     IngestionStageCache,
     IngestionTaskStore,
@@ -48,6 +49,8 @@ from ragflow_lite.infrastructure import (
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
+    LLMDiscoRAGAnswerBlueprintBuilder,
+    LLMInterChunkDiscourseGraphBuilder,
     LocalJsonGraphEvidenceIndex,
     LocalJsonGraphEvidenceStore,
 )
@@ -74,6 +77,7 @@ class AppServices:
     dataset_service: DatasetService
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
     stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
+    structurer_config: DiscoRAGStructurerRuntimeConfig | None = None
 
 
 def _build_vector_index(
@@ -114,7 +118,7 @@ def build_services(settings: Settings) -> AppServices:
     这里显式完成"配置 -> 具体实现 -> 业务流程"的连接，便于后续替换
     parser、embedder 或 index，而不需要改动路由层。
     """
-    ark_runtime_config, deepseek_runtime_config = (
+    ark_runtime_config, deepseek_runtime_config, structurer_runtime_config = (
         settings.require_runtime_provider_configs()
     )
 
@@ -169,10 +173,10 @@ def build_services(settings: Settings) -> AppServices:
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
     discourse_extractor = DeepSeekChatIntraChunkDiscourseExtractor(
-        api_key=deepseek_runtime_config.api_key,
-        base_url=deepseek_runtime_config.base_url,
-        model=deepseek_runtime_config.model,
-        reasoning_effort=deepseek_runtime_config.reasoning_effort,
+        api_key=structurer_runtime_config.api_key,
+        base_url=structurer_runtime_config.base_url,
+        model=structurer_runtime_config.model,
+        reasoning_effort=structurer_runtime_config.reasoning_effort,
     )
     # chunk 辅助检索器：Infinity hybrid 作为辅助召回通道
     chunk_auxiliary_retriever = _build_retriever(embedder, vector_index)
@@ -207,8 +211,18 @@ def build_services(settings: Settings) -> AppServices:
         retriever=retriever,
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=discourse_extractor,
-        inter_chunk_graph_builder=DeterministicInterChunkDiscourseGraphBuilder(),
-        blueprint_builder=DiscoRAGAnswerBlueprintBuilder(),
+        inter_chunk_graph_builder=LLMInterChunkDiscourseGraphBuilder(
+            api_key=structurer_runtime_config.api_key,
+            base_url=structurer_runtime_config.base_url,
+            model=structurer_runtime_config.model,
+            reasoning_effort=structurer_runtime_config.reasoning_effort,
+        ),
+        blueprint_builder=LLMDiscoRAGAnswerBlueprintBuilder(
+            api_key=structurer_runtime_config.api_key,
+            base_url=structurer_runtime_config.base_url,
+            model=structurer_runtime_config.model,
+            reasoning_effort=structurer_runtime_config.reasoning_effort,
+        ),
         answerer=answerer,
     )
     query_router = QueryModeRouter(
@@ -251,6 +265,7 @@ def build_services(settings: Settings) -> AppServices:
         dataset_service=DatasetService(store=vector_index),
         task_store=task_store,
         stage_cache=stage_cache,
+        structurer_config=structurer_runtime_config,
     )
 
 

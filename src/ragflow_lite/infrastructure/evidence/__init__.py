@@ -17,6 +17,12 @@ from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import 
     GraphCandidateInfinityConfig,
     InfinityGraphCandidateIndex,
 )
+from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_builder import (
+    LLMDiscoRAGAnswerBlueprintBuilder,
+)
+from ragflow_lite.infrastructure.evidence.llm_inter_chunk_graph_builder import (
+    LLMInterChunkDiscourseGraphBuilder,
+)
 from ragflow_lite.infrastructure.evidence.local_json_graph_evidence_index import (
     LocalJsonGraphEvidenceIndex,
 )
@@ -35,6 +41,8 @@ __all__ = [
     "GraphCandidateInfinityConfig",
     "GraphEvidenceInfinityStore",
     "InfinityGraphCandidateIndex",
+    "LLMDiscoRAGAnswerBlueprintBuilder",
+    "LLMInterChunkDiscourseGraphBuilder",
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",

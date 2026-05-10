@@ -116,15 +116,7 @@ class RecordingGraphBuilder:
 class RecordingBlueprintBuilder:
     last_package: IntraChunkDiscoursePackage | None = None
     last_graph: InterChunkDiscourseGraph | None = None
-    blueprint: AnswerBlueprint = field(
-        default_factory=lambda: AnswerBlueprint(
-            ordered_chunk_ids=["chunk_a"],
-            chunk_roles={"chunk_a": "context"},
-            answer_constraints=["Follow ordered_chunk_ids."],
-            plan_steps=["Start from the first ordered chunk."],
-            metadata={"status": "ok"},
-        )
-    )
+    blueprint: AnswerBlueprint | None = None
 
     def build(
         self,
@@ -133,7 +125,24 @@ class RecordingBlueprintBuilder:
     ) -> AnswerBlueprint:
         self.last_package = package
         self.last_graph = graph
-        return self.blueprint
+        if self.blueprint is not None:
+            return self.blueprint
+        ordered_chunk_ids = [
+            item.canonical_chunk_id
+            for item in package.evidence_package.items
+            if item.metadata.get("selected_for_answer") is True
+        ]
+        if not ordered_chunk_ids:
+            ordered_chunk_ids = [
+                item.canonical_chunk_id for item in package.evidence_package.items
+            ]
+        return AnswerBlueprint(
+            ordered_chunk_ids=ordered_chunk_ids,
+            chunk_roles={chunk_id: "context" for chunk_id in ordered_chunk_ids},
+            answer_constraints=["Follow ordered_chunk_ids."],
+            plan_steps=["Start from the first ordered chunk."],
+            metadata={"status": "ok"},
+        )
 
 
 @dataclass
@@ -419,7 +428,16 @@ def test_discorag_query_service_replaces_answer_contexts_with_promoted_within_bu
         chunk_roles={"chunk_a": "main", "chunk_supplemental": "context"},
         answer_constraints=["Respect contradiction."],
         plan_steps=["Use the supplemental qualifier."],
-        metadata={"promoted_chunk_ids": ["chunk_supplemental"]},
+        metadata={
+            "promoted_chunk_ids": ["chunk_supplemental"],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces weaker evidence",
+                }
+            ],
+        },
     )
     answerer = RecordingAnswerer()
     service = DiscoRAGQueryService(
@@ -438,10 +456,19 @@ def test_discorag_query_service_replaces_answer_contexts_with_promoted_within_bu
     assert len(context_ids) == 2  # bounded: 不超过原 answer context 数
     assert "chunk_supplemental" in context_ids  # promoted 换入
     assert "chunk_a" in context_ids  # 保留的原 answer chunk
-    # chunk_b 被挤掉，因为 promoted chunk 替换了最弱位置
+    assert "chunk_b" not in context_ids  # 被替换的原 answer chunk
 
 
 def test_discorag_query_service_blueprint_preserves_promoted_context_order() -> None:
+    """Calibration example: A promoted to replace B, planner orders [A, SUPP].
+
+    Original answer contexts: [A, B]
+    Planner final_answer_chunk_ids: [A, SUPP]
+    Promotion: replace B with SUPP
+
+    Runtime final contexts: [A, SUPP]  (B replaced in-place)
+    Answer-facing blueprint ordered_chunk_ids: [A, SUPP]  (planner order)
+    """
     answer_chunks = [
         _chunk("chunk_a"),
         _chunk("chunk_b"),
@@ -462,7 +489,7 @@ def test_discorag_query_service_blueprint_preserves_promoted_context_order() -> 
         "chunk_supplemental": supplemental_chunk
     }
     blueprint = AnswerBlueprint(
-        ordered_chunk_ids=["chunk_a", "chunk_supplemental", "chunk_b"],
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental"],
         chunk_roles={
             "chunk_a": "main",
             "chunk_supplemental": "context",
@@ -470,7 +497,16 @@ def test_discorag_query_service_blueprint_preserves_promoted_context_order() -> 
         },
         answer_constraints=["Respect qualification."],
         plan_steps=["Use the supplemental qualifier."],
-        metadata={"promoted_chunk_ids": ["chunk_supplemental"]},
+        metadata={
+            "promoted_chunk_ids": ["chunk_supplemental"],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces weaker evidence",
+                }
+            ],
+        },
     )
     answerer = RecordingAnswerer()
     service = DiscoRAGQueryService(
@@ -485,15 +521,19 @@ def test_discorag_query_service_blueprint_preserves_promoted_context_order() -> 
     service.query("How does MiniRAG organize evidence?", top_k=2)
 
     assert answerer.last_request is not None
+    # In-place replacement: chunk_b -> chunk_supplemental preserves [A, SUPP]
     assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
-        "chunk_supplemental",
         "chunk_a",
+        "chunk_supplemental",
     ]
     assert answerer.last_request.blueprint is not None
+    # Planner order [A, SUPP] preserved in blueprint
     assert answerer.last_request.blueprint.ordered_chunk_ids == [
-        "chunk_supplemental",
         "chunk_a",
+        "chunk_supplemental",
     ]
+    # Replaced chunk absent from contexts
+    assert "chunk_b" not in [c.chunk_id for c in answerer.last_request.contexts]
 
 
 def test_discorag_query_service_keeps_supplemental_discourse_out_of_answer_contexts() -> (
@@ -958,6 +998,18 @@ def test_discorag_query_service_filters_blueprint_metadata_to_final_contexts() -
                 "chunk_supplemental_1",
                 "chunk_supplemental_2",
             ],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_a",
+                    "with_chunk_id": "chunk_supplemental_1",
+                    "reason": "supplemental_1 replaces chunk_a",
+                },
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental_2",
+                    "reason": "supplemental_2 replaces chunk_b",
+                },
+            ],
         },
     )
     answerer = RecordingAnswerer()
@@ -992,10 +1044,152 @@ def test_discorag_query_service_filters_blueprint_metadata_to_final_contexts() -
         "chunk_supplemental_1",
         "chunk_supplemental_2",
     ]
+    assert "promotions" not in metadata
+    assert metadata["planner_raw_promotions"] == [
+        {
+            "replace_chunk_id": "chunk_a",
+            "with_chunk_id": "chunk_supplemental_1",
+            "reason": "supplemental_1 replaces chunk_a",
+        },
+        {
+            "replace_chunk_id": "chunk_b",
+            "with_chunk_id": "chunk_supplemental_2",
+            "reason": "supplemental_2 replaces chunk_b",
+        },
+    ]
+    assert metadata["applied_promotions"] == [
+        {
+            "replace_chunk_id": "chunk_a",
+            "with_chunk_id": "chunk_supplemental_1",
+            "reason": "supplemental_1 replaces chunk_a",
+        },
+        {
+            "replace_chunk_id": "chunk_b",
+            "with_chunk_id": "chunk_supplemental_2",
+            "reason": "supplemental_2 replaces chunk_b",
+        },
+    ]
     assert metadata["answer_context_chunk_ids"] == [
         "chunk_supplemental_1",
         "chunk_supplemental_2",
     ]
+
+
+def test_discorag_query_service_raises_when_blueprint_misses_final_context() -> None:
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a"],
+        chunk_roles={"chunk_a": "lead", "chunk_supplemental": "context"},
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces chunk_b",
+                }
+            ],
+        },
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    with pytest.raises(ProcessingError, match="missing final context ids"):
+        service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is None
+
+
+def test_discorag_query_service_raises_when_promotion_metadata_is_stale() -> None:
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental_1",
+        document_id="doc_alpha",
+        text="First supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental_1": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_supplemental_1", "chunk_b"],
+        chunk_roles={
+            "chunk_supplemental_1": "context",
+            "chunk_b": "detail",
+        },
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={
+            "promoted_chunk_ids": [
+                "chunk_supplemental_1",
+                "chunk_supplemental_2",
+            ],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_a",
+                    "with_chunk_id": "chunk_supplemental_1",
+                    "reason": "supplemental_1 replaces chunk_a",
+                },
+                {
+                    "replace_chunk_id": "chunk_missing",
+                    "with_chunk_id": "chunk_supplemental_2",
+                    "reason": "stale promotion should not leak",
+                },
+            ],
+        },
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    with pytest.raises(
+        ProcessingError,
+        match="promotions are inconsistent with final contexts",
+    ):
+        service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is None
 
 
 def test_discorag_rst_boundary_receives_all_default_discourse_visible_chunks() -> None:
@@ -1050,4 +1244,167 @@ def test_discorag_rst_boundary_receives_all_default_discourse_visible_chunks() -
 
     assert discourse_extractor.selected_chunk_ids == [
         f"chunk_{index}" for index in range(12)
+    ]
+
+
+def test_promotion_raises_processing_error_when_supplemental_missing_at_runtime() -> (
+    None
+):
+    """When a promotion references a supplemental chunk absent from retrieval, ProcessingError."""
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    # supplemental_discourse_chunks 缺失 promoted chunk
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {}
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental"],
+        chunk_roles={"chunk_a": "main", "chunk_supplemental": "context"},
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={
+            "promoted_chunk_ids": ["chunk_supplemental"],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces chunk_b",
+                }
+            ],
+        },
+    )
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=RecordingAnswerer(),
+    )
+
+    with pytest.raises(ProcessingError, match="not found at runtime"):
+        service.query("How does MiniRAG organize evidence?", top_k=2)
+
+
+def test_planner_ordering_preserved_over_retrieval_order() -> None:
+    """Answer-facing blueprint ordered_chunk_ids follows planner order, not retrieval score order."""
+    answer_chunks = [
+        _chunk("chunk_b"),
+        _chunk("chunk_a"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    # Planner orders: chunk_a first, then chunk_supplemental (替换 chunk_b)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a", "chunk_supplemental"],
+        chunk_roles={
+            "chunk_a": "lead",
+            "chunk_supplemental": "context",
+            "chunk_b": "detail",
+        },
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={
+            "promoted_chunk_ids": ["chunk_supplemental"],
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces chunk_b",
+                }
+            ],
+        },
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    # In-place replacement: chunk_b -> chunk_supplemental in original position
+    # Original retrieval order: [chunk_b, chunk_a] -> [chunk_supplemental, chunk_a]
+    assert [chunk.chunk_id for chunk in answerer.last_request.contexts] == [
+        "chunk_supplemental",
+        "chunk_a",
+    ]
+    assert answerer.last_request.blueprint is not None
+    # Planner order preserved: [chunk_a, chunk_supplemental]
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_a",
+        "chunk_supplemental",
+    ]
+    # metadata reflects actual context order
+    assert answerer.last_request.blueprint.metadata["answer_context_chunk_ids"] == [
+        "chunk_supplemental",
+        "chunk_a",
+    ]
+
+
+def test_non_promotion_query_unchanged() -> None:
+    """When blueprint has no promotions, original answer contexts pass through unchanged."""
+    answer_chunks = [_chunk("chunk_a"), _chunk("chunk_b"), _chunk("chunk_c")]
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_c", "chunk_a", "chunk_b"],
+        chunk_roles={
+            "chunk_a": "support",
+            "chunk_b": "detail",
+            "chunk_c": "lead",
+        },
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={},  # 无 promotions
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(
+            result=_retrieval_result(chunks=answer_chunks),
+        ),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    service.query("How does MiniRAG organize evidence?", top_k=3)
+
+    assert answerer.last_request is not None
+    # Contexts pass through unchanged (no promotion)
+    assert [c.chunk_id for c in answerer.last_request.contexts] == [
+        "chunk_a",
+        "chunk_b",
+        "chunk_c",
+    ]
+    # Blueprint ordering follows planner order [C, A, B]
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.blueprint.ordered_chunk_ids == [
+        "chunk_c",
+        "chunk_a",
+        "chunk_b",
+    ]
+    assert answerer.last_request.blueprint.metadata["answer_context_chunk_ids"] == [
+        "chunk_a",
+        "chunk_b",
+        "chunk_c",
     ]

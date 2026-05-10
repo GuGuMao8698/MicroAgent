@@ -26,7 +26,7 @@ single-purpose):
 
 ## Adapter Boundary Contract
 
-Reviewed at: `2026-05-08T16:00:00+08:00`
+Reviewed at: `2026-05-09T21:00:00+08:00`
 Status: Active
 Owner: `build_services` in [../api/deps/providers.py](../api/deps/providers.py)
 
@@ -46,6 +46,8 @@ Provider wiring:
 - Non-embedding LLM: `DeepSeekChatCompletionsClient` via `DeepSeekChatAnswerer`,
   `DeepSeekChatEvidenceExtractor`, `DeepSeekChatIntraChunkDiscourseExtractor`,
   `DeepSeekChatQueryGrounder`.
+- Structurer LLM: `LLMInterChunkDiscourseGraphBuilder` and `LLMDiscoRAGAnswerBlueprintBuilder`
+  both use `DiscoRAGStructurerRuntimeConfig`, decoupled from the answer model.
 - OpenAI Responses adapters (`OpenAIResponsesAnswerer`, `OpenAIResponsesEvidenceExtractor`,
   `OpenAIResponsesQueryGrounder`) remain legacy; they are not the default runtime path.
 - Default model: `deepseek-v4-flash` with `reasoning_effort="high"`.
@@ -56,7 +58,7 @@ Logging boundary:
 
 ## Known Submodule Contracts
 
-- [evidence/CONTRACTS.md](evidence/CONTRACTS.md) -- graph evidence extraction, candidate indexing, storage, canonicalization, and intra-chunk discourse extraction.
+- [evidence/CONTRACTS.md](evidence/CONTRACTS.md) -- graph evidence extraction, candidate indexing, storage, canonicalization, intra-chunk discourse extraction, inter-chunk graph building, and blueprint planning.
 
 ## Verification
 

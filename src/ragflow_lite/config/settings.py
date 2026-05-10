@@ -75,6 +75,21 @@ class DeepSeekRuntimeConfig:
     render_citations: bool
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoRAGStructurerRuntimeConfig:
+    """DiscoRAG structurer LLM runtime configuration validated at startup.
+
+    The structurer model is used for RST extraction and inter-chunk graph
+    construction.  It is decoupled from the final answer model so that a
+    smaller / cheaper model can be swapped in via configuration alone.
+    """
+
+    api_key: str
+    base_url: str
+    model: str
+    reasoning_effort: str
+
+
 @dataclass(slots=True)
 class Settings:
     """承载应用启动时需要的最小配置集合。"""
@@ -102,6 +117,13 @@ class Settings:
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_reasoning_effort: str = "high"
+    # ── DiscoRAG structurer LLM 配置 ──
+    discorag_structurer_api_key: str | None = field(
+        default_factory=lambda: _read_optional_env("DISCORAG_STRUCTURER_API_KEY")
+    )
+    discorag_structurer_base_url: str = "https://api.deepseek.com"
+    discorag_structurer_model: str = "deepseek-v4-flash"
+    discorag_structurer_reasoning_effort: str = "high"
     answer_prompt_path: str | None = field(
         default_factory=lambda: (
             _read_optional_env("RAGFLOW_LITE_ANSWER_PROMPT_PATH")
@@ -180,7 +202,11 @@ class Settings:
 
     def require_runtime_provider_configs(
         self,
-    ) -> tuple[ArkEmbeddingRuntimeConfig, DeepSeekRuntimeConfig]:
+    ) -> tuple[
+        ArkEmbeddingRuntimeConfig,
+        DeepSeekRuntimeConfig,
+        DiscoRAGStructurerRuntimeConfig,
+    ]:
         """校验并返回当前 V0 运行时依赖的 provider 配置。"""
         required_settings = (
             ("DEEPSEEK_API_KEY", self.deepseek_api_key),
@@ -202,6 +228,14 @@ class Settings:
                 prompt_file = self.project_root / prompt_file
             prompt_path = str(prompt_file)
 
+        # Structurer API key: explicit override wins, otherwise alias
+        # DeepSeek API key.  deepseek_api_key is guaranteed non-None after
+        # the required_settings guard above.
+        assert self.deepseek_api_key is not None  # for type narrows
+        structurer_api_key: str = (
+            self.discorag_structurer_api_key or self.deepseek_api_key
+        )
+
         return (
             ArkEmbeddingRuntimeConfig(
                 api_key=self.ark_api_key,
@@ -215,6 +249,12 @@ class Settings:
                 reasoning_effort=self.deepseek_reasoning_effort,
                 prompt_path=prompt_path,
                 render_citations=self.openai_render_citations,
+            ),
+            DiscoRAGStructurerRuntimeConfig(
+                api_key=structurer_api_key,
+                base_url=self.discorag_structurer_base_url,
+                model=self.discorag_structurer_model,
+                reasoning_effort=self.discorag_structurer_reasoning_effort,
             ),
         )
 

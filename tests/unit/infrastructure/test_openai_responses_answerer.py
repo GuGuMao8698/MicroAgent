@@ -490,3 +490,66 @@ def test_answer_invalid_blueprint_falls_back_to_score_order() -> None:
     assert result.contexts == [high, low]
     assert result.metadata["blueprint_applied"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
+
+
+def test_answer_partially_invalid_blueprint_falls_back() -> None:
+    """Blueprint mixing known and unknown chunk IDs is invalid."""
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-low", "chunk-ghost"],
+        chunk_roles={"chunk-low": "thesis", "chunk-ghost": "support"},
+        answer_constraints=[],
+        plan_steps=[],
+    )
+
+    result = answerer.answer(
+        _make_request([low, high], mode="discorag", blueprint=blueprint)
+    )
+
+    assert result.contexts == [high, low]
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
+
+
+def test_answer_incomplete_blueprint_falls_back() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-low"],
+        chunk_roles={"chunk-low": "thesis"},
+        answer_constraints=[],
+        plan_steps=[],
+    )
+
+    result = answerer.answer(
+        _make_request([low, high], mode="discorag", blueprint=blueprint)
+    )
+
+    assert result.contexts == [high, low]
+    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
+
+
+def test_answer_standard_mode_ignores_blueprint_and_uses_score_order() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    low = _make_chunk("low", 0.2)
+    high = _make_chunk("high", 0.9)
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-low", "chunk-high"],
+        chunk_roles={"chunk-low": "thesis", "chunk-high": "support"},
+        answer_constraints=["Follow ordered_chunk_ids."],
+        plan_steps=["State the thesis first."],
+    )
+
+    result = answerer.answer(_make_request([low, high], blueprint=blueprint))
+
+    assert result.contexts == [high, low]
+    assert result.metadata["answer_mode"] == "standard"
+    assert result.metadata["blueprint_applied"] is False
+    assert "blueprint_fallback_reason" not in result.metadata

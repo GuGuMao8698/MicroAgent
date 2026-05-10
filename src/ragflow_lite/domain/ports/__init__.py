@@ -1,5 +1,6 @@
 from ragflow_lite.domain.ports.interfaces import (
     Answerer,
+    BlueprintBuilder,
     Chunker,
     ChunkLookup,
     DatasetStore,
@@ -22,6 +23,7 @@ from ragflow_lite.domain.ports.interfaces import (
 
 __all__ = [
     "Answerer",
+    "BlueprintBuilder",
     "ChunkLookup",
     "Chunker",
     "DatasetStore",

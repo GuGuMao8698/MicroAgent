@@ -247,26 +247,24 @@ def _order_contexts_by_blueprint(
     blueprint: AnswerBlueprint,
 ) -> list[RetrievedChunk] | None:
     contexts_by_id = {context.chunk_id: context for context in contexts}
-    selected: list[RetrievedChunk] = []
-    seen_ids: set[str] = set()
-    has_valid_id = False
+    context_ids = set(contexts_by_id)
 
-    for chunk_id in blueprint.ordered_chunk_ids:
-        context = contexts_by_id.get(chunk_id)
-        if context is None:
-            continue
-        has_valid_id = True
-        if chunk_id in seen_ids:
-            continue
-        selected.append(context)
-        seen_ids.add(chunk_id)
-
-    if not has_valid_id:
+    # Blueprint references unknown chunks — treat as invalid.
+    unknown_ids = set(blueprint.ordered_chunk_ids) - context_ids
+    if unknown_ids:
         return None
 
-    for context in contexts:
-        if context.chunk_id not in seen_ids:
-            selected.append(context)
+    selected: list[RetrievedChunk] = []
+    seen_ids: set[str] = set()
+
+    for chunk_id in blueprint.ordered_chunk_ids:
+        if chunk_id in seen_ids:
+            return None
+        selected.append(contexts_by_id[chunk_id])
+        seen_ids.add(chunk_id)
+
+    if seen_ids != context_ids:
+        return None
 
     return selected
 

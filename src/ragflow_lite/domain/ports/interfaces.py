@@ -223,3 +223,14 @@ class InterChunkDiscourseGraphBuilder(Protocol):
         self,
         package: IntraChunkDiscoursePackage,
     ) -> InterChunkDiscourseGraph: ...
+
+
+class BlueprintBuilder(Protocol):
+    """从话语包和跨 chunk 图构建回答蓝图。"""
+
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+        *,
+        graph: InterChunkDiscourseGraph | None = None,
+    ) -> AnswerBlueprint: ...

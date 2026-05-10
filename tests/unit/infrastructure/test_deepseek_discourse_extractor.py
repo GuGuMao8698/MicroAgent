@@ -183,6 +183,11 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
     assert structure.relations[0].target_unit_id == structure.units[0].unit_id
     assert structure.relations[0].relation_type == "supports"
 
+    # Functional RST projections
+    assert [u.nuclearity for u in structure.units] == ["nucleus", "satellite"]
+    assert [u.rst_relation for u in structure.units] == ["supports", None]
+    assert [u.planning_role for u in structure.units] == ["claim", "context"]
+
     assert len(client.calls) == 1
     assert "JSON object" in client.calls[0]["instructions"]
     assert "canonical_chunk_id: chunk_doc_alpha_0" in client.calls[0]["input_text"]
@@ -262,6 +267,82 @@ def test_deepseek_discourse_extractor_rejects_invalid_json() -> None:
     )
 
     with pytest.raises(ProcessingError, match="invalid JSON"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_unknown_canonical_chunk_id() -> None:
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient(
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_unknown",
+                            "units": [
+                                {
+                                    "text": "Unexpected chunk.",
+                                    "role": "main",
+                                    "start_char": 0,
+                                    "end_char": 17,
+                                }
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ProcessingError, match="unknown canonical_chunk_id"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_rejects_mixed_valid_and_unknown_chunk_ids() -> (
+    None
+):
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient(
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [
+                                {
+                                    "text": "MiniRAG first retrieves chunks.",
+                                    "role": "main",
+                                    "start_char": 0,
+                                    "end_char": 30,
+                                }
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        },
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_unknown",
+                            "units": [
+                                {
+                                    "text": "Unexpected chunk.",
+                                    "role": "support",
+                                    "start_char": 0,
+                                    "end_char": 17,
+                                }
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [],
+                            "supporting_unit_indexes": [0],
+                        },
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ProcessingError, match="unknown canonical_chunk_id"):
         extractor.extract(_package())
 
 
@@ -571,3 +652,255 @@ def test_extract_with_mixed_source_selection_skips_unselected_items_without_cap(
     assert "canonical_chunk_id: chunk_doc_alpha_2" in client.calls[0]["input_text"]
     assert "canonical_chunk_id: chunk_doc_alpha_0" not in client.calls[0]["input_text"]
     assert "canonical_chunk_id: chunk_doc_alpha_3" not in client.calls[0]["input_text"]
+
+
+# --- Functional RST projection tests ---
+
+
+def test_rst_projection_nuclearity_joint() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Unit A.", "role": "main"},
+                {"text": "Unit B.", "role": "support"},
+            ],
+            "relations": [],
+            "main_unit_indexes": [0, 1],
+            "supporting_unit_indexes": [0, 1],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert [u.nuclearity for u in structure.units] == ["joint", "joint"]
+
+
+def test_rst_projection_nuclearity_neither() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Orphan unit.", "role": "detail"},
+            ],
+            "relations": [],
+            "main_unit_indexes": [],
+            "supporting_unit_indexes": [],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert structure.units[0].nuclearity is None
+
+
+def test_rst_projection_planning_role_mappings() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Claim.", "role": "claim"},
+                {"text": "Main.", "role": "main"},
+                {"text": "Thesis.", "role": "thesis"},
+                {"text": "Evidence.", "role": "evidence"},
+                {"text": "Data.", "role": "data"},
+                {"text": "Fact.", "role": "fact"},
+                {"text": "Definition.", "role": "definition"},
+                {"text": "Term.", "role": "term"},
+                {"text": "Condition.", "role": "condition"},
+                {"text": "Prerequisite.", "role": "prerequisite"},
+                {"text": "Qualification.", "role": "qualification"},
+                {"text": "Caveat.", "role": "caveat"},
+                {"text": "Limitation.", "role": "limitation"},
+                {"text": "Contrast.", "role": "contrast"},
+                {"text": "Opposition.", "role": "opposition"},
+                {"text": "Counter.", "role": "counter"},
+                {"text": "Procedure.", "role": "procedure"},
+                {"text": "Step.", "role": "step"},
+                {"text": "Method.", "role": "method"},
+                {"text": "Unknown.", "role": "background"},
+                {"text": "Bizarre.", "role": "foobar"},
+            ],
+            "relations": [],
+            "main_unit_indexes": [],
+            "supporting_unit_indexes": [],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    roles = [u.planning_role for u in structure.units]
+    assert roles[:3] == ["claim", "claim", "claim"]
+    assert roles[3:6] == ["evidence", "evidence", "evidence"]
+    assert roles[6:8] == ["definition", "definition"]
+    assert roles[8:10] == ["condition", "condition"]
+    assert roles[10:13] == ["qualification", "qualification", "qualification"]
+    assert roles[13:16] == ["contrast", "contrast", "contrast"]
+    assert roles[16:19] == ["procedure", "procedure", "procedure"]
+    assert roles[19:] == ["context", "context"]
+
+
+def test_rst_projection_normalizes_relation_types() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Target A.", "role": "main"},
+                {"text": "Target B.", "role": "main"},
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": "elaboration",
+                    "weight": 0.9,
+                },
+                {
+                    "source_unit_index": 0,
+                    "target_unit_index": 1,
+                    "relation_type": "example",
+                    "weight": 0.8,
+                },
+            ],
+            "main_unit_indexes": [0, 1],
+            "supporting_unit_indexes": [],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert structure.units[0].rst_relation == "elaborates"
+    assert structure.units[1].rst_relation == "example_of"
+
+
+def test_rst_projection_sequences_normalizes_to_temporal_next() -> None:
+    """The LLM prompt lists 'sequences' as a valid relation type;
+    the normalizer must map it to 'temporal_next'."""
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Step one.", "role": "main"},
+                {"text": "Step two.", "role": "support"},
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": "sequences",
+                    "weight": 1.0,
+                },
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert structure.units[0].rst_relation == "temporal_next"
+
+
+@pytest.mark.parametrize(
+    "relation_type",
+    ["Sequences", "SEQUENCES", " sequences ", "  SequenceS  "],
+)
+def test_rst_projection_sequences_alias_case_and_whitespace_tolerant(
+    relation_type: str,
+) -> None:
+    """Normalizer strips whitespace and lowercases before lookup."""
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Step one.", "role": "main"},
+                {"text": "Step two.", "role": "support"},
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": relation_type,
+                    "weight": 1.0,
+                },
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert structure.units[0].rst_relation == "temporal_next"
+
+
+def test_rst_projection_unknown_relation_not_mapped() -> None:
+    extractor = _extractor_for_chunk_output(
+        {
+            "canonical_chunk_id": "chunk_doc_alpha_0",
+            "units": [
+                {"text": "Target.", "role": "main"},
+                {"text": "Source.", "role": "support"},
+            ],
+            "relations": [
+                {
+                    "source_unit_index": 1,
+                    "target_unit_index": 0,
+                    "relation_type": "unknown_relation",
+                    "weight": 1.0,
+                },
+            ],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [1],
+        }
+    )
+
+    structure = extractor.extract(_package()).structures[0]
+    assert structure.units[0].rst_relation is None
+    assert structure.relations[0].relation_type == "unknown_relation"
+
+
+def test_rst_projection_preserves_existing_behavior() -> None:
+    client = _FakeDeepSeekClient(
+        json.dumps(
+            {
+                "chunks": [
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_0",
+                        "units": [
+                            {
+                                "text": "MiniRAG first retrieves chunks.",
+                                "role": "main",
+                                "start_char": 0,
+                                "end_char": 30,
+                            },
+                            {
+                                "text": "Graph paths then explain why they matter.",
+                                "role": "support",
+                                "start_char": 31,
+                                "end_char": 73,
+                            },
+                        ],
+                        "relations": [
+                            {
+                                "source_unit_index": 1,
+                                "target_unit_index": 0,
+                                "relation_type": "supports",
+                                "weight": 1.0,
+                            }
+                        ],
+                        "main_unit_indexes": [0],
+                        "supporting_unit_indexes": [1],
+                    }
+                ]
+            }
+        )
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        enabled=False,
+    )
+
+    package = extractor.extract(_package())
+
+    assert package.structures == []
+    assert package.metadata["status"] == "disabled"
+    for structure in package.structures:
+        for unit in structure.units:
+            assert unit.nuclearity is None
+            assert unit.rst_relation is None
+            assert unit.planning_role is None

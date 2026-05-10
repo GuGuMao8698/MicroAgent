@@ -14,6 +14,92 @@ from ragflow_lite.domain.models import (
     IntraChunkDiscourseRelation,
 )
 
+# --- Functional RST projection constants ---
+
+_RST_RELATION_PROJECTIONS: frozenset[str] = frozenset(
+    {
+        "supports",
+        "elaborates",
+        "defines",
+        "qualifies",
+        "contrasts",
+        "causes",
+        "conditions",
+        "temporal_next",
+        "example_of",
+    }
+)
+
+_NUCLEARITY_VALUES: frozenset[str] = frozenset({"nucleus", "satellite", "joint"})
+
+_PLANNING_ROLE_ALIASES: dict[str, str] = {
+    # claim
+    "claim": "claim",
+    "main": "claim",
+    "thesis": "claim",
+    # evidence
+    "evidence": "evidence",
+    "data": "evidence",
+    "fact": "evidence",
+    # definition
+    "definition": "definition",
+    "term": "definition",
+    # condition
+    "condition": "condition",
+    "prerequisite": "condition",
+    # qualification
+    "qualification": "qualification",
+    "caveat": "qualification",
+    "limitation": "qualification",
+    # contrast
+    "contrast": "contrast",
+    "opposition": "contrast",
+    "counter": "contrast",
+    # procedure
+    "procedure": "procedure",
+    "step": "procedure",
+    "method": "procedure",
+}
+
+_RST_NORMALIZATION_MAP: dict[str, str] = {
+    # supports
+    "supports": "supports",
+    "support": "supports",
+    # elaborates
+    "elaborates": "elaborates",
+    "elaboration": "elaborates",
+    "elaborate": "elaborates",
+    # defines
+    "defines": "defines",
+    "definition": "defines",
+    "define": "defines",
+    # qualifies
+    "qualifies": "qualifies",
+    "qualification": "qualifies",
+    "qualify": "qualifies",
+    # contrasts
+    "contrasts": "contrasts",
+    "contrast": "contrasts",
+    "contrast_with": "contrasts",
+    # causes
+    "causes": "causes",
+    "cause": "causes",
+    "causation": "causes",
+    # conditions
+    "conditions": "conditions",
+    "condition": "conditions",
+    # temporal_next
+    "temporal_next": "temporal_next",
+    "sequence": "temporal_next",
+    "sequences": "temporal_next",
+    "next": "temporal_next",
+    "sequencing": "temporal_next",
+    # example_of
+    "example_of": "example_of",
+    "example": "example_of",
+    "exemplifies": "example_of",
+}
+
 DISCOURSE_INSTRUCTIONS = """Extract minimal intra-chunk discourse structure.
 
 Return exactly one JSON object with this shape:
@@ -212,7 +298,10 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             canonical_chunk_id = _required_text(raw, "canonical_chunk_id")
             item = items_by_id.get(canonical_chunk_id)
             if item is None:
-                continue
+                raise ProcessingError(
+                    "Discourse extractor returned unknown canonical_chunk_id "
+                    f"{canonical_chunk_id!r}."
+                )
             structures_by_id[canonical_chunk_id] = self._load_structure(raw, item)
 
         return [
@@ -245,6 +334,10 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         supporting_unit_ids = _unit_ids_from_indexes(
             raw, "supporting_unit_indexes", units
         )
+        main_id_set = set(main_unit_ids)
+        supporting_id_set = set(supporting_unit_ids)
+
+        self._enrich_units(units, relations, main_id_set, supporting_id_set)
 
         return ChunkDiscourseStructure(
             canonical_chunk_id=item.canonical_chunk_id,
@@ -259,6 +352,33 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 "retained_reasons": list(item.retained_reasons),
             },
         )
+
+    @staticmethod
+    def _enrich_units(
+        units: list[DiscourseUnit],
+        relations: list[IntraChunkDiscourseRelation],
+        main_id_set: set[str],
+        supporting_id_set: set[str],
+    ) -> None:
+        rst_by_target: dict[str, str] = {}
+        for rel in relations:
+            if rel.target_unit_id not in rst_by_target:
+                normalized = _normalize_rst_relation(rel.relation_type)
+                if normalized is not None:
+                    rst_by_target[rel.target_unit_id] = normalized
+
+        for unit in units:
+            in_main = unit.unit_id in main_id_set
+            in_supporting = unit.unit_id in supporting_id_set
+            if in_main and in_supporting:
+                unit.nuclearity = "joint"
+            elif in_main:
+                unit.nuclearity = "nucleus"
+            elif in_supporting:
+                unit.nuclearity = "satellite"
+
+            unit.rst_relation = rst_by_target.get(unit.unit_id)
+            unit.planning_role = _map_planning_role(unit.role)
 
     def _load_unit(
         self,
@@ -397,6 +517,16 @@ def _normalize_label(value: str) -> str:
 
 def _normalize_text(value: str) -> str:
     return " ".join(value.strip().lower().split())
+
+
+def _normalize_rst_relation(relation_type: str) -> str | None:
+    key = relation_type.strip().lower()
+    return _RST_NORMALIZATION_MAP.get(key)
+
+
+def _map_planning_role(role: str) -> str:
+    key = role.strip().lower()
+    return _PLANNING_ROLE_ALIASES.get(key, "context")
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

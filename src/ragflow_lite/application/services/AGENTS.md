@@ -17,7 +17,6 @@ rtk cx references --name QueryService --file src/ragflow_lite/application/servic
 - [query_mode_router.py](query_mode_router.py): query mode router.
 - [mini_graph_first_retriever.py](mini_graph_first_retriever.py): graph-first retriever service.
 - [evidence_package_builder.py](evidence_package_builder.py): evidence package helper.
-- [inter_chunk_discourse_graph_builder.py](inter_chunk_discourse_graph_builder.py): inter-chunk discourse graph helper.
 - [discorag_answer_blueprint_builder.py](discorag_answer_blueprint_builder.py): DiscoRAG answer blueprint helper.
 - [document_service.py](document_service.py): document service.
 - [dataset_service.py](dataset_service.py): dataset service.

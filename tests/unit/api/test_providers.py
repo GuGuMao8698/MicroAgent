@@ -13,8 +13,6 @@ from infinity_test_support import (
 from ragflow_lite.api.deps.providers import build_services
 from ragflow_lite.app import create_app
 from ragflow_lite.application.services import (
-    DeterministicInterChunkDiscourseGraphBuilder,
-    DiscoRAGAnswerBlueprintBuilder,
     DiscoRAGQueryService,
     EvidencePackageBuilder,
     MiniGraphFirstRetriever,
@@ -23,6 +21,7 @@ from ragflow_lite.application.services import (
 from ragflow_lite.config import (
     ArkEmbeddingRuntimeConfig,
     DeepSeekRuntimeConfig,
+    DiscoRAGStructurerRuntimeConfig,
     Settings,
 )
 from ragflow_lite.infrastructure import (
@@ -38,6 +37,8 @@ from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
+    LLMDiscoRAGAnswerBlueprintBuilder,
+    LLMInterChunkDiscourseGraphBuilder,
     LocalJsonGraphEvidenceIndex,
 )
 from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
@@ -70,7 +71,7 @@ def _fake_embedder(*args: object, **kwargs: object) -> SimpleNamespace:
 
 
 def _fake_answerer(*args: object, **kwargs: object) -> SimpleNamespace:
-    return SimpleNamespace()
+    return SimpleNamespace(**kwargs)
 
 
 def _fake_graph_store(*args: object, **kwargs: object) -> SimpleNamespace:
@@ -85,7 +86,9 @@ def _fake_query_grounder(*args: object, **kwargs: object) -> SimpleNamespace:
     return SimpleNamespace()
 
 
-def _fake_mini_graph_first_retriever(*args: object, **kwargs: object) -> SimpleNamespace:
+def _fake_mini_graph_first_retriever(
+    *args: object, **kwargs: object
+) -> SimpleNamespace:
     return SimpleNamespace(**kwargs)
 
 
@@ -99,7 +102,9 @@ def _patch_non_live_build_services_dependencies(
     from ragflow_lite.api.deps import providers as providers_module
 
     monkeypatch.setattr(providers_module, "ArkMultimodalTextEmbedder", _fake_embedder)
-    monkeypatch.setattr(providers_module, "_build_vector_index", lambda *_: _FakeVectorIndex())
+    monkeypatch.setattr(
+        providers_module, "_build_vector_index", lambda *_: _FakeVectorIndex()
+    )
     monkeypatch.setattr(providers_module, "DeepSeekChatAnswerer", _fake_answerer)
     monkeypatch.setattr(
         providers_module,
@@ -141,7 +146,9 @@ def _patch_non_live_build_services_dependencies(
         "MiniGraphFirstRetriever",
         _fake_mini_graph_first_retriever,
     )
-    monkeypatch.setattr(providers_module, "QueryService", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        providers_module, "QueryService", lambda **kwargs: SimpleNamespace(**kwargs)
+    )
     monkeypatch.setattr(
         providers_module,
         "DiscoRAGQueryService",
@@ -166,6 +173,18 @@ def _patch_non_live_build_services_dependencies(
         providers_module,
         "DatasetService",
         lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LLMInterChunkDiscourseGraphBuilder",
+        lambda **kwargs: SimpleNamespace(**kwargs, build=lambda package: None),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LLMDiscoRAGAnswerBlueprintBuilder",
+        lambda **kwargs: SimpleNamespace(
+            **kwargs, build=lambda package, *, graph=None: None
+        ),
     )
 
 
@@ -193,7 +212,7 @@ def test_settings_group_runtime_provider_configuration(
     monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
     monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
 
-    ark_config, deepseek_config = _build_settings(
+    ark_config, deepseek_config, structurer_config = _build_settings(
         tmp_path
     ).require_runtime_provider_configs()
 
@@ -210,6 +229,12 @@ def test_settings_group_runtime_provider_configuration(
         prompt_path=None,
         render_citations=True,
     )
+    assert structurer_config == DiscoRAGStructurerRuntimeConfig(
+        api_key="test-deepseek-api-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+    )
 
 
 def test_settings_reads_optional_answerer_prompt_path(
@@ -221,7 +246,7 @@ def test_settings_reads_optional_answerer_prompt_path(
         "/tmp/optimized_answerer_prompt.txt",
     )
 
-    _, deepseek_config = _build_settings(tmp_path).require_runtime_provider_configs()
+    _, deepseek_config, _ = _build_settings(tmp_path).require_runtime_provider_configs()
 
     assert deepseek_config.prompt_path == "/tmp/optimized_answerer_prompt.txt"
 
@@ -232,9 +257,77 @@ def test_settings_reads_optional_render_citations_env(
 ) -> None:
     monkeypatch.setenv("RAGFLOW_LITE_OPENAI_RENDER_CITATIONS", "false")
 
-    _, deepseek_config = _build_settings(tmp_path).require_runtime_provider_configs()
+    _, deepseek_config, _ = _build_settings(tmp_path).require_runtime_provider_configs()
 
     assert deepseek_config.render_citations is False
+
+
+def test_structurer_config_falls_back_to_deepseek_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When DISCORAG_STRUCTURER_API_KEY is not set, structurer aliases DEEPSEEK_API_KEY."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+    monkeypatch.delenv("DISCORAG_STRUCTURER_API_KEY", raising=False)
+
+    _, _, structurer_config = _build_settings(
+        tmp_path
+    ).require_runtime_provider_configs()
+
+    assert structurer_config.api_key == "test-deepseek-api-key"
+    assert structurer_config.base_url == "https://api.deepseek.com"
+    assert structurer_config.model == "deepseek-v4-flash"
+    assert structurer_config.reasoning_effort == "high"
+
+
+def test_structurer_config_uses_explicit_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When DISCORAG_STRUCTURER_API_KEY is set, it overrides the DeepSeek fallback."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+    monkeypatch.setenv("DISCORAG_STRUCTURER_API_KEY", "explicit-structurer-key")
+
+    _, deepseek_config, structurer_config = _build_settings(
+        tmp_path
+    ).require_runtime_provider_configs()
+
+    assert deepseek_config.api_key == "test-deepseek-api-key"
+    assert structurer_config.api_key == "explicit-structurer-key"
+
+
+def test_structurer_config_defaults_in_settings(tmp_path: Path) -> None:
+    """Verify structurer settings have correct hardcoded defaults."""
+    settings = _build_settings(tmp_path)
+
+    assert settings.discorag_structurer_base_url == "https://api.deepseek.com"
+    assert settings.discorag_structurer_model == "deepseek-v4-flash"
+    assert settings.discorag_structurer_reasoning_effort == "high"
+
+
+def test_structurer_config_is_independent_from_deepseek_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify structurer config and deepseek config are separate objects."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
+    _, deepseek_config, structurer_config = _build_settings(
+        tmp_path
+    ).require_runtime_provider_configs()
+
+    # Both default to same provider but are distinct frozen configs
+    assert deepseek_config is not structurer_config
+    assert deepseek_config.api_key == structurer_config.api_key
+    assert deepseek_config.base_url == structurer_config.base_url
+    assert deepseek_config.model == structurer_config.model
+    assert deepseek_config.reasoning_effort == structurer_config.reasoning_effort
 
 
 @pytest.mark.live_infinity
@@ -463,6 +556,50 @@ def test_build_services_non_live_keeps_discourse_extractor_uncapped(
     assert services.discorag_query_service.discourse_extractor.max_chunks is None
 
 
+def test_build_services_non_live_structurer_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RST、graph、blueprint 三个结构化组件使用 structurer config，answerer 使用 deepseek config。"""
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+    monkeypatch.setenv("DISCORAG_STRUCTURER_API_KEY", "structurer-key")
+
+    settings = _build_settings(tmp_path)
+    settings.discorag_structurer_base_url = "https://structurer.example.com"
+    settings.discorag_structurer_model = "structurer-model-v2"
+    settings.discorag_structurer_reasoning_effort = "low"
+
+    services = build_services(settings)
+
+    # 三个结构化组件共享 structurer config
+    de = services.discorag_query_service.discourse_extractor
+    assert isinstance(de, DeepSeekChatIntraChunkDiscourseExtractor)
+    assert de.api_key == "structurer-key"
+    assert de.base_url == "https://structurer.example.com"
+    assert de.model == "structurer-model-v2"
+    assert de.reasoning_effort == "low"
+
+    gb = services.discorag_query_service.inter_chunk_graph_builder
+    assert gb.api_key == "structurer-key"
+    assert gb.base_url == "https://structurer.example.com"
+    assert gb.model == "structurer-model-v2"
+    assert gb.reasoning_effort == "low"
+
+    bb = services.discorag_query_service.blueprint_builder
+    assert bb.api_key == "structurer-key"
+    assert bb.base_url == "https://structurer.example.com"
+    assert bb.model == "structurer-model-v2"
+    assert bb.reasoning_effort == "low"
+
+    # answerer 使用 deepseek config，与 structurer 无关
+    answerer = services.query_service.answerer
+    assert answerer.api_key == "deepseek-key"
+    assert answerer.model != "structurer-model-v2"
+
+
 @pytest.mark.live_infinity
 def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
     services = build_services(_build_live_settings(tmp_path))
@@ -481,12 +618,12 @@ def test_build_services_wires_discorag_query_service(tmp_path: Path) -> None:
     assert services.discorag_query_service.discourse_extractor.max_chunks is None
     assert isinstance(
         services.discorag_query_service.blueprint_builder,
-        DiscoRAGAnswerBlueprintBuilder,
+        LLMDiscoRAGAnswerBlueprintBuilder,
     )
-    # inter-chunk graph builder 使用确定性实现
+    # inter-chunk graph builder 使用 LLM structurer 实现
     assert isinstance(
         services.discorag_query_service.inter_chunk_graph_builder,
-        DeterministicInterChunkDiscourseGraphBuilder,
+        LLMInterChunkDiscourseGraphBuilder,
     )
 
 
