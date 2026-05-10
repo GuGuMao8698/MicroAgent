@@ -213,6 +213,133 @@ def test_deepseek_chat_does_not_retry_non_retryable_status_error(
     assert sleeps == []
 
 
+def test_complete_messages_sends_messages_and_returns_content() -> None:
+    completions = _FakeCompletions("hello world")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    result = client.complete_messages(
+        [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Say hi."},
+        ]
+    )
+    assert result == "hello world"
+    request = completions.requests[0]
+    assert request["messages"] == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Say hi."},
+    ]
+    assert "response_format" not in request
+    assert "max_tokens" not in request
+
+
+def test_complete_messages_passes_timeout_through() -> None:
+    completions = _FakeCompletions("timed response")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    result = client.complete_messages(
+        [{"role": "user", "content": "Ping."}],
+        timeout_seconds=90,
+    )
+    assert result == "timed response"
+    assert completions.requests[0]["timeout"] == 90
+
+
+def test_complete_messages_json_sends_json_mode_and_timeout() -> None:
+    completions = _FakeCompletions('{"ok": true}')
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    result = client.complete_messages_json(
+        [
+            {"role": "system", "content": "Return JSON."},
+            {"role": "user", "content": "Build graph."},
+            {"role": "assistant", "content": '{"relations": []}'},
+            {"role": "user", "content": "Previous JSON was invalid. Regenerate."},
+        ],
+        timeout_seconds=90,
+    )
+    assert result == '{"ok": true}'
+    request = completions.requests[0]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["max_tokens"] == 262144
+    assert request["timeout"] == 90
+    assert "JSON" in request["messages"][0]["content"].upper()
+
+
+def test_complete_messages_json_injects_instruction_when_no_system_message() -> None:
+    completions = _FakeCompletions('{"ok": true}')
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    result = client.complete_messages_json(
+        [
+            {"role": "user", "content": "Build a graph."},
+        ]
+    )
+    assert result == '{"ok": true}'
+    request = completions.requests[0]
+    assert request["messages"][0]["role"] == "system"
+    assert "JSON" in request["messages"][0]["content"].upper()
+
+
+def test_complete_messages_rejects_empty_messages() -> None:
+    completions = _FakeCompletions("irrelevant")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    with pytest.raises(ProcessingError, match="messages must not be empty"):
+        client.complete_messages([])
+
+
+def test_complete_messages_rejects_invalid_role() -> None:
+    completions = _FakeCompletions("irrelevant")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    with pytest.raises(ProcessingError, match="Invalid.*role"):
+        client.complete_messages([{"role": "tool", "content": "output"}])
+
+
+def test_complete_messages_rejects_empty_content() -> None:
+    completions = _FakeCompletions("irrelevant")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    with pytest.raises(ProcessingError, match="non-empty text"):
+        client.complete_messages([{"role": "user", "content": "   "}])
+
+
 def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
     client = _FakeAnswerClient("回答")
     answerer = DeepSeekChatAnswerer(
