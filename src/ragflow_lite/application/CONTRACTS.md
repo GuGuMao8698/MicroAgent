@@ -86,6 +86,27 @@ Invariant:
 - `QueryService` remains generic over `Retriever` + `Answerer`; do not couple it to graph-first or provider-specific internals.
 - `GraphFirstSourceSelection` is an internal application contract; downstream collaborators may consume its metadata, but public API surfaces must not expose its full internal shape.
 
+## DiscoRAG Degraded Fallback Contract
+
+Reviewed at: `2026-05-10T20:00:00+08:00`
+Status: Active
+Owner: `DiscoRAGQueryService`
+
+Source of truth:
+- When RST extraction, inter-chunk graph construction, or blueprint planning exhausts structurer attempts, `DiscoRAGQueryService` catches the `ProcessingError` and degrades to MiniRAG direct answer.
+- Fallback uses `retrieval_result.chunks` exactly as contexts, `mode="standard"`, `blueprint=None`.
+- Result metadata includes `discorag_degraded == True` and a user-visible `discorag_error` block with stage, failure type, attempt counts, and message.
+- Fallback does not append supplemental discourse chunks and does not use a blueprint.
+
+Invariant:
+- Only structurer-stage `ProcessingError` (rst_extraction, inter_chunk_graph, blueprint) triggers fallback.
+- Runtime invariant failures after a valid blueprint (e.g. promotion runtime errors from `_contexts_with_bounded_promotion`, blueprint-context consistency errors from `_blueprint_for_contexts`) remain hard errors and propagate upward.
+- Non-`ProcessingError` exceptions also propagate upward and do not trigger fallback.
+
 Forbidden stale interpretations:
-- Do not move retrieval-strategy knobs or graph-first internals into HTTP query-mode dispatch.
-- Do not treat service-local orchestration metadata as a public API contract unless the API layer documents it explicitly.
+- Do not treat structurer-stage `ProcessingError` as a hard error requiring user retry; the service already degrades.
+- Do not treat post-blueprint runtime errors as recoverable; they remain hard errors.
+
+Verification:
+- [tests/unit/application/test_discorag_query_service.py](../../../tests/unit/application/test_discorag_query_service.py)
+- [tests/unit/application/test_discorag_local_smoke.py](../../../tests/unit/application/test_discorag_local_smoke.py)

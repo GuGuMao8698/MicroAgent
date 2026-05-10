@@ -117,6 +117,31 @@ Verification:
 - [tests/unit/infrastructure/test_deepseek_discourse_extractor.py](../../../../tests/unit/infrastructure/test_deepseek_discourse_extractor.py)
 - provider wiring assertions in [tests/unit/api/test_providers.py](../../../../tests/unit/api/test_providers.py)
 
+## Structurer Retry Boundary
+
+Reviewed at: `2026-05-10T20:00:00+08:00`
+Status: Active
+Owner: `LLMInterChunkDiscourseGraphBuilder`, `LLMDiscoRAGAnswerBlueprintBuilder`, `DeepSeekChatIntraChunkDiscourseExtractor`
+
+Source of truth:
+- DiscoRAG structurer calls use bounded attempts controlled by `DiscoRAGStructurerRuntimeConfig.timeout_seconds` (default 90) and `max_attempts` (default 2).
+- Validation failures are repaired by asking the same structurer model to regenerate a complete JSON object using multi-turn context and a short validation feedback turn (`build_validation_repair_messages` in [structurer_retry.py](structurer_retry.py)).
+- Timeout retries start a fresh original attempt (reset `repair_messages = None`).
+- `StructurerAttemptState` tracks attempt counts, repair counts, and timeout counts per stage.
+- `is_timeout_error()` classifies exceptions by class name and message content.
+- Parsers remain strict; runtime services do not patch invalid structure.
+
+Invariant:
+- Each builder loop raises `ProcessingError` with an `"failed after N attempts"` message when all attempts are exhausted.
+- Validation repair uses `complete_messages_json()` (multi-turn); fresh attempts use `complete_json()` (single-turn).
+- Builders do not fall back to deterministic output on exhaustion; the caller decides fallback policy.
+
+Verification:
+- [tests/unit/infrastructure/test_structurer_retry.py](../../../../tests/unit/infrastructure/test_structurer_retry.py)
+- [tests/unit/infrastructure/test_llm_inter_chunk_graph_builder.py](../../../../tests/unit/infrastructure/test_llm_inter_chunk_graph_builder.py)
+- [tests/unit/infrastructure/test_llm_discorag_blueprint_builder.py](../../../../tests/unit/infrastructure/test_llm_discorag_blueprint_builder.py)
+- [tests/unit/infrastructure/test_deepseek_discourse_extractor.py](../../../../tests/unit/infrastructure/test_deepseek_discourse_extractor.py)
+
 ## LLM Inter-Chunk Discourse Graph Contract
 
 Reviewed at: `2026-05-09T20:00:00+08:00`
