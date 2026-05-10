@@ -24,6 +24,10 @@ from ragflow_lite.domain.models import (
 from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_parser import (
     parse_llm_discorag_blueprint,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    build_validation_repair_messages,
+    is_timeout_error,
+)
 
 # ── System instructions ─────────────────────────────────────────────────────
 
@@ -111,13 +115,21 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
         reasoning_effort: str = "high",
         provider: str = "deepseek",
         client: Any | None = None,
+        timeout_seconds: float = 90.0,
+        max_attempts: int = 2,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.client = client
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
 
     def _provenance_metadata(self) -> dict[str, Any]:
         """Build safe provenance metadata — never includes API keys."""
@@ -169,37 +181,67 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
             top_k=top_k,
         )
 
-        # 6. Call LLM
+        # 6. Attempt loop: timeout retry uses fresh original request,
+        #    validation repair uses multi-turn messages.
         client = self.client or self._build_client(self.api_key, self.base_url)
-        try:
-            raw_json = client.complete_json(
-                instructions=_BLUEPRINT_INSTRUCTIONS,
-                input_text=input_text,
-            )
-        except Exception as exc:
-            raise ProcessingError(
-                f"LLM DiscoRAG blueprint builder call failed: {exc}"
-            ) from exc
+        instructions = _BLUEPRINT_INSTRUCTIONS
+        last_error: Exception | None = None
+        # None = use complete_json (fresh request); list = use complete_messages_json (repair)
+        repair_messages: list[dict[str, str]] | None = None
 
-        # 7. Parse and validate
-        try:
-            blueprint = parse_llm_discorag_blueprint(
-                raw_json,
-                answer_chunk_ids=answer_chunk_ids,
-                supplemental_chunk_ids=supplemental_chunk_ids,
-                known_relation_ids=known_relation_ids,
-                known_rst_unit_ids=known_rst_unit_ids,
-                top_k=top_k,
-                llm_metadata=self._provenance_metadata(),
-            )
-        except ProcessingError:
-            raise
-        except Exception as exc:
-            raise ProcessingError(
-                f"LLM DiscoRAG blueprint builder parsing failed: {exc}"
-            ) from exc
+        for attempt_index in range(self.max_attempts):
+            try:
+                if repair_messages is None:
+                    raw_json = client.complete_json(
+                        instructions=instructions,
+                        input_text=input_text,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                else:
+                    raw_json = client.complete_messages_json(
+                        repair_messages,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+            except Exception as exc:
+                if is_timeout_error(exc):
+                    if attempt_index >= self.max_attempts - 1:
+                        raise ProcessingError(
+                            f"LLM DiscoRAG blueprint builder failed after "
+                            f"{self.max_attempts} attempts: timeout"
+                        ) from exc
+                    # Timeout retry: fresh original request
+                    repair_messages = None
+                    last_error = exc
+                    continue
+                raise ProcessingError(
+                    f"LLM DiscoRAG blueprint builder call failed: {exc}"
+                ) from exc
 
-        return blueprint
+            try:
+                return parse_llm_discorag_blueprint(
+                    raw_json,
+                    answer_chunk_ids=answer_chunk_ids,
+                    supplemental_chunk_ids=supplemental_chunk_ids,
+                    known_relation_ids=known_relation_ids,
+                    known_rst_unit_ids=known_rst_unit_ids,
+                    top_k=top_k,
+                    llm_metadata=self._provenance_metadata(),
+                )
+            except ProcessingError as exc:
+                last_error = exc
+                if attempt_index >= self.max_attempts - 1:
+                    break
+                repair_messages = build_validation_repair_messages(
+                    instructions=instructions,
+                    input_text=input_text,
+                    invalid_output=raw_json,
+                    validation_error=str(exc),
+                )
+
+        raise ProcessingError(
+            f"LLM DiscoRAG blueprint builder failed after "
+            f"{self.max_attempts} attempts: {last_error}"
+        ) from last_error
 
     def _build_client(self, api_key: str | None, base_url: str | None) -> Any:
         from ragflow_lite.infrastructure.llms import DeepSeekChatCompletionsClient

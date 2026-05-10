@@ -36,15 +36,46 @@ from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_builder import 
 
 
 class _FakeClient:
-    """Minimal fake DeepSeekChatCompletionsClient for testing."""
+    """Minimal fake DeepSeekChatCompletionsClient for testing.
 
-    def __init__(self, output_text: str) -> None:
-        self.output_text = output_text
-        self.calls: list[dict[str, str]] = []
+    Accepts a single str (backward compatible) or a list of str|Exception
+    for sequential responses across retry attempts.
+    """
 
-    def complete_json(self, instructions: str, input_text: str) -> str:
-        self.calls.append({"instructions": instructions, "input_text": input_text})
-        return self.output_text
+    def __init__(self, responses: str | list[str | Exception]) -> None:
+        if isinstance(responses, str):
+            self._responses: list[str | Exception] = [responses]
+        else:
+            self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    def complete_json(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def complete_messages_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def _next_response(self, call_args: dict) -> str:
+        if not self._responses:
+            raise RuntimeError("No more fake responses")
+        self.calls.append(call_args)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class _FailingClient:
@@ -53,7 +84,23 @@ class _FailingClient:
     def __init__(self, error: Exception) -> None:
         self.error = error
 
-    def complete_json(self, instructions: str, input_text: str) -> str:
+    def complete_json(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        raise self.error
+
+    def complete_messages_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
         raise self.error
 
 
@@ -412,7 +459,7 @@ def test_builder_exceeding_top_k_raises() -> None:
         chunk_roles={"chunk_a": "lead", "chunk_b": "support"},
     )
     client = _FakeClient(llm_output)
-    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="exceeds top_k"):
         builder.build(package)
@@ -426,7 +473,7 @@ def test_invalid_json_propagates_processing_error() -> None:
     package = _package(item_a, source_selection={"final_context_k": 5})
 
     client = _FakeClient("not valid json {{{")
-    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="not valid JSON"):
         builder.build(package)
@@ -437,7 +484,7 @@ def test_missing_final_ids_propagates_processing_error() -> None:
     package = _package(item_a, source_selection={"final_context_k": 5})
 
     client = _FakeClient(json.dumps({"chunk_roles": {}}))
-    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="missing 'final_answer_chunk_ids'"):
         builder.build(package)
@@ -528,7 +575,7 @@ def test_llm_call_failure_propagates_no_fallback() -> None:
     item_a = _evidence_item("chunk_a", "Text.", order=0, selected_for_answer=True)
     package = _package(item_a, source_selection={"final_context_k": 5})
 
-    client = _FailingClient(RuntimeError("API timeout"))
+    client = _FailingClient(RuntimeError("API connection refused"))
     builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
 
     with pytest.raises(
@@ -548,7 +595,7 @@ def test_parser_failure_propagates_no_fallback() -> None:
         chunk_roles={"chunk_ghost": "lead"},
     )
     client = _FakeClient(llm_output)
-    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="Unknown chunk ID"):
         builder.build(package)
@@ -810,3 +857,157 @@ def test_provenance_never_includes_api_key() -> None:
     meta_str = _metadata_as_str(blueprint.metadata)
     assert "sk-super-secret-key-67890" not in meta_str
     assert "api_key" not in meta_str
+
+
+# ── Tests: validation repair and timeout retry ────────────────────────────────
+
+
+def _package_with_two_answer_chunks() -> IntraChunkDiscoursePackage:
+    """Package with two answer chunks for retry tests."""
+    item_a = _evidence_item("chunk_a", "Answer A.", order=0, selected_for_answer=True)
+    item_b = _evidence_item("chunk_b", "Answer B.", order=1, selected_for_answer=True)
+    return _package(item_a, item_b, source_selection={"final_context_k": 5})
+
+
+def _graph() -> InterChunkDiscourseGraph:
+    """Minimal inter-chunk graph for retry tests."""
+    rel = InterChunkDiscourseRelation(
+        source_chunk_id="chunk_a",
+        target_chunk_id="chunk_b",
+        relation_type="supports",
+        metadata={"relation_id": "rel_0"},
+    )
+    return _inter_chunk_graph(rel, chunk_ids=["chunk_a", "chunk_b"])
+
+
+def test_blueprint_builder_repairs_validation_error_with_multiturn_messages() -> None:
+    """First attempt returns invalid JSON (missing chunk_b role), repair returns valid."""
+    client = _FakeClient(
+        responses=[
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead"},  # missing chunk_b
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead", "chunk_b": "support"},
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    blueprint = builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+    assert blueprint.ordered_chunk_ids == ["chunk_a", "chunk_b"]
+    assert len(client.calls) == 2
+    # Second call should be message-based (repair)
+    repair_call = client.calls[1]
+    assert repair_call.get("messages") is not None
+    messages = repair_call["messages"]
+    assert messages[2]["role"] == "assistant"
+    assert "chunk_roles" in messages[3]["content"]
+    assert "query:" not in messages[3]["content"]
+    assert "Do not output a patch" in messages[3]["content"]
+
+
+def test_blueprint_builder_raises_after_repair_attempts_exhausted() -> None:
+    """Both attempts return invalid JSON, builder raises ProcessingError."""
+    client = _FakeClient(
+        responses=[
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead"},  # missing chunk_b
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead"},  # still missing chunk_b
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+
+def test_blueprint_builder_retries_timeout_with_fresh_original_request() -> None:
+    """First call times out, second call is a fresh original request (not repair)."""
+    client = _FakeClient(
+        responses=[
+            TimeoutError("request timed out"),
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead", "chunk_b": "support"},
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    blueprint = builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+    assert blueprint.ordered_chunk_ids == ["chunk_a", "chunk_b"]
+    assert len(client.calls) == 2
+    # Second call should be a fresh original (instructions+input_text based)
+    second_call = client.calls[1]
+    assert "instructions" in second_call
+    assert "input_text" in second_call
+
+
+def test_blueprint_builder_timeout_exhausted_raises() -> None:
+    """Both attempts time out, builder raises ProcessingError."""
+    client = _FakeClient(
+        responses=[
+            TimeoutError("request timed out"),
+            TimeoutError("request timed out"),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        builder.build(_package_with_two_answer_chunks(), graph=_graph())
