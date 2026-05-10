@@ -17,13 +17,44 @@ from ragflow_lite.infrastructure.evidence import (
 
 
 class _FakeDeepSeekClient:
-    def __init__(self, output_text: str) -> None:
-        self.output_text = output_text
-        self.calls: list[dict[str, str]] = []
+    """Minimal fake DeepSeekChatCompletionsClient for testing.
 
-    def complete_json(self, instructions: str, input_text: str) -> str:
-        self.calls.append({"instructions": instructions, "input_text": input_text})
-        return self.output_text
+    Accepts a single str (backward compatible) or a list of str|Exception
+    for sequential responses across retry attempts.
+    """
+
+    def __init__(self, output_text_or_responses: str | list[str | Exception]) -> None:
+        if isinstance(output_text_or_responses, str):
+            self._responses: list[str | Exception] = [output_text_or_responses]
+        else:
+            self._responses = list(output_text_or_responses)
+        self.calls: list[dict] = []
+
+    def complete_json(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def complete_messages_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def _next_response(self, call_args: dict) -> str:
+        if not self._responses:
+            raise RuntimeError("No more fake responses")
+        self.calls.append(call_args)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def _package() -> EvidencePackage:
@@ -114,6 +145,7 @@ def _extractor_for_chunk_output(
 ) -> DeepSeekChatIntraChunkDiscourseExtractor:
     return DeepSeekChatIntraChunkDiscourseExtractor(
         client=_FakeDeepSeekClient(json.dumps({"chunks": [chunk_output]})),
+        max_attempts=1,
     )
 
 
@@ -264,6 +296,7 @@ def test_deepseek_discourse_extractor_empty_package_skips_model_call() -> None:
 def test_deepseek_discourse_extractor_rejects_invalid_json() -> None:
     extractor = DeepSeekChatIntraChunkDiscourseExtractor(
         client=_FakeDeepSeekClient("not json"),
+        max_attempts=1,
     )
 
     with pytest.raises(ProcessingError, match="invalid JSON"):
@@ -293,7 +326,8 @@ def test_deepseek_discourse_extractor_rejects_unknown_canonical_chunk_id() -> No
                     ]
                 }
             )
-        )
+        ),
+        max_attempts=1,
     )
 
     with pytest.raises(ProcessingError, match="unknown canonical_chunk_id"):
@@ -339,7 +373,8 @@ def test_deepseek_discourse_extractor_rejects_mixed_valid_and_unknown_chunk_ids(
                     ]
                 }
             )
-        )
+        ),
+        max_attempts=1,
     )
 
     with pytest.raises(ProcessingError, match="unknown canonical_chunk_id"):
@@ -369,7 +404,8 @@ def test_deepseek_discourse_extractor_rejects_invalid_span() -> None:
                     ]
                 }
             )
-        )
+        ),
+        max_attempts=1,
     )
 
     with pytest.raises(ProcessingError, match="span is outside chunk text"):
@@ -404,7 +440,8 @@ def test_deepseek_discourse_extractor_rejects_invalid_relation_reference() -> No
                     ]
                 }
             )
-        )
+        ),
+        max_attempts=1,
     )
 
     with pytest.raises(ProcessingError, match="target index is invalid"):
@@ -904,3 +941,137 @@ def test_rst_projection_preserves_existing_behavior() -> None:
             assert unit.nuclearity is None
             assert unit.rst_relation is None
             assert unit.planning_role is None
+
+
+# --- Validation repair and timeout retry tests ---
+
+
+def test_deepseek_discourse_extractor_repairs_unknown_chunk_id() -> None:
+    """First response has unknown canonical_chunk_id, repair returns valid."""
+    client = _FakeDeepSeekClient(
+        [
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "missing",
+                            "units": [{"text": "Bad.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [{"text": "Good.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+    package = extractor.extract(_package())
+    assert package.structures[0].canonical_chunk_id == "chunk_doc_alpha_0"
+    assert len(client.calls) == 2
+    assert "unknown canonical_chunk_id" in client.calls[1]["messages"][3]["content"]
+
+
+def test_deepseek_discourse_extractor_raises_after_exhausted() -> None:
+    """Both attempts return invalid, raises ProcessingError."""
+    client = _FakeDeepSeekClient(
+        [
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "missing",
+                            "units": [{"text": "Bad.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "still_missing",
+                            "units": [{"text": "Still bad.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_attempts=2,
+    )
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        extractor.extract(_package())
+
+
+def test_deepseek_discourse_extractor_retries_timeout_fresh() -> None:
+    """Timeout then success, second call is fresh original."""
+    client = _FakeDeepSeekClient(
+        [
+            TimeoutError("timed out"),
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [{"text": "Good.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+    package = extractor.extract(_package())
+    assert package.structures[0].canonical_chunk_id == "chunk_doc_alpha_0"
+    assert len(client.calls) == 2
+    # Second call should be complete_json (fresh), not repair messages
+    assert "instructions" in client.calls[1]
+
+
+def test_deepseek_discourse_extractor_timeout_exhausted_raises() -> None:
+    """Both timeout, raises."""
+    client = _FakeDeepSeekClient(
+        [
+            TimeoutError("timed out"),
+            TimeoutError("timed out"),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_attempts=2,
+    )
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        extractor.extract(_package())

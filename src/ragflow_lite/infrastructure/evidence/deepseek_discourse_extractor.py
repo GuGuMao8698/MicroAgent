@@ -13,6 +13,10 @@ from ragflow_lite.domain.models import (
     IntraChunkDiscoursePackage,
     IntraChunkDiscourseRelation,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    build_validation_repair_messages,
+    is_timeout_error,
+)
 
 # --- Functional RST projection constants ---
 
@@ -148,6 +152,9 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         client: Any | None = None,
         max_chunks: int | None = None,
         enabled: bool = True,
+        *,
+        timeout_seconds: float = 90.0,
+        max_attempts: int = 2,
     ) -> None:
         # Contract reviewed 2026-05-08T12:56:51+08:00.
         # default RST extraction consumes the retriever-selected discourse window;
@@ -161,6 +168,8 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         self.api_key = api_key
         self.base_url = base_url
         self.client = client
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
 
     def extract(self, evidence_package: EvidencePackage) -> IntraChunkDiscoursePackage:
         if not self.enabled:
@@ -179,28 +188,75 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         ]
 
         client = self.client or self._build_client(self.api_key, self.base_url)
-        response_text = client.complete_json(
-            instructions=DISCOURSE_INSTRUCTIONS,
-            input_text=self._build_input(evidence_package, selected_items),
-        )
-        payload = self._load_payload(response_text)
-        structures = self._load_structures(payload, selected_items)
-        return IntraChunkDiscoursePackage(
-            query=evidence_package.query,
-            evidence_package=evidence_package,
-            structures=structures,
-            metadata={
-                "extractor": "deepseek_chat_intra_chunk_discourse",
-                "model": self.model,
-                "selected_evidence_count": len(selected_items),
-                "structure_count": len(structures),
-                "status": "ok",
-                "selection_source": selection_source,
-                "max_chunks": self.max_chunks,
-                "selected_chunk_ids": selected_ids,
-                "skipped_chunk_ids": skipped_ids,
-            },
-        )
+        input_text = self._build_input(evidence_package, selected_items)
+        instructions = DISCOURSE_INSTRUCTIONS
+        last_error: Exception | None = None
+        # None = use complete_json (fresh request); list = use complete_messages_json (repair)
+        repair_messages: list[dict[str, str]] | None = None
+
+        for attempt_index in range(self.max_attempts):
+            try:
+                if repair_messages is None:
+                    raw_json = client.complete_json(
+                        instructions=instructions,
+                        input_text=input_text,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                else:
+                    raw_json = client.complete_messages_json(
+                        repair_messages,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+            except Exception as exc:
+                if is_timeout_error(exc):
+                    if attempt_index >= self.max_attempts - 1:
+                        raise ProcessingError(
+                            f"DeepSeek discourse extractor failed after "
+                            f"{self.max_attempts} attempts: timeout"
+                        ) from exc
+                    repair_messages = None
+                    last_error = exc
+                    continue
+                raise ProcessingError(
+                    f"DeepSeek discourse extractor call failed: {exc}"
+                ) from exc
+
+            try:
+                payload = self._load_payload(raw_json)
+                structures = self._load_structures(payload, selected_items)
+            except ProcessingError as exc:
+                last_error = exc
+                if attempt_index >= self.max_attempts - 1:
+                    break
+                repair_messages = build_validation_repair_messages(
+                    instructions=instructions,
+                    input_text=input_text,
+                    invalid_output=raw_json,
+                    validation_error=str(exc),
+                )
+                continue
+
+            return IntraChunkDiscoursePackage(
+                query=evidence_package.query,
+                evidence_package=evidence_package,
+                structures=structures,
+                metadata={
+                    "extractor": "deepseek_chat_intra_chunk_discourse",
+                    "model": self.model,
+                    "selected_evidence_count": len(selected_items),
+                    "structure_count": len(structures),
+                    "status": "ok",
+                    "selection_source": selection_source,
+                    "max_chunks": self.max_chunks,
+                    "selected_chunk_ids": selected_ids,
+                    "skipped_chunk_ids": skipped_ids,
+                },
+            )
+
+        raise ProcessingError(
+            f"DeepSeek discourse extractor failed after "
+            f"{self.max_attempts} attempts: {last_error}"
+        ) from last_error
 
     def _select_items(
         self, items: list[EvidenceItem]
