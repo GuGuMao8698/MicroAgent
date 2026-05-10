@@ -4,12 +4,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ragflow_lite.domain.errors.exceptions import ProcessingError
+
+
+class StructurerAttemptsExhaustedError(ProcessingError):
+    """Raised when a structurer stage exhausts its retry budget."""
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        failure_type: str,
+        attempts: int,
+        max_attempts: int,
+        message: str,
+    ) -> None:
+        self.stage = stage
+        self.failure_type = failure_type
+        self.attempts = attempts
+        self.max_attempts = max_attempts
+        self.message = message
+        super().__init__(
+            f"{stage} structurer failed after {attempts} attempts: {message}"
+        )
+
+    def safe_metadata(self) -> dict[str, object]:
+        return {
+            "stage": self.stage,
+            "error_type": type(self).__name__,
+            "failure_type": self.failure_type,
+            "attempts": self.attempts,
+            "max_attempts": self.max_attempts,
+            "message": self.message,
+            "user_visible": True,
+        }
+
 
 @dataclass
 class StructurerAttemptState:
     """Tracks attempt counts and failure summaries for a single structurer stage."""
 
     stage: str
+    max_attempts: int
     attempts: int = 0
     repair_count: int = 0
     timeout_count: int = 0
@@ -37,6 +73,17 @@ class StructurerAttemptState:
         if self.last_failure_type is not None:
             metadata["structurer_last_failure_type"] = self.last_failure_type
         return metadata
+
+    def exhausted_error(self) -> StructurerAttemptsExhaustedError:
+        failure_type = self.last_failure_type or "validation_error"
+        message = self.failure_summaries[-1] if self.failure_summaries else "unknown"
+        return StructurerAttemptsExhaustedError(
+            stage=self.stage,
+            failure_type=failure_type,
+            attempts=self.attempts,
+            max_attempts=self.max_attempts,
+            message=message,
+        )
 
 
 def build_validation_repair_messages(
