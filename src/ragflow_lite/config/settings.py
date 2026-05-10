@@ -39,6 +39,16 @@ def _read_int_env(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be an integer, got '{value}'.") from exc
 
 
+def _read_float_env(name: str, default: float) -> float:
+    value = _read_optional_env(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a float, got '{value}'.") from exc
+
+
 def _read_bool_env(name: str, default: bool) -> bool:
     value = _read_optional_env(name)
     if value is None:
@@ -88,6 +98,14 @@ class DiscoRAGStructurerRuntimeConfig:
     base_url: str
     model: str
     reasoning_effort: str
+    timeout_seconds: float = 90.0
+    max_attempts: int = 2
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("discorag_structurer_timeout_seconds must be positive")
+        if self.max_attempts < 1:
+            raise ValueError("discorag_structurer_max_attempts must be at least 1")
 
 
 @dataclass(slots=True)
@@ -124,6 +142,14 @@ class Settings:
     discorag_structurer_base_url: str = "https://api.deepseek.com"
     discorag_structurer_model: str = "deepseek-v4-flash"
     discorag_structurer_reasoning_effort: str = "high"
+    discorag_structurer_timeout_seconds: float = field(
+        default_factory=lambda: _read_float_env(
+            "DISCORAG_STRUCTURER_TIMEOUT_SECONDS", 90.0
+        )
+    )
+    discorag_structurer_max_attempts: int = field(
+        default_factory=lambda: _read_int_env("DISCORAG_STRUCTURER_MAX_ATTEMPTS", 2)
+    )
     answer_prompt_path: str | None = field(
         default_factory=lambda: (
             _read_optional_env("RAGFLOW_LITE_ANSWER_PROMPT_PATH")
@@ -255,6 +281,8 @@ class Settings:
                 base_url=self.discorag_structurer_base_url,
                 model=self.discorag_structurer_model,
                 reasoning_effort=self.discorag_structurer_reasoning_effort,
+                timeout_seconds=self.discorag_structurer_timeout_seconds,
+                max_attempts=self.discorag_structurer_max_attempts,
             ),
         )
 

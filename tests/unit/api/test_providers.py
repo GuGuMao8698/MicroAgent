@@ -234,6 +234,8 @@ def test_settings_group_runtime_provider_configuration(
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
+        timeout_seconds=90.0,
+        max_attempts=2,
     )
 
 
@@ -673,6 +675,50 @@ def test_settings_default_observability_and_infinity_values(tmp_path: Path) -> N
     assert settings.metrics_enabled is False
     assert settings.infinity_host == "127.0.0.1"
     assert settings.infinity_port == 23817
+
+
+def test_discorag_structurer_retry_defaults_are_bounded(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    assert settings.discorag_structurer_timeout_seconds == 90.0
+    assert settings.discorag_structurer_max_attempts == 2
+
+
+def test_discorag_structurer_config_includes_retry_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
+    _, _, structurer_config = _build_settings(
+        tmp_path
+    ).require_runtime_provider_configs()
+
+    assert structurer_config.timeout_seconds == 90.0
+    assert structurer_config.max_attempts == 2
+
+
+def test_discorag_structurer_config_rejects_non_positive_timeout() -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        DiscoRAGStructurerRuntimeConfig(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-v4-flash",
+            reasoning_effort="high",
+            timeout_seconds=-1.0,
+        )
+
+
+def test_discorag_structurer_config_rejects_zero_max_attempts() -> None:
+    with pytest.raises(ValueError, match="must be at least 1"):
+        DiscoRAGStructurerRuntimeConfig(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-v4-flash",
+            reasoning_effort="high",
+            max_attempts=0,
+        )
 
 
 def test_settings_reads_observability_and_infinity_envs(
