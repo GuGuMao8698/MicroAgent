@@ -699,12 +699,13 @@ def test_build_services_non_live_structurer_wires_retry_settings(
     assert de.max_attempts == 3
 
     gb = services.discorag_query_service.inter_chunk_graph_builder
-    assert gb.timeout_seconds == 12.5
-    assert gb.max_attempts == 3
+    # Non-live path uses SimpleNamespace fake; access attributes directly
+    assert gb.timeout_seconds == 12.5  # type: ignore[attr-defined]
+    assert gb.max_attempts == 3  # type: ignore[attr-defined]
 
     bb = services.discorag_query_service.blueprint_builder
-    assert bb.timeout_seconds == 12.5
-    assert bb.max_attempts == 3
+    assert bb.timeout_seconds == 12.5  # type: ignore[attr-defined]
+    assert bb.max_attempts == 3  # type: ignore[attr-defined]
 
 
 def test_discorag_structurer_retry_defaults_are_bounded(tmp_path: Path) -> None:
