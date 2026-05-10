@@ -220,7 +220,7 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
                 ) from exc
 
             try:
-                return parse_llm_discorag_blueprint(
+                result = parse_llm_discorag_blueprint(
                     raw_json,
                     answer_chunk_ids=answer_chunk_ids,
                     supplemental_chunk_ids=supplemental_chunk_ids,
@@ -239,6 +239,10 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
                     invalid_output=raw_json,
                     validation_error=str(exc),
                 )
+                continue
+
+            attempt_state.record_success_attempt()
+            return result
 
         raise attempt_state.exhausted_error()
 

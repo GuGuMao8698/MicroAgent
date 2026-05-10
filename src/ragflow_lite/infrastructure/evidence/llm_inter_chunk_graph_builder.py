@@ -178,7 +178,7 @@ class LLMInterChunkDiscourseGraphBuilder:
                 ) from exc
 
             try:
-                return parse_llm_inter_chunk_graph(
+                result = parse_llm_inter_chunk_graph(
                     raw_json,
                     chunk_ids=chunk_ids,
                     query=package.query,
@@ -194,6 +194,10 @@ class LLMInterChunkDiscourseGraphBuilder:
                     invalid_output=raw_json,
                     validation_error=str(exc),
                 )
+                continue
+
+            attempt_state.record_success_attempt()
+            return result
 
         raise attempt_state.exhausted_error()
 
