@@ -33,15 +33,46 @@ from ragflow_lite.infrastructure.evidence.llm_inter_chunk_graph_builder import (
 
 
 class _FakeClient:
-    """Minimal fake DeepSeekChatCompletionsClient for testing."""
+    """Minimal fake DeepSeekChatCompletionsClient for testing.
 
-    def __init__(self, output_text: str) -> None:
-        self.output_text = output_text
-        self.calls: list[dict[str, str]] = []
+    Accepts a single str (backward compatible) or a list of str|Exception
+    for sequential responses across retry attempts.
+    """
 
-    def complete_json(self, instructions: str, input_text: str) -> str:
-        self.calls.append({"instructions": instructions, "input_text": input_text})
-        return self.output_text
+    def __init__(self, responses: str | list[str | Exception]) -> None:
+        if isinstance(responses, str):
+            self._responses: list[str | Exception] = [responses]
+        else:
+            self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    def complete_json(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def complete_messages_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        return self._next_response(locals())
+
+    def _next_response(self, call_args: dict) -> str:
+        if not self._responses:
+            raise RuntimeError("No more fake responses")
+        self.calls.append(call_args)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class _FailingClient:
@@ -50,7 +81,23 @@ class _FailingClient:
     def __init__(self, error: Exception) -> None:
         self.error = error
 
-    def complete_json(self, instructions: str, input_text: str) -> str:
+    def complete_json(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        raise self.error
+
+    def complete_messages_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 262144,
+        timeout_seconds: float | None = None,
+    ) -> str:
         raise self.error
 
 
@@ -220,8 +267,8 @@ def test_build_llm_call_failure_raises_processing_error() -> None:
     item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
     package = _intra_chunk_package(item_a)
 
-    client = _FailingClient(RuntimeError("API timeout"))
-    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+    client = _FailingClient(RuntimeError("API connection refused"))
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client, max_attempts=1)
 
     with pytest.raises(
         ProcessingError, match="LLM inter-chunk graph builder call failed"
@@ -234,7 +281,7 @@ def test_build_llm_call_processing_error_propagates() -> None:
     package = _intra_chunk_package(item_a)
 
     client = _FailingClient(ProcessingError("model returned empty content"))
-    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client, max_attempts=1)
 
     with pytest.raises(
         ProcessingError, match="LLM inter-chunk graph builder call failed"
@@ -250,7 +297,7 @@ def test_build_invalid_json_raises_processing_error() -> None:
     package = _intra_chunk_package(item_a)
 
     client = _FakeClient("not valid json")
-    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="not valid JSON"):
         builder.build(package)
@@ -266,7 +313,7 @@ def test_build_all_invalid_relations_raises_processing_error() -> None:
             _relation("chunk_unknown", "chunk_a", "invalid_type"),
         )
     )
-    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="unknown relation type"):
         builder.build(package)
@@ -466,7 +513,7 @@ def test_build_unknown_chunk_id_raises_processing_error() -> None:
             _relation("chunk_a", "chunk_unknown", "supports"),
         )
     )
-    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client, max_attempts=1)
 
     with pytest.raises(ProcessingError, match="unknown target chunk"):
         builder.build(package)
@@ -796,3 +843,123 @@ def test_provenance_empty_graph_no_api_key() -> None:
 
     meta_str = _metadata_as_str(graph.metadata)
     assert "sk-secret-for-empty-path" not in meta_str
+
+
+# ── Tests: validation repair and timeout retry ────────────────────────────────
+
+
+def test_graph_builder_repairs_unknown_target_with_multiturn_messages() -> None:
+    """First response has unknown target_chunk_id, repair returns valid graph."""
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    item_b = _evidence_item("chunk_b", "Text B", order=1, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a, item_b)
+
+    client = _FakeClient(
+        responses=[
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_unknown", "supports"),
+            ),
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_b", "supports"),
+            ),
+        ]
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    graph = builder.build(package)
+
+    assert len(graph.relations) == 1
+    assert graph.relations[0].target_chunk_id == "chunk_b"
+    assert len(client.calls) == 2
+    # Second call should be message-based (repair)
+    repair_call = client.calls[1]
+    assert repair_call.get("messages") is not None
+    messages = repair_call["messages"]
+    assert len(messages) == 4
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert messages[2]["role"] == "assistant"
+    assert messages[3]["role"] == "user"
+    # Feedback should contain validation error, not repeat the original query
+    assert "query:" not in messages[3]["content"]
+    assert "Do not output a patch" in messages[3]["content"]
+
+
+def test_graph_builder_raises_after_repair_attempts_exhausted() -> None:
+    """Both attempts return invalid JSON with unknown target, builder raises."""
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a)
+
+    client = _FakeClient(
+        responses=[
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_unknown", "supports"),
+            ),
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_still_unknown", "supports"),
+            ),
+        ]
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        builder.build(package)
+
+
+def test_graph_builder_retries_timeout_with_fresh_original_request() -> None:
+    """First call times out, second call is a fresh original request (not repair)."""
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    item_b = _evidence_item("chunk_b", "Text B", order=1, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a, item_b)
+
+    client = _FakeClient(
+        responses=[
+            TimeoutError("request timed out"),
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_b", "supports"),
+            ),
+        ]
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    graph = builder.build(package)
+
+    assert len(graph.relations) == 1
+    assert len(client.calls) == 2
+    # Second call should be fresh original (instructions+input_text based)
+    second_call = client.calls[1]
+    assert "instructions" in second_call
+    assert "input_text" in second_call
+
+
+def test_graph_builder_timeout_exhausted_raises() -> None:
+    """Both attempts time out, builder raises ProcessingError."""
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a)
+
+    client = _FakeClient(
+        responses=[
+            TimeoutError("request timed out"),
+            TimeoutError("request timed out"),
+        ]
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(ProcessingError, match="failed after 2 attempts"):
+        builder.build(package)

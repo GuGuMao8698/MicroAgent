@@ -23,6 +23,10 @@ from ragflow_lite.domain.models import (
 from ragflow_lite.infrastructure.evidence.llm_inter_chunk_graph_parser import (
     parse_llm_inter_chunk_graph,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    build_validation_repair_messages,
+    is_timeout_error,
+)
 
 # ── System instructions ─────────────────────────────────────────────────────
 
@@ -88,13 +92,21 @@ class LLMInterChunkDiscourseGraphBuilder:
         reasoning_effort: str = "high",
         provider: str = "deepseek",
         client: Any | None = None,
+        timeout_seconds: float = 90.0,
+        max_attempts: int = 2,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.client = client
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
 
     def _provenance_metadata(self) -> dict[str, Any]:
         """Build safe provenance metadata — never includes API keys."""
@@ -126,35 +138,65 @@ class LLMInterChunkDiscourseGraphBuilder:
         # 3. Build prompt
         input_text = _build_input(package.query, items, structures_by_id)
 
-        # 4. Call LLM
+        # 4. Attempt loop: timeout retry uses fresh original request,
+        #    validation repair uses multi-turn messages.
         client = self.client or self._build_client(self.api_key, self.base_url)
-        try:
-            raw_json = client.complete_json(
-                instructions=_INTER_CHUNK_INSTRUCTIONS,
-                input_text=input_text,
-            )
-        except Exception as exc:
-            raise ProcessingError(
-                f"LLM inter-chunk graph builder call failed: {exc}"
-            ) from exc
-
-        # 5. Parse and validate
+        instructions = _INTER_CHUNK_INSTRUCTIONS
         chunk_ids = [item.canonical_chunk_id for item in items]
-        try:
-            graph = parse_llm_inter_chunk_graph(
-                raw_json,
-                chunk_ids=chunk_ids,
-                query=package.query,
-                llm_metadata=self._provenance_metadata(),
-            )
-        except ProcessingError:
-            raise
-        except Exception as exc:
-            raise ProcessingError(
-                f"LLM inter-chunk graph builder parsing failed: {exc}"
-            ) from exc
+        last_error: Exception | None = None
+        # None = use complete_json (fresh request); list = use complete_messages_json (repair)
+        repair_messages: list[dict[str, str]] | None = None
 
-        return graph
+        for attempt_index in range(self.max_attempts):
+            try:
+                if repair_messages is None:
+                    raw_json = client.complete_json(
+                        instructions=instructions,
+                        input_text=input_text,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                else:
+                    raw_json = client.complete_messages_json(
+                        repair_messages,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+            except Exception as exc:
+                if is_timeout_error(exc):
+                    if attempt_index >= self.max_attempts - 1:
+                        raise ProcessingError(
+                            f"LLM inter-chunk graph builder failed after "
+                            f"{self.max_attempts} attempts: timeout"
+                        ) from exc
+                    # Timeout retry: fresh original request
+                    repair_messages = None
+                    last_error = exc
+                    continue
+                raise ProcessingError(
+                    f"LLM inter-chunk graph builder call failed: {exc}"
+                ) from exc
+
+            try:
+                return parse_llm_inter_chunk_graph(
+                    raw_json,
+                    chunk_ids=chunk_ids,
+                    query=package.query,
+                    llm_metadata=self._provenance_metadata(),
+                )
+            except ProcessingError as exc:
+                last_error = exc
+                if attempt_index >= self.max_attempts - 1:
+                    break
+                repair_messages = build_validation_repair_messages(
+                    instructions=instructions,
+                    input_text=input_text,
+                    invalid_output=raw_json,
+                    validation_error=str(exc),
+                )
+
+        raise ProcessingError(
+            f"LLM inter-chunk graph builder failed after "
+            f"{self.max_attempts} attempts: {last_error}"
+        ) from last_error
 
     def _build_client(self, api_key: str | None, base_url: str | None) -> Any:
         from ragflow_lite.infrastructure.llms import DeepSeekChatCompletionsClient
