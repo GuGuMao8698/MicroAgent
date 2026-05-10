@@ -156,6 +156,10 @@ def test_deepseek_chat_rejects_missing_content() -> None:
         client.complete("System", "User")
 
 
+class _TimeoutLikeError(Exception):
+    pass
+
+
 class _RetryableStatusError(Exception):
     status_code = 500
 
@@ -426,3 +430,78 @@ def test_deepseek_answerer_invalid_blueprint_falls_back_to_score_order() -> None
     assert result.metadata["answer_mode"] == "discorag"
     assert result.metadata["blueprint_applied"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
+
+
+def test_complete_json_passes_timeout_through() -> None:
+    completions = _FakeCompletions('{"ok": true}')
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+
+    result = client.complete_json("Return JSON.", "{}", timeout_seconds=90)
+
+    assert result == '{"ok": true}'
+    assert completions.requests[0]["timeout"] == 90
+
+
+def test_complete_json_can_disable_low_level_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    completions = _FakeCompletions(
+        '{"ok": true}',
+        failures=[_TimeoutLikeError("request timeout")],
+    )
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.llms.deepseek_chat.time.sleep",
+        sleeps.append,
+    )
+
+    with pytest.raises(_TimeoutLikeError):
+        client.complete_json(
+            "Return JSON.",
+            "{}",
+            timeout_seconds=90,
+            max_retries=0,
+        )
+
+    assert len(completions.requests) == 1
+    assert sleeps == []
+
+
+def test_complete_json_keeps_default_low_level_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    completions = _FakeCompletions(
+        '{"ok": true}',
+        failures=[_TimeoutLikeError("request timeout")],
+    )
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=_FakeClient(completions),
+    )
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.llms.deepseek_chat.time.sleep",
+        sleeps.append,
+    )
+
+    result = client.complete_json("Return JSON.", "{}", timeout_seconds=90)
+
+    assert result == '{"ok": true}'
+    assert len(completions.requests) == 2
+    assert sleeps == [0.5]

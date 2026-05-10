@@ -75,12 +75,19 @@ class DeepSeekChatCompletionsClient:
         self.reasoning_effort = reasoning_effort
         self.client = client or self._build_client(api_key, base_url)
 
-    def complete(self, instructions: str, input_text: str) -> str:
+    def complete(
+        self,
+        instructions: str,
+        input_text: str,
+        *,
+        max_retries: int | None = None,
+    ) -> str:
         return self.complete_messages(
             [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_text},
-            ]
+            ],
+            max_retries=max_retries,
         )
 
     def complete_json(
@@ -89,6 +96,8 @@ class DeepSeekChatCompletionsClient:
         input_text: str,
         *,
         max_tokens: int = _DEFAULT_JSON_MAX_TOKENS,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self.complete_messages_json(
             [
@@ -96,6 +105,8 @@ class DeepSeekChatCompletionsClient:
                 {"role": "user", "content": input_text},
             ],
             max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
         )
 
     def complete_messages(
@@ -103,12 +114,14 @@ class DeepSeekChatCompletionsClient:
         messages: list[dict[str, str]],
         *,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._complete_messages(
             messages,
             response_format=None,
             max_tokens=None,
             timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
         )
 
     def complete_messages_json(
@@ -117,12 +130,14 @@ class DeepSeekChatCompletionsClient:
         *,
         max_tokens: int = _DEFAULT_JSON_MAX_TOKENS,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._complete_messages(
             _ensure_messages_json_instruction(messages),
             response_format={"type": "json_object"},
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
         )
 
     def _complete_messages(
@@ -131,7 +146,12 @@ class DeepSeekChatCompletionsClient:
         response_format: dict[str, str] | None,
         max_tokens: int | None,
         timeout_seconds: float | None,
+        max_retries: int | None,
     ) -> str:
+        retry_limit = _MAX_DEEPSEEK_RETRIES if max_retries is None else max_retries
+        if retry_limit < 0:
+            raise ProcessingError("DeepSeek max_retries must be non-negative.")
+
         validated = _validate_messages(messages)
         request: dict[str, Any] = {
             "model": self.model,
@@ -147,7 +167,7 @@ class DeepSeekChatCompletionsClient:
         if timeout_seconds is not None:
             request["timeout"] = timeout_seconds
 
-        for attempt in range(_MAX_DEEPSEEK_RETRIES + 1):
+        for attempt in range(retry_limit + 1):
             try:
                 response = self.client.chat.completions.create(**request)
                 content = response.choices[0].message.content
@@ -157,7 +177,7 @@ class DeepSeekChatCompletionsClient:
             except Exception as exc:
                 if isinstance(exc, ProcessingError):
                     raise
-                if attempt >= _MAX_DEEPSEEK_RETRIES or not _should_retry_error(exc):
+                if attempt >= retry_limit or not _should_retry_error(exc):
                     raise
                 time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
         raise AssertionError("unreachable")
