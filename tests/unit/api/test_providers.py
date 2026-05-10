@@ -677,6 +677,36 @@ def test_settings_default_observability_and_infinity_values(tmp_path: Path) -> N
     assert settings.infinity_port == 23817
 
 
+def test_build_services_non_live_structurer_wires_retry_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """timeout_seconds and max_attempts from settings reach all three structurer constructors."""
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
+    settings = _build_settings(tmp_path)
+    settings.discorag_structurer_timeout_seconds = 12.5
+    settings.discorag_structurer_max_attempts = 3
+
+    services = build_services(settings)
+
+    de = services.discorag_query_service.discourse_extractor
+    assert isinstance(de, DeepSeekChatIntraChunkDiscourseExtractor)
+    assert de.timeout_seconds == 12.5
+    assert de.max_attempts == 3
+
+    gb = services.discorag_query_service.inter_chunk_graph_builder
+    assert gb.timeout_seconds == 12.5
+    assert gb.max_attempts == 3
+
+    bb = services.discorag_query_service.blueprint_builder
+    assert bb.timeout_seconds == 12.5
+    assert bb.max_attempts == 3
+
+
 def test_discorag_structurer_retry_defaults_are_bounded(tmp_path: Path) -> None:
     settings = _build_settings(tmp_path)
     assert settings.discorag_structurer_timeout_seconds == 90.0

@@ -177,6 +177,8 @@ def build_services(settings: Settings) -> AppServices:
         base_url=structurer_runtime_config.base_url,
         model=structurer_runtime_config.model,
         reasoning_effort=structurer_runtime_config.reasoning_effort,
+        timeout_seconds=structurer_runtime_config.timeout_seconds,
+        max_attempts=structurer_runtime_config.max_attempts,
     )
     # chunk 辅助检索器：Infinity hybrid 作为辅助召回通道
     chunk_auxiliary_retriever = _build_retriever(embedder, vector_index)
@@ -216,12 +218,16 @@ def build_services(settings: Settings) -> AppServices:
             base_url=structurer_runtime_config.base_url,
             model=structurer_runtime_config.model,
             reasoning_effort=structurer_runtime_config.reasoning_effort,
+            timeout_seconds=structurer_runtime_config.timeout_seconds,
+            max_attempts=structurer_runtime_config.max_attempts,
         ),
         blueprint_builder=LLMDiscoRAGAnswerBlueprintBuilder(
             api_key=structurer_runtime_config.api_key,
             base_url=structurer_runtime_config.base_url,
             model=structurer_runtime_config.model,
             reasoning_effort=structurer_runtime_config.reasoning_effort,
+            timeout_seconds=structurer_runtime_config.timeout_seconds,
+            max_attempts=structurer_runtime_config.max_attempts,
         ),
         answerer=answerer,
     )
