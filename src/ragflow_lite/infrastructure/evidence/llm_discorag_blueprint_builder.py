@@ -25,6 +25,7 @@ from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_parser import (
     parse_llm_discorag_blueprint,
 )
 from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    StructurerAttemptState,
     build_validation_repair_messages,
     is_timeout_error,
 )
@@ -185,7 +186,10 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
         #    validation repair uses multi-turn messages.
         client = self.client or self._build_client(self.api_key, self.base_url)
         instructions = _BLUEPRINT_INSTRUCTIONS
-        last_error: Exception | None = None
+        attempt_state = StructurerAttemptState(
+            stage="blueprint",
+            max_attempts=self.max_attempts,
+        )
         # None = use complete_json (fresh request); list = use complete_messages_json (repair)
         repair_messages: list[dict[str, str]] | None = None
 
@@ -196,22 +200,20 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
                         instructions=instructions,
                         input_text=input_text,
                         timeout_seconds=self.timeout_seconds,
+                        max_retries=0,
                     )
                 else:
                     raw_json = client.complete_messages_json(
                         repair_messages,
                         timeout_seconds=self.timeout_seconds,
+                        max_retries=0,
                     )
             except Exception as exc:
                 if is_timeout_error(exc):
+                    attempt_state.record_failure("timeout", str(exc) or "timeout")
                     if attempt_index >= self.max_attempts - 1:
-                        raise ProcessingError(
-                            f"LLM DiscoRAG blueprint builder failed after "
-                            f"{self.max_attempts} attempts: timeout"
-                        ) from exc
-                    # Timeout retry: fresh original request
+                        raise attempt_state.exhausted_error() from exc
                     repair_messages = None
-                    last_error = exc
                     continue
                 raise ProcessingError(
                     f"LLM DiscoRAG blueprint builder call failed: {exc}"
@@ -228,9 +230,9 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
                     llm_metadata=self._provenance_metadata(),
                 )
             except ProcessingError as exc:
-                last_error = exc
+                attempt_state.record_failure("validation_error", str(exc))
                 if attempt_index >= self.max_attempts - 1:
-                    break
+                    raise attempt_state.exhausted_error() from exc
                 repair_messages = build_validation_repair_messages(
                     instructions=instructions,
                     input_text=input_text,
@@ -238,10 +240,7 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
                     validation_error=str(exc),
                 )
 
-        raise ProcessingError(
-            f"LLM DiscoRAG blueprint builder failed after "
-            f"{self.max_attempts} attempts: {last_error}"
-        ) from last_error
+        raise attempt_state.exhausted_error()
 
     def _build_client(self, api_key: str | None, base_url: str | None) -> Any:
         from ragflow_lite.infrastructure.llms import DeepSeekChatCompletionsClient

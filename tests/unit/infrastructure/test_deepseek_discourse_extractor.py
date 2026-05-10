@@ -14,6 +14,9 @@ from ragflow_lite.domain.models import (
 from ragflow_lite.infrastructure.evidence import (
     DeepSeekChatIntraChunkDiscourseExtractor,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    StructurerAttemptsExhaustedError as StructurerAttemptsExhaustedError,
+)
 
 
 class _FakeDeepSeekClient:
@@ -36,6 +39,7 @@ class _FakeDeepSeekClient:
         input_text: str,
         *,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -44,6 +48,7 @@ class _FakeDeepSeekClient:
         messages: list[dict[str, str]],
         *,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -1075,3 +1080,57 @@ def test_deepseek_discourse_extractor_timeout_exhausted_raises() -> None:
     )
     with pytest.raises(ProcessingError, match="failed after 2 attempts"):
         extractor.extract(_package())
+
+
+def test_rst_extractor_disables_low_level_retry_for_structurer_attempts() -> None:
+    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(client=client)
+
+    extractor.extract(_package())
+
+    assert client.calls[0]["max_retries"] == 0
+
+
+def test_rst_extractor_raises_structured_exhaustion_after_validation_failures() -> None:
+    client = _FakeDeepSeekClient(
+        [
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "missing",
+                            "units": [{"text": "Bad.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "still_missing",
+                            "units": [{"text": "Still bad.", "role": "main"}],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_attempts=2,
+    )
+
+    with pytest.raises(StructurerAttemptsExhaustedError) as exc_info:
+        extractor.extract(_package())
+
+    assert exc_info.value.stage == "rst_extraction"
+    assert exc_info.value.failure_type == "validation_error"
+    assert exc_info.value.attempts == 2
+    assert exc_info.value.max_attempts == 2

@@ -31,6 +31,9 @@ from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_builder import 
     _classify_items,
     _resolve_top_k,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    StructurerAttemptsExhaustedError as StructurerAttemptsExhaustedError,
+)
 
 # ── Fake clients ──────────────────────────────────────────────────────────────
 
@@ -56,6 +59,7 @@ class _FakeClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -65,6 +69,7 @@ class _FakeClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -91,6 +96,7 @@ class _FailingClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         raise self.error
 
@@ -100,6 +106,7 @@ class _FailingClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         raise self.error
 
@@ -1011,3 +1018,62 @@ def test_blueprint_builder_timeout_exhausted_raises() -> None:
 
     with pytest.raises(ProcessingError, match="failed after 2 attempts"):
         builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+
+def test_blueprint_builder_disables_low_level_retry_for_structurer_attempts() -> None:
+    item_a = _evidence_item("chunk_a", "Answer A.", order=0, selected_for_answer=True)
+    package = _package(item_a, source_selection={"final_context_k": 5})
+
+    client = _FakeClient(
+        _valid_blueprint_json(
+            final_ids=["chunk_a"],
+            chunk_roles={"chunk_a": "lead"},
+        )
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+
+    builder.build(package)
+
+    assert client.calls[0]["max_retries"] == 0
+
+
+def test_blueprint_builder_raises_structured_exhaustion_after_validation_failures() -> (
+    None
+):
+    client = _FakeClient(
+        responses=[
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead"},  # missing chunk_b
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead"},  # still missing chunk_b
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(StructurerAttemptsExhaustedError) as exc_info:
+        builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+    assert exc_info.value.stage == "blueprint"
+    assert exc_info.value.failure_type == "validation_error"
+    assert exc_info.value.attempts == 2
+    assert exc_info.value.max_attempts == 2

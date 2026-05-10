@@ -28,6 +28,9 @@ from ragflow_lite.infrastructure.evidence.llm_inter_chunk_graph_builder import (
     _rst_summary,
     _select_discourse_visible_items,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    StructurerAttemptsExhaustedError as StructurerAttemptsExhaustedError,
+)
 
 # ── Fake client ──────────────────────────────────────────────────────────────
 
@@ -53,6 +56,7 @@ class _FakeClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -62,6 +66,7 @@ class _FakeClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         return self._next_response(locals())
 
@@ -88,6 +93,7 @@ class _FailingClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         raise self.error
 
@@ -97,6 +103,7 @@ class _FailingClient:
         *,
         max_tokens: int = 262144,
         timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> str:
         raise self.error
 
@@ -963,3 +970,45 @@ def test_graph_builder_timeout_exhausted_raises() -> None:
 
     with pytest.raises(ProcessingError, match="failed after 2 attempts"):
         builder.build(package)
+
+
+def test_graph_builder_disables_low_level_retry_for_structurer_attempts() -> None:
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    item_b = _evidence_item("chunk_b", "Text B", order=1, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a, item_b)
+
+    client = _FakeClient(_valid_llm_output())
+    builder = LLMInterChunkDiscourseGraphBuilder(client=client)
+
+    builder.build(package)
+
+    assert client.calls[0]["max_retries"] == 0
+
+
+def test_graph_builder_raises_structured_exhaustion_after_validation_failures() -> None:
+    item_a = _evidence_item("chunk_a", "Text A", order=0, selected_for_discourse=True)
+    package = _intra_chunk_package(item_a)
+
+    client = _FakeClient(
+        responses=[
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_unknown", "supports"),
+            ),
+            _valid_llm_output(
+                _relation("chunk_a", "chunk_still_unknown", "supports"),
+            ),
+        ]
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    with pytest.raises(StructurerAttemptsExhaustedError) as exc_info:
+        builder.build(package)
+
+    assert exc_info.value.stage == "inter_chunk_graph"
+    assert exc_info.value.failure_type == "validation_error"
+    assert exc_info.value.attempts == 2
+    assert exc_info.value.max_attempts == 2

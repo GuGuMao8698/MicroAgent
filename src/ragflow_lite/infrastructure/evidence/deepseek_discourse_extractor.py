@@ -14,6 +14,7 @@ from ragflow_lite.domain.models import (
     IntraChunkDiscourseRelation,
 )
 from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    StructurerAttemptState,
     build_validation_repair_messages,
     is_timeout_error,
 )
@@ -161,6 +162,10 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         # any local cap must be explicit and observable in metadata.
         if max_chunks is not None and max_chunks < 1:
             raise ProcessingError("Intra-chunk discourse max_chunks must be positive.")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.max_chunks = max_chunks
@@ -190,7 +195,10 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         client = self.client or self._build_client(self.api_key, self.base_url)
         input_text = self._build_input(evidence_package, selected_items)
         instructions = DISCOURSE_INSTRUCTIONS
-        last_error: Exception | None = None
+        attempt_state = StructurerAttemptState(
+            stage="rst_extraction",
+            max_attempts=self.max_attempts,
+        )
         # None = use complete_json (fresh request); list = use complete_messages_json (repair)
         repair_messages: list[dict[str, str]] | None = None
 
@@ -201,21 +209,20 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                         instructions=instructions,
                         input_text=input_text,
                         timeout_seconds=self.timeout_seconds,
+                        max_retries=0,
                     )
                 else:
                     raw_json = client.complete_messages_json(
                         repair_messages,
                         timeout_seconds=self.timeout_seconds,
+                        max_retries=0,
                     )
             except Exception as exc:
                 if is_timeout_error(exc):
+                    attempt_state.record_failure("timeout", str(exc) or "timeout")
                     if attempt_index >= self.max_attempts - 1:
-                        raise ProcessingError(
-                            f"DeepSeek discourse extractor failed after "
-                            f"{self.max_attempts} attempts: timeout"
-                        ) from exc
+                        raise attempt_state.exhausted_error() from exc
                     repair_messages = None
-                    last_error = exc
                     continue
                 raise ProcessingError(
                     f"DeepSeek discourse extractor call failed: {exc}"
@@ -225,9 +232,9 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 payload = self._load_payload(raw_json)
                 structures = self._load_structures(payload, selected_items)
             except ProcessingError as exc:
-                last_error = exc
+                attempt_state.record_failure("validation_error", str(exc))
                 if attempt_index >= self.max_attempts - 1:
-                    break
+                    raise attempt_state.exhausted_error() from exc
                 repair_messages = build_validation_repair_messages(
                     instructions=instructions,
                     input_text=input_text,
@@ -236,6 +243,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 )
                 continue
 
+            attempt_state.record_success_attempt()
             return IntraChunkDiscoursePackage(
                 query=evidence_package.query,
                 evidence_package=evidence_package,
@@ -253,10 +261,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
                 },
             )
 
-        raise ProcessingError(
-            f"DeepSeek discourse extractor failed after "
-            f"{self.max_attempts} attempts: {last_error}"
-        ) from last_error
+        raise attempt_state.exhausted_error()
 
     def _select_items(
         self, items: list[EvidenceItem]
