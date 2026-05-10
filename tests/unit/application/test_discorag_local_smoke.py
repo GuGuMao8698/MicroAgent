@@ -362,12 +362,46 @@ class FakeDeepSeekJsonClient:
     Callers may pass *output_text* to override the response.  The client
     accepts any positional/keyword arguments to match the real
     DeepSeekChatCompletionsClient.complete_json signature.
+
+    Supports both ``complete_json`` (single-turn) and ``complete_messages_json``
+    (multi-turn repair) used by the structurer retry loop.  Both return the
+    same ``output_text`` so that retry / repair paths exercise the builder logic
+    without needing a real LLM.
     """
 
     output_text: str = "{}"
 
     def complete_json(self, *args: object, **kwargs: object) -> str:
         return self.output_text
+
+    def complete_messages_json(
+        self, messages: list[dict[str, str]], **kwargs: object
+    ) -> str:
+        return self.output_text
+
+
+@dataclass
+class SequentialFakeDeepSeekJsonClient:
+    """Fake LLM client that returns a sequence of responses.
+
+    ``complete_json`` pops from the front of *responses* on each call.
+    ``complete_messages_json`` does the same, allowing the repair path to
+    return a different (valid) response after the initial (invalid) one.
+    """
+
+    responses: list[str] = field(default_factory=lambda: ["{}"])
+
+    def complete_json(self, *args: object, **kwargs: object) -> str:
+        if not self.responses:
+            return "{}"
+        return self.responses.pop(0)
+
+    def complete_messages_json(
+        self, messages: list[dict[str, str]], **kwargs: object
+    ) -> str:
+        if not self.responses:
+            return "{}"
+        return self.responses.pop(0)
 
 
 @dataclass
@@ -606,12 +640,16 @@ def test_ac5_all_relations_invalid_raises_processing_error() -> None:
         builder.build(package)
 
 
-def test_ac5_invalid_graph_output_propagates_through_service() -> None:
-    """When the graph LLM client returns invalid output, DiscoRAGQueryService raises ProcessingError."""
-    service, _, _, _, _ = _build_service(graph_llm_json="not valid json")
+def test_ac5_invalid_graph_output_falls_back_to_minirag() -> None:
+    """When the graph LLM client returns invalid output, DiscoRAGQueryService degrades to MiniRAG fallback."""
+    service, answerer, _, _, _ = _build_service(graph_llm_json="not valid json")
 
-    with pytest.raises(ProcessingError):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    # Service degrades to MiniRAG instead of raising
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "inter_chunk_graph"
 
 
 # ---------------------------------------------------------------------------
@@ -775,35 +813,47 @@ def test_ac8_blueprint_ordered_chunk_ids_preserves_planner_order() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ac9_invalid_planner_json_raises_processing_error() -> None:
-    """When the planner LLM returns invalid JSON, ProcessingError propagates (not deterministic fallback)."""
-    service, _, _, _, _ = _build_service(blueprint_llm_json="not valid json at all")
+def test_ac9_invalid_planner_json_falls_back_to_minirag() -> None:
+    """When the planner LLM returns invalid JSON, DiscoRAGQueryService degrades to MiniRAG fallback."""
+    service, answerer, _, _, _ = _build_service(
+        blueprint_llm_json="not valid json at all"
+    )
 
-    with pytest.raises(ProcessingError):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    # Service degrades to MiniRAG instead of raising
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
-def test_ac9_invalid_planner_missing_fields_raises_processing_error() -> None:
-    """When the planner LLM returns valid JSON but missing required fields, ProcessingError propagates."""
+def test_ac9_invalid_planner_missing_fields_falls_back_to_minirag() -> None:
+    """When the planner LLM returns valid JSON but missing required fields, DiscoRAGQueryService degrades to MiniRAG."""
     bad_blueprint = json.dumps({"metadata": {}})  # missing final_answer_chunk_ids
-    service, _, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
+    service, answerer, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
 
-    with pytest.raises(ProcessingError, match="final_answer_chunk_ids"):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
-def test_ac9_invalid_planner_unknown_chunk_id_raises_processing_error() -> None:
-    """When the planner references a non-existent chunk ID, ProcessingError propagates."""
+def test_ac9_invalid_planner_unknown_chunk_id_falls_back_to_minirag() -> None:
+    """When the planner references a non-existent chunk ID, DiscoRAGQueryService degrades to MiniRAG."""
     bad_blueprint = json.dumps(
         {
             "final_answer_chunk_ids": ["nonexistent_chunk"],
             "chunk_roles": {},
         }
     )
-    service, _, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
+    service, answerer, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
 
-    with pytest.raises(ProcessingError, match="Unknown chunk ID"):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
 # ---------------------------------------------------------------------------
@@ -845,8 +895,8 @@ def test_ac10_blueprint_references_valid_rst_unit_ids() -> None:
         )
 
 
-def test_ac10_blueprint_with_unknown_relation_id_fails() -> None:
-    """If the planner references an unknown relation ID, ProcessingError propagates."""
+def test_ac10_blueprint_with_unknown_relation_id_falls_back_to_minirag() -> None:
+    """If the planner references an unknown relation ID, DiscoRAGQueryService degrades to MiniRAG."""
     bad_blueprint = json.dumps(
         {
             "final_answer_chunk_ids": [CHUNK_A],
@@ -860,10 +910,13 @@ def test_ac10_blueprint_with_unknown_relation_id_fails() -> None:
             ],
         }
     )
-    service, _, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
+    service, answerer, _, _, _ = _build_service(blueprint_llm_json=bad_blueprint)
 
-    with pytest.raises(ProcessingError, match="Unknown relation ID"):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
 # ---------------------------------------------------------------------------
@@ -912,8 +965,8 @@ def test_ac11_blueprint_roles_are_valid() -> None:
         assert role in valid_roles, f"Invalid role {role!r} for chunk {cid!r}"
 
 
-def test_ac11_blueprint_with_invalid_role_raises() -> None:
-    """When the planner assigns an invalid role, the parser raises ProcessingError (strict validation)."""
+def test_ac11_blueprint_with_invalid_role_falls_back_to_minirag() -> None:
+    """When the planner assigns an invalid role, DiscoRAGQueryService degrades to MiniRAG."""
     # Use a blueprint with one valid and one invalid role
     blueprint_with_bad_role = json.dumps(
         {
@@ -925,12 +978,15 @@ def test_ac11_blueprint_with_invalid_role_raises() -> None:
             "metadata": {},
         }
     )
-    service, *_ = _build_service(
+    service, answerer, *_ = _build_service(
         blueprint_llm_json=blueprint_with_bad_role,
     )
 
-    with pytest.raises(ProcessingError, match="Invalid chunk role"):
-        service.query(QUERY, top_k=TOP_K)
+    result = service.query(QUERY, top_k=TOP_K)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
 def test_ac11_blueprint_ordered_chunk_ids_respects_budget() -> None:
@@ -945,3 +1001,154 @@ def test_ac11_blueprint_ordered_chunk_ids_respects_budget() -> None:
 
     # After filtering, ordered_chunk_ids must be within budget
     assert len(blueprint.ordered_chunk_ids) <= 2
+
+
+# ---------------------------------------------------------------------------
+# AC12: Blueprint repair succeeds after one validation failure
+# ---------------------------------------------------------------------------
+
+# Invalid blueprint: final_answer_chunk_ids has [CHUNK_A, CHUNK_B] but
+# chunk_roles only covers CHUNK_A (missing CHUNK_B).  This triggers the
+# "chunk_roles must cover final_answer_chunk_ids exactly" validation error,
+# causing the builder to retry via complete_messages_json.
+_INVALID_BLUEPRINT_MISSING_ROLE = json.dumps(
+    {
+        "final_answer_chunk_ids": [CHUNK_A, CHUNK_B],
+        "chunk_roles": {
+            CHUNK_A: "lead",
+            # CHUNK_B intentionally omitted
+        },
+    }
+)
+
+
+def test_ac12_blueprint_repair_succeeds_after_validation_failure() -> None:
+    """Blueprint builder fails validation once, then succeeds on repair via complete_messages_json."""
+    result = _retrieval_result()
+    retriever = FakeTopologyRetriever(result=result)
+
+    # Graph builder uses a standard fake (always returns valid graph)
+    graph_llm_client = FakeDeepSeekJsonClient(output_text=VALID_GRAPH_LLM_JSON)
+    graph_builder = LLMInterChunkDiscourseGraphBuilder(client=graph_llm_client)
+
+    # Blueprint builder uses sequential fake:
+    # 1st call (complete_json) -> invalid blueprint (missing CHUNK_B role)
+    # 2nd call (complete_messages_json, repair) -> valid blueprint
+    blueprint_llm_client = SequentialFakeDeepSeekJsonClient(
+        responses=[
+            _INVALID_BLUEPRINT_MISSING_ROLE,
+            VALID_BLUEPRINT_LLM_JSON,
+        ]
+    )
+    blueprint_builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=blueprint_llm_client,
+    )
+
+    extractor = FakeRSTDiscourseExtractor()
+    answerer = RecordingAnswerer()
+
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=extractor,
+        inter_chunk_graph_builder=graph_builder,
+        blueprint_builder=blueprint_builder,
+        answerer=answerer,
+    )
+
+    query_result = service.query(QUERY, top_k=2)
+
+    # The service did NOT fall back to MiniRAG — repair succeeded
+    assert query_result.metadata.get("discorag_degraded") is not True
+    assert query_result.answer != ""
+
+    # The answerer received a valid blueprint (not None)
+    assert answerer.last_request is not None
+    assert answerer.last_request.blueprint is not None
+    assert answerer.last_request.mode == "discorag"
+
+    # The sequential client was called twice: once for initial, once for repair
+    assert len(blueprint_llm_client.responses) == 0, (
+        "Expected both responses consumed (2 calls), "
+        f"but {len(blueprint_llm_client.responses)} remain"
+    )
+
+    # Promotion metadata preserved after repair
+    blueprint = answerer.last_request.blueprint
+    assert blueprint.ordered_chunk_ids == [CHUNK_A, CHUNK_SUPP]
+
+
+# ---------------------------------------------------------------------------
+# AC13: Blueprint exhausted → MiniRAG fallback with explicit metadata
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ExhaustedBlueprintBuilder:
+    """Blueprint builder stub that always raises ProcessingError (simulates exhausted retries)."""
+
+    call_count: int = 0
+
+    def build(self, package: object, *, graph: object = None) -> None:
+        self.call_count += 1
+        raise ProcessingError(
+            "LLM DiscoRAG blueprint builder failed after 2 attempts: "
+            "chunk_roles keys must exactly match final_answer_chunk_ids."
+        )
+
+
+def test_ac13_blueprint_exhausted_falls_back_to_minirag_with_explicit_metadata() -> (
+    None
+):
+    """Blueprint builder exhausts retry attempts, service degrades to MiniRAG with explicit metadata."""
+    result = _retrieval_result()
+    retriever = FakeTopologyRetriever(result=result)
+
+    graph_llm_client = FakeDeepSeekJsonClient(output_text=VALID_GRAPH_LLM_JSON)
+    graph_builder = LLMInterChunkDiscourseGraphBuilder(client=graph_llm_client)
+
+    exhausted_builder = _ExhaustedBlueprintBuilder()
+
+    extractor = FakeRSTDiscourseExtractor()
+    answerer = RecordingAnswerer()
+
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=extractor,
+        inter_chunk_graph_builder=graph_builder,
+        blueprint_builder=exhausted_builder,
+        answerer=answerer,
+    )
+
+    query_result = service.query(QUERY, top_k=TOP_K)
+
+    # --- Explicit fallback metadata ---
+    assert query_result.metadata["mode"] == "discorag"
+    assert query_result.metadata["answer_mode"] == "minirag_fallback"
+    assert query_result.metadata["discorag_degraded"] is True
+    assert query_result.metadata["discorag_error"]["stage"] == "blueprint"
+    assert query_result.metadata["discorag_error"]["user_visible"] is True
+
+    # --- Fallback contexts are exactly the retrieval result chunks ---
+    expected_chunks = result.chunks
+    fallback_context_ids = [c.chunk_id for c in query_result.contexts]
+    expected_chunk_ids = [c.chunk_id for c in expected_chunks]
+    assert fallback_context_ids == expected_chunk_ids, (
+        f"Fallback contexts {fallback_context_ids} must match "
+        f"retrieval chunks {expected_chunk_ids}"
+    )
+
+    # --- Supplemental discourse chunk is NOT in fallback contexts ---
+    assert CHUNK_SUPP not in fallback_context_ids, (
+        f"Supplemental discourse chunk {CHUNK_SUPP!r} must not appear "
+        f"in fallback contexts {fallback_context_ids}"
+    )
+
+    # --- Fallback context count <= top_k ---
+    assert len(query_result.contexts) <= TOP_K
+
+    # --- Answerer received mode="standard" (MiniRAG path, not "discorag") ---
+    assert answerer.last_request is not None
+    assert answerer.last_request.mode == "standard"
+    assert answerer.last_request.blueprint is None
