@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from ragflow_lite.application.services._query_observability import log_query_event
 from ragflow_lite.application.services.evidence_package_builder import (
@@ -16,6 +17,7 @@ from ragflow_lite.domain.models import (
 )
 from ragflow_lite.domain.ports import (
     Answerer,
+    BlueprintBuilder,
     InterChunkDiscourseGraphBuilder,
     IntraChunkDiscourseExtractor,
     TopologyContextRetriever,
@@ -204,6 +206,34 @@ def _blueprint_for_contexts(
     )
 
 
+def _parse_structurer_failure(message: str) -> tuple[int | None, int | None, str]:
+    match = re.search(r"failed after (\d+) attempts", message)
+    attempts = int(match.group(1)) if match else None
+    failure_type = "timeout" if "timeout" in message.lower() else "validation_error"
+    return attempts, attempts, failure_type
+
+
+def _discorag_fallback_metadata(
+    *, stage: str, exc: ProcessingError, source_selection: object
+) -> dict[str, object]:
+    attempts, max_attempts, failure_type = _parse_structurer_failure(str(exc))
+    return {
+        "mode": "discorag",
+        "answer_mode": "minirag_fallback",
+        "discorag_degraded": True,
+        "source_selection": source_selection,
+        "discorag_error": {
+            "stage": stage,
+            "error_type": type(exc).__name__,
+            "failure_type": failure_type,
+            "attempts": attempts,
+            "max_attempts": max_attempts,
+            "message": str(exc),
+            "user_visible": True,
+        },
+    }
+
+
 class DiscoRAGQueryService:
     """Query-time DiscoRAG orchestration without changing the standard query path."""
 
@@ -235,12 +265,43 @@ class DiscoRAGQueryService:
         try:
             retrieval_result = self.retriever.retrieve_context(query, top_k)
             evidence_package = self.evidence_package_builder.build(retrieval_result)
-            discourse_package = self.discourse_extractor.extract(evidence_package)
-            inter_chunk_graph = self.inter_chunk_graph_builder.build(discourse_package)
-            blueprint = self.blueprint_builder.build(
-                discourse_package,
-                graph=inter_chunk_graph,
-            )
+
+            # Structurer stages: catch ProcessingError and degrade to MiniRAG.
+            try:
+                discourse_package = self.discourse_extractor.extract(evidence_package)
+            except ProcessingError as exc:
+                return self._answer_with_minirag_fallback(
+                    query=query,
+                    retrieval_result=retrieval_result,
+                    stage="rst_extraction",
+                    exc=exc,
+                )
+
+            try:
+                inter_chunk_graph = self.inter_chunk_graph_builder.build(
+                    discourse_package
+                )
+            except ProcessingError as exc:
+                return self._answer_with_minirag_fallback(
+                    query=query,
+                    retrieval_result=retrieval_result,
+                    stage="inter_chunk_graph",
+                    exc=exc,
+                )
+
+            try:
+                blueprint = self.blueprint_builder.build(
+                    discourse_package,
+                    graph=inter_chunk_graph,
+                )
+            except ProcessingError as exc:
+                return self._answer_with_minirag_fallback(
+                    query=query,
+                    retrieval_result=retrieval_result,
+                    stage="blueprint",
+                    exc=exc,
+                )
+
             answer_contexts = _contexts_with_bounded_promotion(
                 retrieval_result.chunks,
                 retrieval_result,
@@ -295,3 +356,28 @@ class DiscoRAGQueryService:
             )
             record_query_outcome("failed")
             raise
+
+    def _answer_with_minirag_fallback(
+        self,
+        *,
+        query: str,
+        retrieval_result: TopologyRetrievalResult,
+        stage: str,
+        exc: ProcessingError,
+    ) -> AnswerResult:
+        metadata = _discorag_fallback_metadata(
+            stage=stage,
+            exc=exc,
+            source_selection=retrieval_result.metadata.get("source_selection"),
+        )
+        result = self.answerer.answer(
+            AnswerRequest(
+                query=query,
+                contexts=retrieval_result.chunks,
+                mode="standard",
+                blueprint=None,
+                metadata=metadata,
+            )
+        )
+        result.metadata.update(metadata)
+        return result

@@ -173,6 +173,49 @@ class RecordingAnswerer:
         )
 
 
+@dataclass
+class _ExhaustedBlueprintBuilder:
+    """Simulates a blueprint builder that exhausted retry attempts."""
+
+    message: str = (
+        "LLM DiscoRAG blueprint builder failed after 2 attempts: "
+        "chunk_roles keys must exactly match final_answer_chunk_ids."
+    )
+
+    def build(
+        self,
+        package: IntraChunkDiscoursePackage,
+        graph: InterChunkDiscourseGraph | None = None,
+    ) -> AnswerBlueprint:
+        raise ProcessingError(self.message)
+
+
+@dataclass
+class _ExhaustedDiscourseExtractor:
+    """Simulates a discourse extractor that exhausted retry attempts."""
+
+    message: str = (
+        "DeepSeek discourse extractor failed after 2 attempts: "
+        "unknown canonical_chunk_id 'missing'."
+    )
+
+    def extract(self, evidence_package: EvidencePackage) -> IntraChunkDiscoursePackage:
+        raise ProcessingError(self.message)
+
+
+@dataclass
+class _ExhaustedGraphBuilder:
+    """Simulates a graph builder that exhausted retry attempts."""
+
+    message: str = (
+        "LLM inter-chunk graph builder failed after 2 attempts: "
+        "target_chunk_id 'missing' is unknown."
+    )
+
+    def build(self, package: IntraChunkDiscoursePackage) -> InterChunkDiscourseGraph:
+        raise ProcessingError(self.message)
+
+
 class _ServiceGrounder:
     def ground(self, query: str) -> GroundedQuery:
         return GroundedQuery(
@@ -317,6 +360,12 @@ def test_discorag_query_service_logs_started_and_succeeded_and_records_metric(
 
 
 def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
+    """Non-exhaustion ProcessingError from blueprint builder also triggers fallback.
+
+    All ProcessingError from structurer stages (including non-retry errors) are
+    caught and degraded to MiniRAG fallback. Only non-structurer failures remain
+    hard failures.
+    """
     answerer = RecordingAnswerer()
     error = ProcessingError("corrupt discourse plan")
     service = DiscoRAGQueryService(
@@ -328,11 +377,14 @@ def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
         answerer=answerer,
     )
 
-    with pytest.raises(ProcessingError) as exc_info:
-        service.query("q", top_k=1)
+    result = service.query("q", top_k=1)
 
-    assert exc_info.value is error
-    assert answerer.last_request is None
+    assert answerer.last_request is not None
+    assert answerer.last_request.mode == "standard"
+    assert answerer.last_request.blueprint is None
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
 
 
 def test_discorag_query_service_logs_failed_and_records_metric_on_domain_error(
@@ -341,14 +393,14 @@ def test_discorag_query_service_logs_failed_and_records_metric_on_domain_error(
 ) -> None:
     outcomes: list[str] = []
     monkeypatch.setattr(discorag_module, "record_query_outcome", outcomes.append)
-    error = ProcessingError("corrupt discourse plan")
+    error = ProcessingError("answerer failed")
     service = DiscoRAGQueryService(
         retriever=FakeTopologyRetriever(),
         evidence_package_builder=EvidencePackageBuilder(),
         discourse_extractor=RecordingDiscourseExtractor(),
         inter_chunk_graph_builder=RecordingGraphBuilder(),
-        blueprint_builder=FailingBlueprintBuilder(error=error),
-        answerer=RecordingAnswerer(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=RecordingAnswerer(error=error),
     )
 
     with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
@@ -1408,3 +1460,95 @@ def test_non_promotion_query_unchanged() -> None:
         "chunk_b",
         "chunk_c",
     ]
+
+
+def test_discorag_query_service_falls_back_to_minirag_contexts_when_blueprint_exhausts() -> (
+    None
+):
+    answer_chunks = [_chunk("chunk_a"), _chunk("chunk_b")]
+    supplemental_chunk = _chunk("chunk_supplemental")
+    supplemental_chunk.metadata["selected_for_answer"] = False
+    supplemental_chunk.metadata["selected_for_discourse"] = True
+
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=_ExhaustedBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is not None
+    assert answerer.last_request.mode == "standard"
+    assert answerer.last_request.blueprint is None
+    assert [c.chunk_id for c in answerer.last_request.contexts] == [
+        "chunk_a",
+        "chunk_b",
+    ]
+    assert "chunk_supplemental" not in [
+        c.chunk_id for c in answerer.last_request.contexts
+    ]
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "blueprint"
+    assert result.metadata["discorag_error"]["attempts"] == 2
+    assert result.metadata["discorag_error"]["max_attempts"] == 2
+    assert result.metadata["discorag_error"]["user_visible"] is True
+    assert "chunk_roles" in result.metadata["discorag_error"]["message"]
+
+
+def test_discorag_query_service_fallback_metadata_identifies_rst_stage() -> None:
+    retrieval_result = _retrieval_result(chunks=[_chunk("chunk_a")])
+
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=_ExhaustedDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG organize evidence?", top_k=1)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "rst_extraction"
+    assert result.metadata["discorag_error"]["error_type"] == "ProcessingError"
+    assert result.metadata["discorag_error"]["attempts"] == 2
+    assert result.metadata["discorag_error"]["max_attempts"] == 2
+    assert result.metadata["discorag_error"]["user_visible"] is True
+
+
+def test_discorag_query_service_fallback_metadata_identifies_graph_stage() -> None:
+    retrieval_result = _retrieval_result(chunks=[_chunk("chunk_a")])
+
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=_ExhaustedGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG organize evidence?", top_k=1)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert result.metadata["answer_mode"] == "minirag_fallback"
+    assert result.metadata["discorag_error"]["stage"] == "inter_chunk_graph"
+    assert result.metadata["discorag_error"]["error_type"] == "ProcessingError"
+    assert result.metadata["discorag_error"]["attempts"] == 2
+    assert result.metadata["discorag_error"]["max_attempts"] == 2
+    assert result.metadata["discorag_error"]["user_visible"] is True
