@@ -8,6 +8,7 @@
 - 仓库根 Python 命令默认使用本地 `.venv`。
 - 本地运行、provider 环境和 Docker 契约见 [src/ragflow_lite/CONTRACTS.md](src/ragflow_lite/CONTRACTS.md) 与 [docker/CONTRACTS.md](docker/CONTRACTS.md)；根文档只保留入口指针。
 - `AGENTS.md` / `CONTRACTS.md` 维护规范见 [docs/agent-doc-governance.md](docs/agent-doc-governance.md)；新增或移动契约前先按该文件判断模块边界。
+- 用户显式提到`context7`时, read[context7.md](context7.md).
 
 # cx — Semantic Code Navigation
 
