@@ -40,19 +40,10 @@ class QueryService:
             outcome="started",
         )
         try:
-            request_metadata: dict[str, object] = {}
-            retrieve_context = getattr(self.retriever, "retrieve_context", None)
-            if callable(retrieve_context):
-                retrieval_result = cast(TopologyContextRetriever, self.retriever).retrieve_context(
-                    query,
-                    top_k,
-                )
-                contexts = retrieval_result.chunks
-                retrieval_rewrite = retrieval_result.metadata.get("retrieval_rewrite")
-                if retrieval_rewrite is not None:
-                    request_metadata["retrieval_rewrite"] = retrieval_rewrite
-            else:
-                contexts = self.retriever.retrieve(query, top_k)
+            contexts, request_metadata = self._retrieve_contexts_and_metadata(
+                query,
+                top_k,
+            )
             result = self.answerer.answer(
                 AnswerRequest(
                     query=query,
@@ -95,3 +86,22 @@ class QueryService:
             )
             record_query_outcome("failed")
             raise ProcessingError("Failed to answer query.") from exc
+
+    def _retrieve_contexts_and_metadata(
+        self,
+        query: str,
+        top_k: int,
+    ) -> tuple[list, dict[str, object]]:
+        request_metadata: dict[str, object] = {}
+        retrieve_context = getattr(self.retriever, "retrieve_context", None)
+        if not callable(retrieve_context):
+            return self.retriever.retrieve(query, top_k), request_metadata
+
+        retrieval_result = cast(TopologyContextRetriever, self.retriever).retrieve_context(
+            query,
+            top_k,
+        )
+        retrieval_rewrite = retrieval_result.metadata.get("retrieval_rewrite")
+        if retrieval_rewrite is not None:
+            request_metadata["retrieval_rewrite"] = retrieval_rewrite
+        return retrieval_result.chunks, request_metadata

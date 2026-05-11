@@ -13,6 +13,9 @@ from ragflow_lite.domain.models import (
     AnswerResult,
     RetrievedChunk,
 )
+from ragflow_lite.infrastructure.answerers._input_formatting import (
+    format_retrieval_rewrite_notice,
+)
 from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 from ragflow_lite.infrastructure.llms.deepseek_chat import DeepSeekChatCompletionsClient
 
@@ -23,22 +26,6 @@ _PACKAGED_TEMPLATES_DIR = Path(__file__).parent
 _DEFAULT_VARIANT = "citations"
 _VARIANT_ENV_VAR = "RAGFLOW_LITE_DEEPSEEK_ANSWER_PROMPT_VARIANT"
 _TEMPLATE_CACHE: dict[str, str] = {}
-
-
-def _format_retrieval_rewrite_notice(metadata: dict[str, Any]) -> list[str]:
-    rewrite = metadata.get("retrieval_rewrite")
-    if (
-        not isinstance(rewrite, dict)
-        or rewrite.get("answer_notice_required") is not True
-    ):
-        return []
-    return [
-        "Retrieval rewrite notice:",
-        "- Retrieval rewrite already ran, but the available evidence still appears insufficient.",
-        "- Likely causes include missing relevant documents in the knowledge base or a query that is still too ambiguous.",
-        "- Tell the user that they may need to rephrase the query or add the needed documents.",
-        "",
-    ]
 
 
 def _format_page(metadata: dict[str, Any]) -> str:
@@ -193,7 +180,7 @@ class DeepSeekChatAnswerer:
             "",
         ]
 
-        notice_lines = _format_retrieval_rewrite_notice(request.metadata)
+        notice_lines = format_retrieval_rewrite_notice(request.metadata)
         if notice_lines:
             lines.extend(notice_lines)
 
