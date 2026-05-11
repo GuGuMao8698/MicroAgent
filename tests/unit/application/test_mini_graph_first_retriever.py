@@ -13,6 +13,8 @@ from ragflow_lite.application.services.evidence_package_builder import (
 from ragflow_lite.domain.models import (
     CoTGroundingResult,
     EntityEvidence,
+    GraphFirstSource,
+    GraphFirstSourceSelection,
     GroundedQuery,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
@@ -20,6 +22,7 @@ from ragflow_lite.domain.models import (
     RetrievedChunk,
     SourceChunkSupport,
     TopologyPath,
+    TopologyRetrievalResult,
 )
 
 
@@ -187,7 +190,21 @@ class QueryAwareAuxiliaryRetriever:
                     text="enriched chunk",
                     score=4.0,
                     metadata={"filename": "enriched.md"},
-                )
+                ),
+                RetrievedChunk(
+                    chunk_id="chunk_supplemental_valid",
+                    document_id="doc1",
+                    text="valid supplemental chunk",
+                    score=3.0,
+                    metadata={"filename": "supplemental.md"},
+                ),
+                RetrievedChunk(
+                    chunk_id="chunk_supplemental_stale",
+                    document_id="doc1",
+                    text="stale supplemental chunk",
+                    score=2.0,
+                    metadata={"filename": "stale.md"},
+                ),
             ]
         return [
             RetrievedChunk(
@@ -196,7 +213,14 @@ class QueryAwareAuxiliaryRetriever:
                 text="initial chunk",
                 score=5.0,
                 metadata={"filename": "initial.md"},
-            )
+            ),
+            RetrievedChunk(
+                chunk_id="chunk_initial_supplemental",
+                document_id="doc1",
+                text="initial supplemental chunk",
+                score=1.0,
+                metadata={"filename": "initial-supplemental.md"},
+            ),
         ]
 
 
@@ -1686,15 +1710,171 @@ def test_post_rewrite_gate_failure_marks_notice_without_second_rewrite() -> None
 
 
 def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> None:
-    auxiliary_retriever = QueryAwareAuxiliaryRetriever()
-    retriever = MiniGraphFirstRetriever(
-        query_grounder=EmptyGrounder(),
+    grounded_query = GroundedQuery(
+        query="ambiguous question",
+        answer_type_keywords=[],
+        entities_from_query=[],
+    )
+    initial_chunk = RetrievedChunk(
+        chunk_id="chunk_initial",
+        document_id="doc1",
+        text="initial chunk",
+        score=5.0,
+        metadata={"filename": "initial.md"},
+    )
+    enriched_chunk = RetrievedChunk(
+        chunk_id="chunk_enriched",
+        document_id="doc1",
+        text="enriched chunk",
+        score=4.0,
+        metadata={"filename": "enriched.md"},
+    )
+    valid_supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental_valid",
+        document_id="doc1",
+        text="valid supplemental chunk",
+        score=3.0,
+        metadata={"filename": "supplemental.md"},
+    )
+    initial_result = TopologyRetrievalResult(
+        query="ambiguous question",
+        grounded_query=grounded_query,
+        chunks=[initial_chunk],
+        paths=[],
+        source_selection=GraphFirstSourceSelection(
+            sources=[
+                GraphFirstSource(
+                    chunk_id="chunk_initial",
+                    rank=0,
+                    score=5.0,
+                    score_components={"initial": 5.0},
+                    supporting_entity_ids=[],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=True,
+                    selected_for_discourse=True,
+                    selection_reason="initial_answer",
+                ),
+                GraphFirstSource(
+                    chunk_id="chunk_initial_supplemental",
+                    rank=1,
+                    score=1.0,
+                    score_components={"initial": 1.0},
+                    supporting_entity_ids=[],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=False,
+                    selected_for_discourse=True,
+                    selection_reason="initial_discourse_only",
+                    metadata={"supplemental_discourse": True},
+                ),
+            ],
+            final_context_k=3,
+            discourse_selection_k=3,
+            context_token_budget=None,
+            omitted_source_count=0,
+        ),
+        metadata={
+            "retrieval_mode": "mini_graph_first",
+            "source_selection": {},
+            "supplemental_discourse_chunks": {},
+        },
+    )
+    enriched_result = TopologyRetrievalResult(
+        query="ambiguous question",
+        grounded_query=grounded_query,
+        chunks=[enriched_chunk],
+        paths=[],
+        source_selection=GraphFirstSourceSelection(
+            sources=[
+                GraphFirstSource(
+                    chunk_id="chunk_enriched",
+                    rank=0,
+                    score=4.0,
+                    score_components={"enriched": 4.0},
+                    supporting_entity_ids=[],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=True,
+                    selected_for_discourse=True,
+                    selection_reason="enriched_answer",
+                ),
+                GraphFirstSource(
+                    chunk_id="chunk_supplemental_valid",
+                    rank=1,
+                    score=3.0,
+                    score_components={"enriched": 3.0},
+                    supporting_entity_ids=[],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=False,
+                    selected_for_discourse=True,
+                    selection_reason="valid_discourse_only",
+                    metadata={"supplemental_discourse": True},
+                ),
+                GraphFirstSource(
+                    chunk_id="chunk_supplemental_stale",
+                    rank=2,
+                    score=2.0,
+                    score_components={"enriched": 2.0},
+                    supporting_entity_ids=[],
+                    supporting_relation_ids=[],
+                    supporting_path_ids=[],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=False,
+                    selected_for_discourse=True,
+                    selection_reason="stale_discourse_only",
+                    metadata={"supplemental_discourse": True},
+                ),
+            ],
+            final_context_k=3,
+            discourse_selection_k=3,
+            context_token_budget=None,
+            omitted_source_count=0,
+        ),
+        metadata={
+            "retrieval_mode": "mini_graph_first",
+            "source_selection": {},
+            "supplemental_discourse_chunks": {
+                "chunk_supplemental_valid": valid_supplemental_chunk
+            },
+        },
+    )
+
+    class ScriptedRewriteRetriever(MiniGraphFirstRetriever):
+        def __init__(
+            self,
+            *,
+            scripted_results: list[TopologyRetrievalResult],
+            **kwargs: object,
+        ) -> None:
+            super().__init__(**kwargs)
+            self.scripted_results = list(scripted_results)
+
+        def _retrieve_context_once(
+            self,
+            *,
+            original_query: str,
+            grounding_query: str,
+            auxiliary_query: str,
+            top_k: int,
+            discourse_selection_n: int,
+        ) -> TopologyRetrievalResult:
+            return self.scripted_results.pop(0)
+
+    retriever = ScriptedRewriteRetriever(
+        scripted_results=[initial_result, enriched_result],
+        query_grounder=RecordingGrounder(),
         entity_index=RecordingEntityIndex(),
         relationship_index=RecordingRelationshipIndex(),
         path_expander=RecordingPathExpander(),
         chunk_lookup=RecordingChunkLookup(),
-        chunk_auxiliary_retriever=auxiliary_retriever,
         cot_grounding_rewriter=SuccessfulCoTRewriter(),
+        discourse_selection_k=3,
     )
 
     result = retriever.retrieve_context("ambiguous question", top_k=3)
@@ -1705,25 +1885,60 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
         final_chunk_ids
     )
     assert result.metadata["source_selection"]["selected_discourse_chunk_ids"] == (
-        final_chunk_ids
+        ["chunk_initial", "chunk_enriched", "chunk_supplemental_valid"]
     )
-    assert result.metadata["supplemental_discourse_chunks"] == {}
+    assert result.metadata["source_selection"]["supplemental_discourse_chunk_ids"] == [
+        "chunk_supplemental_valid"
+    ]
+    supplemental = result.metadata["supplemental_discourse_chunks"]
+    assert list(supplemental) == ["chunk_supplemental_valid"]
     assert result.source_selection is not None
     assert [source.chunk_id for source in result.source_selection.sources] == (
-        final_chunk_ids
+        ["chunk_initial", "chunk_enriched", "chunk_supplemental_valid"]
     )
-    assert all(source.selected_for_answer for source in result.source_selection.sources)
-    assert all(
-        source.selected_for_discourse for source in result.source_selection.sources
-    )
+    assert [
+        source.chunk_id
+        for source in result.source_selection.sources
+        if source.selected_for_answer
+    ] == final_chunk_ids
+    assert [
+        source.chunk_id
+        for source in result.source_selection.sources
+        if source.selected_for_discourse and not source.selected_for_answer
+    ] == ["chunk_supplemental_valid"]
+    assert result.source_selection.sources[2].rank == 2
+    assert result.source_selection.sources[2].selected_for_answer is False
+    assert result.source_selection.sources[2].selected_for_discourse is True
+    assert "chunk_supplemental_stale" not in result.metadata["source_selection"][
+        "selected_discourse_chunk_ids"
+    ]
+    assert "chunk_initial_supplemental" not in result.metadata["source_selection"][
+        "selected_discourse_chunk_ids"
+    ]
+    assert "chunk_supplemental_stale" not in supplemental
+    assert "chunk_initial_supplemental" not in supplemental
+    assert supplemental["chunk_supplemental_valid"].metadata[
+        "selected_for_answer"
+    ] is False
+    assert supplemental["chunk_supplemental_valid"].metadata[
+        "selected_for_discourse"
+    ] is True
     assert result.chunks[0].metadata["retrieval_rewrite_sources"] == ["initial"]
     assert result.chunks[1].metadata["retrieval_rewrite_sources"] == ["enriched"]
 
     package = EvidencePackageBuilder().build(result)
-    initial_item = next(
-        item for item in package.items if item.canonical_chunk_id == "chunk_initial"
-    )
+    item_by_id = {item.canonical_chunk_id: item for item in package.items}
+    initial_item = item_by_id["chunk_initial"]
+    supplemental_item = item_by_id["chunk_supplemental_valid"]
     assert initial_item.metadata["selected_for_answer"] is True
     assert initial_item.metadata["selected_for_discourse"] is True
     assert initial_item.metadata["source_selection_index"] == 0
     assert initial_item.metadata["retrieval_rewrite_sources"] == ["initial"]
+    assert supplemental_item.metadata["selected_for_answer"] is False
+    assert supplemental_item.metadata["selected_for_discourse"] is True
+    assert supplemental_item.metadata["source_selection_index"] == 2
+    assert package.metadata["source_selection"]["selected_discourse_chunk_ids"] == [
+        "chunk_initial",
+        "chunk_enriched",
+        "chunk_supplemental_valid",
+    ]

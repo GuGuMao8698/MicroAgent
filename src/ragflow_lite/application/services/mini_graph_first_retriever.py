@@ -277,26 +277,42 @@ class MiniGraphFirstRetriever:
     ]:
         """重建 successful rewrite 合并结果的 source selection 与 chunk metadata。"""
         source_by_chunk: dict[str, GraphFirstSource] = {}
-        for selection in (initial_result.source_selection, enriched_result.source_selection):
+        for selection in (
+            initial_result.source_selection,
+            enriched_result.source_selection,
+        ):
             if selection is None:
                 continue
             for source in selection.sources:
                 source_by_chunk[source.chunk_id] = source
 
+        answer_chunk_ids = {chunk.chunk_id for chunk in merged_chunks}
         discourse_selection_k = (
             enriched_result.source_selection.discourse_selection_k
             if enriched_result.source_selection is not None
-            else max(top_k, len(merged_chunks))
+            else (
+                initial_result.source_selection.discourse_selection_k
+                if initial_result.source_selection is not None
+                else max(top_k, len(merged_chunks))
+            )
         )
         context_token_budget = (
             enriched_result.source_selection.context_token_budget
             if enriched_result.source_selection is not None
-            else None
+            else (
+                initial_result.source_selection.context_token_budget
+                if initial_result.source_selection is not None
+                else None
+            )
         )
         fallback_reason = (
             enriched_result.source_selection.fallback_reason
             if enriched_result.source_selection is not None
-            else None
+            else (
+                initial_result.source_selection.fallback_reason
+                if initial_result.source_selection is not None
+                else None
+            )
         )
 
         rebuilt_sources: list[GraphFirstSource] = []
@@ -326,6 +342,19 @@ class MiniGraphFirstRetriever:
             rebuilt_sources.append(rebuilt_source)
             rebuilt_chunks.append(_with_source_selection_metadata(chunk, rebuilt_source))
 
+        effective_discourse_limit = max(discourse_selection_k, len(rebuilt_chunks))
+        supplemental_slots = max(0, effective_discourse_limit - len(rebuilt_chunks))
+        supplemental_sources, supplemental_chunks = _rebuild_valid_supplemental_sources(
+            candidate_results=[
+                ("enriched", enriched_result),
+                ("initial", initial_result),
+            ],
+            answer_chunk_ids=answer_chunk_ids,
+            start_rank=len(rebuilt_sources),
+            max_sources=supplemental_slots,
+        )
+        rebuilt_sources.extend(supplemental_sources)
+
         selection = GraphFirstSourceSelection(
             sources=rebuilt_sources,
             final_context_k=top_k,
@@ -334,7 +363,7 @@ class MiniGraphFirstRetriever:
             omitted_source_count=max(0, len(rebuilt_sources) - top_k),
             fallback_reason=fallback_reason,
         )
-        return rebuilt_chunks, selection, {}
+        return rebuilt_chunks, selection, supplemental_chunks
 
     def _retrieve_context_once(
         self,
@@ -1094,6 +1123,79 @@ def _merged_chunk_source_metadata(
         metadata["scoring_policy"] = chunk.metadata["scoring_policy"]
     metadata["supplemental_discourse"] = False
     return metadata
+
+
+def _rebuild_valid_supplemental_sources(
+    *,
+    candidate_results: list[tuple[str, TopologyRetrievalResult]],
+    answer_chunk_ids: set[str],
+    start_rank: int,
+    max_sources: int,
+) -> tuple[list[GraphFirstSource], dict[str, RetrievedChunk]]:
+    if max_sources <= 0:
+        return [], {}
+
+    rebuilt_sources: list[GraphFirstSource] = []
+    rebuilt_chunks: dict[str, RetrievedChunk] = {}
+    seen_chunk_ids = set(answer_chunk_ids)
+
+    for _, result in candidate_results:
+        selection = result.source_selection
+        if selection is None:
+            continue
+        for source in selection.sources:
+            if len(rebuilt_sources) >= max_sources:
+                return rebuilt_sources, rebuilt_chunks
+            if source.selected_for_answer or not source.selected_for_discourse:
+                continue
+            if source.chunk_id in seen_chunk_ids:
+                continue
+            base_chunk = _resolve_rebuilt_supplemental_chunk(result, source.chunk_id)
+            if base_chunk is None:
+                continue
+
+            rebuilt_source = GraphFirstSource(
+                chunk_id=source.chunk_id,
+                rank=start_rank + len(rebuilt_sources),
+                score=_merged_chunk_source_score(base_chunk, source),
+                score_components=_merged_chunk_score_components(base_chunk, source),
+                supporting_entity_ids=_merged_chunk_list_metadata(
+                    base_chunk, "supporting_entity_ids", source
+                ),
+                supporting_relation_ids=_merged_chunk_list_metadata(
+                    base_chunk, "supporting_relation_ids", source
+                ),
+                supporting_path_ids=_merged_chunk_list_metadata(
+                    base_chunk, "supporting_path_ids", source
+                ),
+                auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(base_chunk, source),
+                selected_for_answer=False,
+                selected_for_discourse=True,
+                selection_reason=_merged_chunk_selection_reason(base_chunk, source),
+                metadata=_merged_chunk_source_metadata(base_chunk, source),
+            )
+            rebuilt_sources.append(rebuilt_source)
+            rebuilt_chunks[source.chunk_id] = _with_source_selection_metadata(
+                base_chunk, rebuilt_source
+            )
+            seen_chunk_ids.add(source.chunk_id)
+
+    return rebuilt_sources, rebuilt_chunks
+
+
+def _resolve_rebuilt_supplemental_chunk(
+    result: TopologyRetrievalResult,
+    chunk_id: str,
+) -> RetrievedChunk | None:
+    supplemental_chunks = result.metadata.get("supplemental_discourse_chunks", {})
+    if isinstance(supplemental_chunks, dict):
+        candidate = supplemental_chunks.get(chunk_id)
+        if isinstance(candidate, RetrievedChunk):
+            return candidate
+    for chunk in result.chunks:
+        if chunk.chunk_id == chunk_id:
+            return chunk
+    return None
 
 
 def _entity_ids(candidates: list[MiniEntityCandidate]) -> list[str]:
