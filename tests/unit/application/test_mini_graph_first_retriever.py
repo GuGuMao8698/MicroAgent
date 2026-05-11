@@ -194,6 +194,23 @@ def _path(
     )
 
 
+def test_mini_graph_first_retriever_without_rewriter_keeps_existing_metadata() -> None:
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=RecordingAuxiliaryRetriever(),
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG recover sources?", top_k=2)
+
+    assert result.metadata["retrieval_mode"] == "mini_graph_first"
+    assert "retrieval_rewrite" not in result.metadata
+    assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_a", "chunk_b"]
+
+
 def test_mini_graph_first_retriever_grounds_before_auxiliary_chunk_retrieval() -> None:
     grounder = RecordingGrounder()
     entity_index = RecordingEntityIndex()

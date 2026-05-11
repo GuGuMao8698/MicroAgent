@@ -115,8 +115,26 @@ class MiniGraphFirstRetriever:
             answer_top_n * _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER
         )
 
+        return self._retrieve_context_once(
+            original_query=query,
+            grounding_query=query,
+            auxiliary_query=query,
+            top_k=answer_top_n,
+            discourse_selection_n=discourse_selection_n,
+        )
+
+    def _retrieve_context_once(
+        self,
+        *,
+        original_query: str,
+        grounding_query: str,
+        auxiliary_query: str,
+        top_k: int,
+        discourse_selection_n: int,
+    ) -> TopologyRetrievalResult:
+        """单次检索通路：grounding -> 图索引 -> 路径扩展 -> 辅助 chunk -> 评分 -> 合并。"""
         # 第 1 步: query grounding —— 提取实体与回答类型关键词
-        grounded_query = self.query_grounder.ground(query)
+        grounded_query = self.query_grounder.ground(grounding_query)
 
         # 如果 grounding 结果为空（既无实体也无关键词），直接走辅助检索兜底
         if (
@@ -124,7 +142,11 @@ class MiniGraphFirstRetriever:
             and not grounded_query.answer_type_keywords
         ):
             return self._fallback_empty_grounding(
-                query, grounded_query, answer_top_n, discourse_selection_n
+                original_query,
+                grounded_query,
+                top_k,
+                discourse_selection_n,
+                auxiliary_query=auxiliary_query,
             )
 
         # 第 2 步: 实体截断与预算推导
@@ -144,7 +166,7 @@ class MiniGraphFirstRetriever:
             top_k=entity_candidate_n,
         )
         relationship_candidates = self.relationship_index.query_relationships(
-            query,
+            grounding_query,
             grounded_query.answer_type_keywords,
             top_k=relationship_candidate_n,
         )
@@ -162,7 +184,7 @@ class MiniGraphFirstRetriever:
         )[: self.path_candidate_k]
 
         # 第 5 步: chunk 辅助检索（可选）—— 作为评分加成与兜底
-        auxiliary_chunks = self._retrieve_auxiliary_chunks(query, answer_top_n)
+        auxiliary_chunks = self._retrieve_auxiliary_chunks(auxiliary_query, top_k)
 
         # 第 6 步: 源 chunk 评分与排序
         supports = _score_source_chunks(
@@ -174,7 +196,7 @@ class MiniGraphFirstRetriever:
 
         # 第 7 步: 构建 source selection —— 将评分结果转为带选择决策的结构
         selection = self._build_source_selection(
-            supports, answer_top_n, discourse_selection_n=discourse_selection_n
+            supports, top_k, discourse_selection_n=discourse_selection_n
         )
         answer_chunk_ids = [
             source.chunk_id
@@ -190,7 +212,7 @@ class MiniGraphFirstRetriever:
             answer_chunk_ids,
             auxiliary_chunks,
             selection,
-            answer_top_n,
+            top_k,
         )
         supplemental_chunks = self._resolve_supplemental_discourse_chunks(
             discourse_only_chunk_ids,
@@ -198,7 +220,7 @@ class MiniGraphFirstRetriever:
             selection,
         )
         return TopologyRetrievalResult(
-            query=query,
+            query=original_query,
             grounded_query=grounded_query,
             chunks=chunks,
             paths=paths,
@@ -212,13 +234,16 @@ class MiniGraphFirstRetriever:
 
     def _fallback_empty_grounding(
         self,
-        query: str,
+        original_query: str,
         grounded_query: GroundedQuery,
         top_k: int,
         discourse_selection_n: int | None = None,
+        auxiliary_query: str | None = None,
     ) -> TopologyRetrievalResult:
         """grounding 为空时的兜底路径：仅依赖辅助检索。"""
-        auxiliary_chunks = self._retrieve_auxiliary_chunks(query, top_k)
+        auxiliary_chunks = self._retrieve_auxiliary_chunks(
+            auxiliary_query or original_query, top_k
+        )
         # 将辅助检索 chunk 转为 SourceChunkSupport 以复用 selection 构建
         supports = [
             SourceChunkSupport(
@@ -251,7 +276,7 @@ class MiniGraphFirstRetriever:
             if (chunk := auxiliary_by_id.get(source.chunk_id)) is not None
         }
         return TopologyRetrievalResult(
-            query=query,
+            query=original_query,
             grounded_query=grounded_query,
             chunks=chunks,
             paths=[],
