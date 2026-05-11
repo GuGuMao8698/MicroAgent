@@ -69,7 +69,7 @@ Source of truth:
   `match_text` fallback fields.
 - Chunk tables missing `filename_kwd`, `filename_tks`, `content_tks`, or
   `content_sm_tks` are incompatible and must fail during initialization
-  (`_validate_chunk_auxiliary_text_columns` raises `IndexError`).
+  (`_validate_chunk_auxiliary_text_columns` raises `RuntimeError`).
 
 Invariant:
 - `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.
