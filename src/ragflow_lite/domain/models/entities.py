@@ -394,6 +394,49 @@ class TopologyRetrievalResult:
     metadata: Metadata = field(default_factory=dict)
 
 
+# --- Retrieval rewrite domain models (gated CoT grounding) ---
+
+
+@dataclass(slots=True)
+class InitialCandidateSnapshot:
+    query: str
+    grounded_query: GroundedQuery
+    candidates: list[RetrievedChunk]
+    source_selection: GraphFirstSourceSelection | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GroundingGateDecision:
+    should_rewrite: bool
+    route: Literal["accept", "rewrite"]
+    reason: str
+    signals: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class CoTGroundingResult:
+    status: Literal["succeeded", "failed"]
+    strategy: Literal["cot_grounding"]
+    original_query: str
+    solution_steps: list[str]
+    attempts: int
+    failure_reason: str | None = None
+
+
+@dataclass(slots=True)
+class EnrichedGroundingInput:
+    original_query: str
+    solution_steps: list[str]
+
+
+@dataclass(slots=True)
+class PostRewriteAssessment:
+    gate_passed: bool
+    reason: str
+    signals: Metadata = field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Async ingestion task snapshot
 # ---------------------------------------------------------------------------

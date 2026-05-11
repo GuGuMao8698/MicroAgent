@@ -7,6 +7,7 @@ from ragflow_lite.domain.models import (
     AnswerRequest,
     AnswerResult,
     Chunk,
+    CoTGroundingResult,
     Dataset,
     DocumentAsset,
     EmbeddedChunk,
@@ -234,3 +235,7 @@ class BlueprintBuilder(Protocol):
         *,
         graph: InterChunkDiscourseGraph | None = None,
     ) -> AnswerBlueprint: ...
+
+
+class CoTGroundingRewriter(Protocol):
+    def rewrite(self, query: str) -> CoTGroundingResult: ...
