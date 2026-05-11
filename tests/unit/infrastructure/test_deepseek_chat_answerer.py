@@ -33,9 +33,14 @@ def test_deepseek_answerer_includes_retrieval_rewrite_notice() -> None:
     answerer.answer(request)
 
     sent_input = client.calls[0]["input_text"]
-    assert "Retrieval rewrite notice:" in sent_input
-    assert "Retrieval rewrite already ran" in sent_input
-    assert "available evidence still appears insufficient" in sent_input
+    assert (
+        "Retrieval rewrite notice:\n"
+        "- Retrieval rewrite already ran, but the available evidence still appears insufficient.\n"
+        "- Likely causes include missing relevant documents in the knowledge base or a query that is still too ambiguous.\n"
+        "- Tell the user that they may need to rephrase the query or add the needed documents.\n"
+        "\n"
+        "Contexts:"
+    ) in sent_input
 
 
 class _FakeDeepSeekClient:

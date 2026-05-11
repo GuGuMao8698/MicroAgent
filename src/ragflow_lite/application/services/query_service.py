@@ -11,7 +11,7 @@ from typing import cast
 
 from ragflow_lite.application.services._query_observability import log_query_event
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
-from ragflow_lite.domain.models import AnswerRequest, AnswerResult
+from ragflow_lite.domain.models import AnswerRequest, AnswerResult, RetrievedChunk
 from ragflow_lite.domain.ports import Answerer, Retriever, TopologyContextRetriever
 from ragflow_lite.shared.observability import record_query_outcome
 
@@ -91,7 +91,7 @@ class QueryService:
         self,
         query: str,
         top_k: int,
-    ) -> tuple[list, dict[str, object]]:
+    ) -> tuple[list[RetrievedChunk], dict[str, object]]:
         request_metadata: dict[str, object] = {}
         retrieve_context = getattr(self.retriever, "retrieve_context", None)
         if not callable(retrieve_context):

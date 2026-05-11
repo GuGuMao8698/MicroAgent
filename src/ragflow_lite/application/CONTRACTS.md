@@ -132,7 +132,7 @@ Owner: `MiniGraphFirstRetriever`
 - CoT rewrite may run at most once. Post-rewrite assessment may mark retrieval degraded but must not trigger recursive rewrite.
 - If CoT rewrite exhausts attempts, retrieval falls back to the cached initial candidate snapshot and must not rerun raw-query MiniRAG retrieval.
 - `DiscoRAGQueryService` receives the resolved MiniRAG retrieval result and does not own rewrite decisions.
-- Answer-facing degraded retrieval notice is injected via `_format_retrieval_rewrite_notice` into answerer input text when `answer_notice_required` is true.
+- Answer-facing degraded retrieval notice is injected via `format_retrieval_rewrite_notice` in `infrastructure/answerers/_input_formatting.py` into answerer input text when `answer_notice_required` is true.
 
 ### Forbidden stale interpretations
 - `cot_grounding` does not output entities, relations, or answer-type keywords directly.
