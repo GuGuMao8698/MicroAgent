@@ -114,3 +114,33 @@ Forbidden stale interpretations:
 Verification:
 - [tests/unit/application/test_discorag_query_service.py](../../../tests/unit/application/test_discorag_query_service.py)
 - [tests/unit/application/test_discorag_local_smoke.py](../../../tests/unit/application/test_discorag_local_smoke.py)
+
+## Contract E: MiniRAG Retrieval Rewrite Contract
+
+Reviewed at: 2026-05-11
+Status: Active
+Owner: `MiniGraphFirstRetriever`
+
+### Source of truth
+`MiniGraphFirstRetriever.retrieve_context()`, `retrieval_rewrite.py` helpers, CoT grounding rewriters.
+
+### Invariant
+- Retrieval rewrite is an internal MiniRAG capability owned by `MiniGraphFirstRetriever`.
+- `/queries` does not expose a rewrite strategy field; routing remains `standard` or `discorag`.
+- The deterministic gate uses final answer candidates (`selected_for_answer`), not internal graph/path/discourse-only candidates. Threshold: `selected_answer_candidate_count < ceil(requested_top_n / 2)`.
+- `cot_grounding` may produce only explicit `solution_steps`; the grounding layer extracts entities, relations, and answer-type keywords.
+- CoT rewrite may run at most once. Post-rewrite assessment may mark retrieval degraded but must not trigger recursive rewrite.
+- If CoT rewrite exhausts attempts, retrieval falls back to the cached initial candidate snapshot and must not rerun raw-query MiniRAG retrieval.
+- `DiscoRAGQueryService` receives the resolved MiniRAG retrieval result and does not own rewrite decisions.
+- Answer-facing degraded retrieval notice is injected via `_format_retrieval_rewrite_notice` into answerer input text when `answer_notice_required` is true.
+
+### Forbidden stale interpretations
+- `cot_grounding` does not output entities, relations, or answer-type keywords directly.
+- Post-rewrite assessment is observation-only; it never triggers a second rewrite.
+- Rewrite failure and DiscoRAG structurer exhaustion are separate fallback paths.
+- Do not treat hidden model chain-of-thought as a runtime contract.
+
+### Verification
+```
+.venv/bin/python -m pytest tests/unit/application/test_retrieval_rewrite.py tests/unit/application/test_mini_graph_first_retriever.py tests/unit/application/test_discorag_query_service.py -q
+```

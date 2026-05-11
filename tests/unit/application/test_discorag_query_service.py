@@ -1587,6 +1587,52 @@ def test_discorag_query_service_records_success_for_minirag_fallback(
     assert outcomes == ["succeeded"]
 
 
+def test_discorag_query_service_receives_resolved_retrieval_rewrite_metadata() -> None:
+    retrieval_result = TopologyRetrievalResult(
+        query="ambiguous question",
+        grounded_query=GroundedQuery(
+            query="ambiguous question",
+            answer_type_keywords=["mechanism"],
+            entities_from_query=["MiniRAG"],
+        ),
+        chunks=[
+            RetrievedChunk(
+                chunk_id="chunk_a",
+                document_id="doc1",
+                text="retrieved evidence",
+                score=1.0,
+                metadata={"selected_for_answer": True, "selected_for_discourse": True},
+            )
+        ],
+        paths=[],
+        metadata={
+            "retrieval_rewrite": {
+                "enabled": True,
+                "triggered": True,
+                "status": "failed",
+                "fallback_source": "initial_candidate_snapshot",
+            },
+            "supplemental_discourse_chunks": {},
+        },
+    )
+    retriever = FakeTopologyRetriever(result=retrieval_result)
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    service.query("ambiguous question", top_k=1)
+
+    assert answerer.last_request is not None
+    assert answerer.last_request.metadata["retrieval_rewrite"]["status"] == "failed"
+    assert retriever.calls == [("ambiguous question", 1)]
+
+
 def test_discorag_query_service_fallback_metadata_uses_structured_error() -> None:
     service = DiscoRAGQueryService(
         retriever=FakeTopologyRetriever(),

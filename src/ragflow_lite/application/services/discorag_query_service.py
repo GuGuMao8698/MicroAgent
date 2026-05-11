@@ -295,17 +295,20 @@ class DiscoRAGQueryService:
                 blueprint,
             )
             answer_blueprint = _blueprint_for_contexts(blueprint, answer_contexts)
+            answer_metadata: dict[str, object] = {
+                "source_selection": retrieval_result.metadata.get("source_selection"),
+            }
+            if "retrieval_rewrite" in retrieval_result.metadata:
+                answer_metadata["retrieval_rewrite"] = retrieval_result.metadata[
+                    "retrieval_rewrite"
+                ]
             result = self.answerer.answer(
                 AnswerRequest(
                     query=query,
                     contexts=answer_contexts,
                     mode="discorag",
                     blueprint=answer_blueprint,
-                    metadata={
-                        "source_selection": retrieval_result.metadata.get(
-                            "source_selection"
-                        ),
-                    },
+                    metadata=answer_metadata,
                 )
             )
             self._record_success(query, top_k, result)
