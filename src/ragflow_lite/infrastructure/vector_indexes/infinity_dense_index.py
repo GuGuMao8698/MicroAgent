@@ -481,7 +481,7 @@ class InfinityDenseVectorIndex:
                 )
 
     def _chunk_column_names(self) -> set[str]:
-        """读取 chunk 表当前所有列名，用于迁移窗口兼容。"""
+        """读取 chunk 表当前所有列名。"""
         with self._lock:
             chunk_table = self._db.get_table(self._chunk_table)
             df = self._columns_dataframe(chunk_table.show_columns())

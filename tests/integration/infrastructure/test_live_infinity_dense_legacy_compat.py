@@ -60,7 +60,6 @@ def test_legacy_chunk_table_is_rejected_when_auxiliary_fields_are_missing(
         NetworkAddress(app_settings.infinity_host, app_settings.infinity_port),
     )
     db = client.get_database(app_settings.infinity_database)
-    index: InfinityDenseVectorIndex | None = None
 
     try:
         # Manually create a table with only legacy columns.
@@ -74,10 +73,7 @@ def test_legacy_chunk_table_is_rejected_when_auxiliary_fields_are_missing(
 
         with pytest.raises(
             RuntimeError,
-            match=(
-                "Chunk table .* is missing required auxiliary text columns"
-                "|Chunk table .* is missing required fulltext indexes"
-            ),
+            match="Chunk table .* is missing required auxiliary text columns",
         ):
             InfinityDenseVectorIndex(
                 host=app_settings.infinity_host,
@@ -90,12 +86,6 @@ def test_legacy_chunk_table_is_rejected_when_auxiliary_fields_are_missing(
             )
 
     finally:
-        # 断开 InfinityDenseVectorIndex 内部连接，防止 assertion 失败时泄漏。
-        if index is not None:
-            try:
-                index.disconnect()
-            except Exception:
-                pass
         # Best-effort cleanup.
         drop_infinity_tables(
             app_settings,
@@ -110,24 +100,3 @@ def test_legacy_chunk_table_is_rejected_when_auxiliary_fields_are_missing(
             client.disconnect()
         except Exception:
             pass
-
-
-# 复制而非 import 生产代码的私有方法，避免测试依赖内部 API。
-def _list_index_names(table: object) -> set[str]:
-    """Extract index names from an Infinity RemoteTable."""
-    list_indexes = getattr(table, "list_indexes", None)
-    if not callable(list_indexes):
-        return set()
-
-    response = list_indexes()
-    if response is None:
-        return set()
-    if isinstance(response, tuple):
-        response = response[0]
-
-    names = getattr(response, "index_names", None)
-    if names is None and isinstance(response, dict):
-        names = response.get("index_names")
-    if names is None:
-        return set()
-    return {str(name) for name in names}
