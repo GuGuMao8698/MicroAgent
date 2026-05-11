@@ -233,7 +233,23 @@ class MiniGraphFirstRetriever:
             query=query,
             grounded_query=enriched_result.grounded_query,
             chunks=merged_chunks,
-            paths=enriched_result.paths,
+            paths=_merge_rewrite_paths(
+                initial_result=initial_result,
+                enriched_result=enriched_result,
+                retained_chunk_ids={chunk.chunk_id for chunk in merged_chunks}
+                | set(merged_supplemental_chunks),
+                retained_path_ids=_dedupe(
+                    [
+                        path_id
+                        for chunk in [
+                            *merged_chunks,
+                            *merged_supplemental_chunks.values(),
+                        ]
+                        for path_id in chunk.metadata.get("supporting_path_ids", [])
+                        if isinstance(path_id, str)
+                    ]
+                ),
+            ),
             source_selection=merged_selection,
             metadata={
                 **dict(enriched_result.metadata),
@@ -276,15 +292,8 @@ class MiniGraphFirstRetriever:
         dict[str, RetrievedChunk],
     ]:
         """重建 successful rewrite 合并结果的 source selection 与 chunk metadata。"""
-        source_by_chunk: dict[str, GraphFirstSource] = {}
-        for selection in (
-            initial_result.source_selection,
-            enriched_result.source_selection,
-        ):
-            if selection is None:
-                continue
-            for source in selection.sources:
-                source_by_chunk[source.chunk_id] = source
+        initial_source_by_chunk = _source_selection_by_chunk(initial_result)
+        enriched_source_by_chunk = _source_selection_by_chunk(enriched_result)
 
         answer_chunk_ids = {chunk.chunk_id for chunk in merged_chunks}
         discourse_selection_k = (
@@ -318,10 +327,12 @@ class MiniGraphFirstRetriever:
         rebuilt_sources: list[GraphFirstSource] = []
         rebuilt_chunks: list[RetrievedChunk] = []
         for rank, chunk in enumerate(merged_chunks):
-            previous_source = source_by_chunk.get(chunk.chunk_id)
+            previous_source = enriched_source_by_chunk.get(chunk.chunk_id)
+            other_source = initial_source_by_chunk.get(chunk.chunk_id)
             rebuilt_source = _rehydrate_merged_source(
                 chunk=chunk,
                 previous_source=previous_source,
+                other_source=other_source,
                 rank=rank,
                 selected_for_answer=True,
                 selected_for_discourse=True,
@@ -1043,72 +1054,95 @@ def _merged_chunk_source_score(
 def _merged_chunk_score_components(
     chunk: RetrievedChunk,
     source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
 ) -> dict[str, float]:
+    merged: dict[str, float] = {}
+    for candidate in (other_source, source):
+        if candidate is not None:
+            merged.update(candidate.score_components)
     metadata_components = chunk.metadata.get("source_score_components")
     if isinstance(metadata_components, dict):
-        return {
-            key: float(value)
-            for key, value in metadata_components.items()
-            if isinstance(key, str) and isinstance(value, (int, float))
-        }
-    if source is not None:
-        return dict(source.score_components)
-    return {}
+        merged.update(
+            {
+                key: float(value)
+                for key, value in metadata_components.items()
+                if isinstance(key, str) and isinstance(value, (int, float))
+            }
+        )
+    return merged
 
 
 def _merged_chunk_list_metadata(
     chunk: RetrievedChunk,
     key: str,
     source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
 ) -> list[str]:
+    merged: list[str] = []
+    for candidate in (source, other_source):
+        if candidate is None:
+            continue
+        if key == "supporting_entity_ids":
+            merged.extend(candidate.supporting_entity_ids)
+        elif key == "supporting_relation_ids":
+            merged.extend(candidate.supporting_relation_ids)
+        elif key == "supporting_path_ids":
+            merged.extend(candidate.supporting_path_ids)
     value = chunk.metadata.get(key)
     if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    if source is None:
-        return []
-    if key == "supporting_entity_ids":
-        return list(source.supporting_entity_ids)
-    if key == "supporting_relation_ids":
-        return list(source.supporting_relation_ids)
-    if key == "supporting_path_ids":
-        return list(source.supporting_path_ids)
-    return []
+        merged.extend(item for item in value if isinstance(item, str))
+    return _dedupe(merged)
 
 
 def _merged_chunk_auxiliary_hit(
     chunk: RetrievedChunk,
     source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
 ) -> bool:
     value = chunk.metadata.get("auxiliary_chunk_hit")
-    if isinstance(value, bool):
-        return value
-    if source is not None:
-        return source.auxiliary_chunk_hit
-    return False
+    return bool(
+        (isinstance(value, bool) and value)
+        or (source is not None and source.auxiliary_chunk_hit)
+        or (other_source is not None and other_source.auxiliary_chunk_hit)
+    )
 
 
 def _merged_chunk_selection_reason(
     chunk: RetrievedChunk,
     source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
 ) -> str:
+    reasons: list[str] = []
+    for candidate in (source, other_source):
+        if candidate is None or not candidate.selection_reason:
+            continue
+        reasons.extend(
+            reason.strip()
+            for reason in candidate.selection_reason.split("+")
+            if reason.strip()
+        )
     value = chunk.metadata.get("selection_reason")
     if isinstance(value, str) and value:
-        return value
-    if source is not None and source.selection_reason:
-        return source.selection_reason
+        reasons.extend(
+            reason.strip() for reason in value.split("+") if reason.strip()
+        )
+    if reasons:
+        return "+".join(_dedupe(reasons))
     return "retrieval_rewrite_merged_context"
 
 
 def _merged_chunk_source_metadata(
     chunk: RetrievedChunk,
     source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
     *,
     selected_for_answer: bool,
     selected_for_discourse: bool,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {}
-    if source is not None:
-        metadata.update(source.metadata)
+    for candidate in (other_source, source):
+        if candidate is not None:
+            metadata.update(candidate.metadata)
     if "scoring_policy" in chunk.metadata:
         metadata["scoring_policy"] = chunk.metadata["scoring_policy"]
     metadata["supplemental_discourse"] = (
@@ -1121,6 +1155,7 @@ def _rehydrate_merged_source(
     *,
     chunk: RetrievedChunk,
     previous_source: GraphFirstSource | None,
+    other_source: GraphFirstSource | None,
     rank: int,
     selected_for_answer: bool,
     selected_for_discourse: bool,
@@ -1129,23 +1164,30 @@ def _rehydrate_merged_source(
         chunk_id=chunk.chunk_id,
         rank=rank,
         score=_merged_chunk_source_score(chunk, previous_source),
-        score_components=_merged_chunk_score_components(chunk, previous_source),
+        score_components=_merged_chunk_score_components(
+            chunk, previous_source, other_source
+        ),
         supporting_entity_ids=_merged_chunk_list_metadata(
-            chunk, "supporting_entity_ids", previous_source
+            chunk, "supporting_entity_ids", previous_source, other_source
         ),
         supporting_relation_ids=_merged_chunk_list_metadata(
-            chunk, "supporting_relation_ids", previous_source
+            chunk, "supporting_relation_ids", previous_source, other_source
         ),
         supporting_path_ids=_merged_chunk_list_metadata(
-            chunk, "supporting_path_ids", previous_source
+            chunk, "supporting_path_ids", previous_source, other_source
         ),
-        auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(chunk, previous_source),
+        auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(
+            chunk, previous_source, other_source
+        ),
         selected_for_answer=selected_for_answer,
         selected_for_discourse=selected_for_discourse,
-        selection_reason=_merged_chunk_selection_reason(chunk, previous_source),
+        selection_reason=_merged_chunk_selection_reason(
+            chunk, previous_source, other_source
+        ),
         metadata=_merged_chunk_source_metadata(
             chunk,
             previous_source,
+            other_source,
             selected_for_answer=selected_for_answer,
             selected_for_discourse=selected_for_discourse,
         ),
@@ -1184,6 +1226,7 @@ def _rebuild_valid_supplemental_sources(
             rebuilt_source = _rehydrate_merged_source(
                 chunk=base_chunk,
                 previous_source=source,
+                other_source=None,
                 rank=start_rank + len(rebuilt_sources),
                 selected_for_answer=False,
                 selected_for_discourse=True,
@@ -1210,6 +1253,38 @@ def _resolve_rebuilt_supplemental_chunk(
         if chunk.chunk_id == chunk_id:
             return chunk
     return None
+
+
+def _merge_rewrite_paths(
+    *,
+    initial_result: TopologyRetrievalResult,
+    enriched_result: TopologyRetrievalResult,
+    retained_chunk_ids: set[str],
+    retained_path_ids: list[str],
+) -> list[TopologyPath]:
+    merged_paths: list[TopologyPath] = []
+    seen_path_ids: set[str] = set()
+    retained_path_id_set = set(retained_path_ids)
+    for result in (enriched_result, initial_result):
+        for path in result.paths:
+            if path.path_id in seen_path_ids:
+                continue
+            if (
+                path.path_id not in retained_path_id_set
+                and not retained_chunk_ids.intersection(path.source_chunk_ids)
+            ):
+                continue
+            merged_paths.append(path)
+            seen_path_ids.add(path.path_id)
+    return merged_paths
+
+
+def _source_selection_by_chunk(
+    result: TopologyRetrievalResult,
+) -> dict[str, GraphFirstSource]:
+    if result.source_selection is None:
+        return {}
+    return {source.chunk_id: source for source in result.source_selection.sources}
 
 
 def _entity_ids(candidates: list[MiniEntityCandidate]) -> list[str]:

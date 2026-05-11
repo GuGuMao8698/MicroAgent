@@ -1948,3 +1948,271 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
         "chunk_enriched",
         "chunk_supplemental_valid",
     ]
+
+
+def test_successful_rewrite_preserves_topology_provenance_and_unions_support() -> None:
+    grounded_query = GroundedQuery(
+        query="ambiguous question",
+        answer_type_keywords=["mechanism"],
+        entities_from_query=["MiniRAG"],
+    )
+    initial_answer_chunk = RetrievedChunk(
+        chunk_id="chunk_initial_only",
+        document_id="doc1",
+        text="initial-only answer chunk",
+        score=6.0,
+        metadata={
+            "filename": "initial.md",
+            "retrieval_rewrite_sources": ["initial"],
+            "supporting_entity_ids": ["entity_initial"],
+            "supporting_relation_ids": ["rel_initial"],
+            "supporting_path_ids": ["path_initial"],
+            "source_score_components": {"initial_score": 6.0},
+            "auxiliary_chunk_hit": False,
+            "selection_reason": "graph_path_support",
+        },
+    )
+    shared_initial_chunk = RetrievedChunk(
+        chunk_id="chunk_shared",
+        document_id="doc1",
+        text="shared chunk",
+        score=5.5,
+        metadata={
+            "filename": "shared.md",
+            "retrieval_rewrite_sources": ["initial"],
+            "supporting_entity_ids": ["entity_shared_initial"],
+            "supporting_relation_ids": ["rel_shared_initial"],
+            "supporting_path_ids": ["path_shared_initial"],
+            "source_score_components": {"initial_only_component": 1.0},
+            "auxiliary_chunk_hit": False,
+            "selection_reason": "graph_path_support",
+        },
+    )
+    shared_enriched_chunk = RetrievedChunk(
+        chunk_id="chunk_shared",
+        document_id="doc1",
+        text="shared chunk",
+        score=7.0,
+        metadata={
+            "filename": "shared.md",
+            "retrieval_rewrite_sources": ["enriched"],
+            "supporting_entity_ids": ["entity_shared_enriched"],
+            "supporting_relation_ids": ["rel_shared_enriched"],
+            "supporting_path_ids": ["path_shared_enriched"],
+            "source_score_components": {
+                "enriched_only_component": 2.0,
+                "shared_component": 3.0,
+            },
+            "auxiliary_chunk_hit": True,
+            "selection_reason": "auxiliary_fallback",
+        },
+    )
+    initial_path = TopologyPath(
+        path_id="path_initial",
+        document_id="doc1",
+        entity_ids=["entity_initial"],
+        relation_ids=["rel_initial"],
+        source_chunk_ids=["chunk_initial_only"],
+        score=1.0,
+        metadata={"origin": "initial"},
+    )
+    shared_initial_path = TopologyPath(
+        path_id="path_shared_initial",
+        document_id="doc1",
+        entity_ids=["entity_shared_initial"],
+        relation_ids=["rel_shared_initial"],
+        source_chunk_ids=["chunk_shared"],
+        score=0.8,
+        metadata={"origin": "initial"},
+    )
+    shared_enriched_path = TopologyPath(
+        path_id="path_shared_enriched",
+        document_id="doc1",
+        entity_ids=["entity_shared_enriched"],
+        relation_ids=["rel_shared_enriched"],
+        source_chunk_ids=["chunk_shared"],
+        score=0.9,
+        metadata={"origin": "enriched"},
+    )
+    initial_result = TopologyRetrievalResult(
+        query="ambiguous question",
+        grounded_query=grounded_query,
+        chunks=[initial_answer_chunk, shared_initial_chunk],
+        paths=[initial_path, shared_initial_path],
+        source_selection=GraphFirstSourceSelection(
+            sources=[
+                GraphFirstSource(
+                    chunk_id="chunk_initial_only",
+                    rank=0,
+                    score=6.0,
+                    score_components={"initial_score": 6.0},
+                    supporting_entity_ids=["entity_initial"],
+                    supporting_relation_ids=["rel_initial"],
+                    supporting_path_ids=["path_initial"],
+                    auxiliary_chunk_hit=False,
+                    selected_for_answer=True,
+                    selected_for_discourse=True,
+                    selection_reason="graph_path_support",
+                ),
+                GraphFirstSource(
+                    chunk_id="chunk_shared",
+                    rank=1,
+                    score=5.5,
+                    score_components={"initial_only_component": 1.0},
+                    supporting_entity_ids=["entity_shared_initial"],
+                    supporting_relation_ids=["rel_shared_initial"],
+                    supporting_path_ids=["path_shared_initial"],
+                    auxiliary_chunk_hit=False,
+                    selected_for_answer=False,
+                    selected_for_discourse=True,
+                    selection_reason="graph_path_support",
+                ),
+            ],
+            final_context_k=3,
+            discourse_selection_k=3,
+            context_token_budget=None,
+            omitted_source_count=0,
+        ),
+        metadata={
+            "retrieval_mode": "mini_graph_first",
+            "source_selection": {},
+            "supplemental_discourse_chunks": {},
+        },
+    )
+    enriched_result = TopologyRetrievalResult(
+        query="ambiguous question",
+        grounded_query=grounded_query,
+        chunks=[shared_enriched_chunk],
+        paths=[shared_enriched_path],
+        source_selection=GraphFirstSourceSelection(
+            sources=[
+                GraphFirstSource(
+                    chunk_id="chunk_shared",
+                    rank=0,
+                    score=7.0,
+                    score_components={
+                        "enriched_only_component": 2.0,
+                        "shared_component": 3.0,
+                    },
+                    supporting_entity_ids=["entity_shared_enriched"],
+                    supporting_relation_ids=["rel_shared_enriched"],
+                    supporting_path_ids=["path_shared_enriched"],
+                    auxiliary_chunk_hit=True,
+                    selected_for_answer=True,
+                    selected_for_discourse=True,
+                    selection_reason="auxiliary_fallback",
+                )
+            ],
+            final_context_k=3,
+            discourse_selection_k=3,
+            context_token_budget=None,
+            omitted_source_count=0,
+        ),
+        metadata={
+            "retrieval_mode": "mini_graph_first",
+            "source_selection": {},
+            "supplemental_discourse_chunks": {},
+        },
+    )
+
+    class ScriptedRewriteRetriever(MiniGraphFirstRetriever):
+        def __init__(
+            self,
+            *,
+            scripted_results: list[TopologyRetrievalResult],
+            **kwargs: object,
+        ) -> None:
+            super().__init__(**kwargs)
+            self.scripted_results = list(scripted_results)
+
+        def _retrieve_context_once(
+            self,
+            *,
+            original_query: str,
+            grounding_query: str,
+            auxiliary_query: str,
+            top_k: int,
+            discourse_selection_n: int,
+        ) -> TopologyRetrievalResult:
+            return self.scripted_results.pop(0)
+
+    retriever = ScriptedRewriteRetriever(
+        scripted_results=[initial_result, enriched_result],
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        cot_grounding_rewriter=SuccessfulCoTRewriter(),
+        discourse_selection_k=3,
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=3)
+
+    assert [chunk.chunk_id for chunk in result.chunks] == [
+        "chunk_shared",
+        "chunk_initial_only",
+    ]
+    assert [path.path_id for path in result.paths] == [
+        "path_shared_enriched",
+        "path_initial",
+        "path_shared_initial",
+    ]
+
+    assert result.source_selection is not None
+    shared_source = next(
+        source
+        for source in result.source_selection.sources
+        if source.chunk_id == "chunk_shared"
+    )
+    assert shared_source.supporting_entity_ids == [
+        "entity_shared_enriched",
+        "entity_shared_initial",
+    ]
+    assert shared_source.supporting_relation_ids == [
+        "rel_shared_enriched",
+        "rel_shared_initial",
+    ]
+    assert shared_source.supporting_path_ids == [
+        "path_shared_enriched",
+        "path_shared_initial",
+    ]
+    assert shared_source.score_components == {
+        "enriched_only_component": 2.0,
+        "shared_component": 3.0,
+        "initial_only_component": 1.0,
+    }
+    assert shared_source.auxiliary_chunk_hit is True
+    assert shared_source.selection_reason == "auxiliary_fallback+graph_path_support"
+
+    package = EvidencePackageBuilder().build(result)
+    item_by_id = {item.canonical_chunk_id: item for item in package.items}
+    initial_only_item = item_by_id["chunk_initial_only"]
+    shared_item = item_by_id["chunk_shared"]
+
+    assert initial_only_item.topology_path_ids == ["path_initial"]
+    assert initial_only_item.topology_relation_ids == ["rel_initial"]
+    assert "topology_path" in initial_only_item.retained_reasons
+    assert "baseline_retrieval" not in initial_only_item.retained_reasons
+
+    assert shared_item.topology_path_ids == [
+        "path_shared_enriched",
+        "path_shared_initial",
+    ]
+    assert shared_item.topology_relation_ids == [
+        "rel_shared_enriched",
+        "rel_shared_initial",
+    ]
+    assert shared_item.metadata["supporting_path_ids"] == [
+        "path_shared_enriched",
+        "path_shared_initial",
+    ]
+    assert shared_item.metadata["supporting_relation_ids"] == [
+        "rel_shared_enriched",
+        "rel_shared_initial",
+    ]
+    assert shared_item.metadata["source_score_components"] == {
+        "enriched_only_component": 2.0,
+        "shared_component": 3.0,
+        "initial_only_component": 1.0,
+    }
