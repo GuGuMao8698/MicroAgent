@@ -1652,3 +1652,38 @@ def test_discorag_query_service_fallback_metadata_uses_structured_error() -> Non
     assert error["attempts"] == 2
     assert error["max_attempts"] == 2
     assert error["user_visible"] is True
+
+
+def test_discorag_query_service_fallback_preserves_retrieval_rewrite_metadata() -> None:
+    retrieval_result = _retrieval_result(chunks=[_chunk("chunk_a")])
+    retrieval_result.metadata["retrieval_rewrite"] = {
+        "enabled": True,
+        "triggered": True,
+        "status": "failed",
+        "fallback_source": "initial_candidate_snapshot",
+    }
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=_ExhaustedBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG organize evidence?", top_k=1)
+
+    assert answerer.last_request is not None
+    assert answerer.last_request.metadata["retrieval_rewrite"] == {
+        "enabled": True,
+        "triggered": True,
+        "status": "failed",
+        "fallback_source": "initial_candidate_snapshot",
+    }
+    assert result.metadata["retrieval_rewrite"] == {
+        "enabled": True,
+        "triggered": True,
+        "status": "failed",
+        "fallback_source": "initial_candidate_snapshot",
+    }

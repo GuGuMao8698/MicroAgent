@@ -209,15 +209,21 @@ def _blueprint_for_contexts(
 
 
 def _discorag_fallback_metadata(
-    *, exc: StructurerAttemptsExhaustedError, source_selection: object
+    *,
+    exc: StructurerAttemptsExhaustedError,
+    source_selection: object,
+    retrieval_rewrite: object | None = None,
 ) -> dict[str, object]:
-    return {
+    metadata: dict[str, object] = {
         "mode": "discorag",
         "answer_mode": "minirag_fallback",
         "discorag_degraded": True,
         "source_selection": source_selection,
         "discorag_error": exc.safe_metadata(),
     }
+    if retrieval_rewrite is not None:
+        metadata["retrieval_rewrite"] = retrieval_rewrite
+    return metadata
 
 
 class DiscoRAGQueryService:
@@ -349,6 +355,7 @@ class DiscoRAGQueryService:
         metadata = _discorag_fallback_metadata(
             exc=exc,
             source_selection=retrieval_result.metadata.get("source_selection"),
+            retrieval_rewrite=retrieval_result.metadata.get("retrieval_rewrite"),
         )
         result = self.answerer.answer(
             AnswerRequest(

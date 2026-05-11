@@ -7,7 +7,13 @@ import pytest
 
 from ragflow_lite.application.services.query_service import QueryService
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
-from ragflow_lite.domain.models import AnswerRequest, AnswerResult, RetrievedChunk
+from ragflow_lite.domain.models import (
+    AnswerRequest,
+    AnswerResult,
+    GroundedQuery,
+    RetrievedChunk,
+    TopologyRetrievalResult,
+)
 from ragflow_lite.shared.observability import (
     bind_request_context,
     clear_request_context,
@@ -29,6 +35,26 @@ class FakeRetriever:
         if self.error is not None:
             raise self.error
         return self.results or []
+
+
+@dataclass
+class FakeTopologyRetriever(FakeRetriever):
+    retrieval_metadata: dict[str, object] | None = None
+
+    def retrieve_context(self, query: str, top_k: int) -> TopologyRetrievalResult:
+        if self.error is not None:
+            raise self.error
+        return TopologyRetrievalResult(
+            query=query,
+            grounded_query=GroundedQuery(
+                query=query,
+                answer_type_keywords=["mechanism"],
+                entities_from_query=["MiniRAG"],
+            ),
+            chunks=self.results or [],
+            paths=[],
+            metadata=dict(self.retrieval_metadata or {}),
+        )
 
 
 @dataclass
@@ -73,6 +99,38 @@ def test_query_orchestrates_retrieve_then_answer() -> None:
     assert answerer.last_request == AnswerRequest(
         query="q",
         contexts=chunks,
+    )
+
+
+def test_query_preserves_retrieval_rewrite_metadata_from_topology_retriever() -> None:
+    chunks = [_chunk("a")]
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeTopologyRetriever(
+            results=chunks,
+            retrieval_metadata={
+                "retrieval_rewrite": {
+                    "enabled": True,
+                    "triggered": True,
+                    "status": "degraded",
+                }
+            },
+        ),
+        answerer=answerer,
+    )
+
+    service.query("q", top_k=5)
+
+    assert answerer.last_request == AnswerRequest(
+        query="q",
+        contexts=chunks,
+        metadata={
+            "retrieval_rewrite": {
+                "enabled": True,
+                "triggered": True,
+                "status": "degraded",
+            }
+        },
     )
 
 
