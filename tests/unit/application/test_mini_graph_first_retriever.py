@@ -1521,3 +1521,111 @@ def test_rewrite_failure_uses_initial_snapshot_without_rerunning_raw_query() -> 
     assert rewrite["attempts"] == 2
     assert rewrite["failure_reason"] == "invalid structured output"
     assert rewrite["fallback_source"] == "initial_candidate_snapshot"
+
+
+# ---------------------------------------------------------------------------
+# Successful rewrite and enriched grounding tests (Task 6)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SuccessfulCoTRewriter:
+    calls: list[str] = field(default_factory=list)
+
+    def rewrite(self, query: str) -> CoTGroundingResult:
+        self.calls.append(query)
+        return CoTGroundingResult(
+            status="succeeded",
+            strategy="cot_grounding",
+            original_query=query,
+            solution_steps=["Identify missing MiniRAG relation evidence."],
+            attempts=1,
+            failure_reason=None,
+        )
+
+
+@dataclass
+class EnrichedAwareGrounder:
+    calls: list[str] = field(default_factory=list)
+
+    def ground(self, query: str) -> GroundedQuery:
+        self.calls.append(query)
+        if "Solution steps:" in query:
+            return GroundedQuery(
+                query=query,
+                answer_type_keywords=["relation"],
+                entities_from_query=["EnrichedMiniRAG"],
+            )
+        return GroundedQuery(
+            query=query,
+            answer_type_keywords=[],
+            entities_from_query=[],
+        )
+
+
+@dataclass
+class EmptyStepsCoTRewriter:
+    def rewrite(self, query: str) -> CoTGroundingResult:
+        return CoTGroundingResult(
+            status="succeeded",
+            strategy="cot_grounding",
+            original_query=query,
+            solution_steps=[],
+            attempts=1,
+            failure_reason=None,
+        )
+
+
+def test_successful_rewrite_uses_original_query_and_solution_steps_for_enriched_pass() -> (
+    None
+):
+    grounder = EnrichedAwareGrounder()
+    auxiliary_retriever = ManyAuxiliaryRetriever(chunk_count=1)
+    rewriter = SuccessfulCoTRewriter()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        cot_grounding_rewriter=rewriter,
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=4)
+
+    assert rewriter.calls == ["ambiguous question"]
+    assert len(grounder.calls) == 2
+    assert grounder.calls[0] == "ambiguous question"
+    assert "Original query:" in grounder.calls[1]
+    assert "ambiguous question" in grounder.calls[1]
+    assert "Solution steps:" in grounder.calls[1]
+    assert "Identify missing MiniRAG relation evidence." in grounder.calls[1]
+    assert len(result.chunks) <= 4
+    rewrite = result.metadata["retrieval_rewrite"]
+    assert rewrite["triggered"] is True
+    assert rewrite["status"] in {"succeeded", "degraded"}
+    assert rewrite["initial_candidate_count"] >= 1
+    assert rewrite["enriched_candidate_count"] >= 1
+
+
+def test_success_status_with_empty_steps_is_treated_as_rewrite_failure() -> None:
+    auxiliary_retriever = ManyAuxiliaryRetriever(chunk_count=1)
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=EmptyGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        cot_grounding_rewriter=EmptyStepsCoTRewriter(),
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=4)
+
+    assert result.metadata["retrieval_rewrite"]["status"] == "failed"
+    assert (
+        result.metadata["retrieval_rewrite"]["fallback_source"]
+        == "initial_candidate_snapshot"
+    )
+    assert auxiliary_retriever.calls == [("ambiguous question", 30)]

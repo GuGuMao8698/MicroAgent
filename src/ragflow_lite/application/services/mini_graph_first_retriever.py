@@ -3,8 +3,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from ragflow_lite.application.services.retrieval_rewrite import (
+    build_enriched_grounding_input,
     build_retrieval_rewrite_metadata,
     decide_grounding_gate,
+    merge_retrieval_results,
+    render_enriched_query,
     snapshot_initial_candidates,
 )
 from ragflow_lite.domain.errors import ProcessingError
@@ -176,26 +179,72 @@ class MiniGraphFirstRetriever:
             )
             return initial_result
 
-        # Task 6 will implement successful rewrite and enriched retrieval here.
-        # For now, treat unexpected success as fallback to initial candidates.
-        initial_result.metadata.update(
+        # Successful rewrite: build enriched grounding input, run second pass, merge.
+        try:
+            enriched_input = build_enriched_grounding_input(
+                snapshot=snapshot, rewrite=rewrite
+            )
+            enriched_query = render_enriched_query(enriched_input)
+        except ProcessingError as exc:
+            initial_result.metadata.update(
+                build_retrieval_rewrite_metadata(
+                    enabled=True,
+                    triggered=True,
+                    strategy="cot_grounding",
+                    status="failed",
+                    gate_reason=gate.reason,
+                    attempts=rewrite.attempts,
+                    failure_reason=str(exc),
+                    fallback_source="initial_candidate_snapshot",
+                    initial_candidate_count=len(snapshot.candidates),
+                    enriched_candidate_count=0,
+                    post_rewrite_gate_passed=None,
+                    post_rewrite_gate_reason=None,
+                    answer_notice_required=False,
+                )
+            )
+            return initial_result
+
+        enriched_result = self._retrieve_context_once(
+            original_query=query,
+            grounding_query=enriched_query,
+            auxiliary_query=enriched_query,
+            top_k=answer_top_n,
+            discourse_selection_n=discourse_selection_n,
+        )
+        merged_chunks = merge_retrieval_results(
+            initial=initial_result,
+            enriched=enriched_result,
+            top_k=answer_top_n,
+        )
+
+        merged_result = TopologyRetrievalResult(
+            query=query,
+            grounded_query=enriched_result.grounded_query,
+            chunks=merged_chunks,
+            paths=enriched_result.paths,
+            source_selection=enriched_result.source_selection,
+            metadata=dict(enriched_result.metadata),
+        )
+        # Task 7 will add post-rewrite assessment and set status to "degraded" when warranted.
+        merged_result.metadata.update(
             build_retrieval_rewrite_metadata(
                 enabled=True,
                 triggered=True,
                 strategy="cot_grounding",
-                status="failed",
+                status="succeeded",
                 gate_reason=gate.reason,
                 attempts=rewrite.attempts,
-                failure_reason="successful rewrite not yet implemented",
-                fallback_source="initial_candidate_snapshot",
+                failure_reason=None,
+                fallback_source=None,
                 initial_candidate_count=len(snapshot.candidates),
-                enriched_candidate_count=0,
+                enriched_candidate_count=len(enriched_result.chunks),
                 post_rewrite_gate_passed=None,
                 post_rewrite_gate_reason=None,
                 answer_notice_required=False,
             )
         )
-        return initial_result
+        return merged_result
 
     def _retrieve_context_once(
         self,

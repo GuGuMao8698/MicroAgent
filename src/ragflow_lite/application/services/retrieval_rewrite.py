@@ -3,11 +3,18 @@ from __future__ import annotations
 from math import ceil
 from typing import Any, Literal
 
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
+    CoTGroundingResult,
+    EnrichedGroundingInput,
     GroundingGateDecision,
     InitialCandidateSnapshot,
     PostRewriteAssessment,
+    RetrievedChunk,
     TopologyRetrievalResult,
+)
+from ragflow_lite.infrastructure.retrievers.cot_grounding import (
+    render_enriched_grounding_input,
 )
 
 RewriteStatus = Literal["not_triggered", "succeeded", "failed", "degraded"]
@@ -110,3 +117,64 @@ def build_retrieval_rewrite_metadata(
             "answer_notice_required": answer_notice_required,
         }
     }
+
+
+def build_enriched_grounding_input(
+    *,
+    snapshot: InitialCandidateSnapshot,
+    rewrite: CoTGroundingResult,
+) -> EnrichedGroundingInput:
+    if rewrite.status != "succeeded":
+        raise ProcessingError("CoT grounding rewrite did not succeed.")
+    if rewrite.original_query.strip() != snapshot.query.strip():
+        raise ProcessingError("CoT grounding original_query does not match snapshot.")
+    steps = [step.strip() for step in rewrite.solution_steps if step.strip()]
+    if not steps:
+        raise ProcessingError("CoT grounding solution_steps must not be empty.")
+    return EnrichedGroundingInput(original_query=snapshot.query, solution_steps=steps)
+
+
+def render_enriched_query(input_value: EnrichedGroundingInput) -> str:
+    return render_enriched_grounding_input(
+        original_query=input_value.original_query,
+        solution_steps=input_value.solution_steps,
+    )
+
+
+def merge_retrieval_results(
+    *,
+    initial: TopologyRetrievalResult,
+    enriched: TopologyRetrievalResult,
+    top_k: int,
+) -> list[RetrievedChunk]:
+    merged: dict[str, RetrievedChunk] = {}
+    for source_name, chunks in (
+        ("initial", initial.chunks),
+        ("enriched", enriched.chunks),
+    ):
+        for chunk in chunks:
+            existing = merged.get(chunk.chunk_id)
+            source_set: set[str] = set()
+            if existing is not None:
+                source_set.update(
+                    existing.metadata.get("retrieval_rewrite_sources", [])
+                )
+                if existing.score >= chunk.score:
+                    target = existing
+                else:
+                    target = chunk
+            else:
+                target = chunk
+            source_set.add(source_name)
+            target = RetrievedChunk(
+                chunk_id=target.chunk_id,
+                document_id=target.document_id,
+                text=target.text,
+                score=target.score,
+                metadata={
+                    **target.metadata,
+                    "retrieval_rewrite_sources": sorted(source_set),
+                },
+            )
+            merged[chunk.chunk_id] = target
+    return sorted(merged.values(), key=lambda c: c.score, reverse=True)[:top_k]
