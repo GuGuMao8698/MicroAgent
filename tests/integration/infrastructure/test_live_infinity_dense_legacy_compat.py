@@ -1,9 +1,8 @@
-"""Focused live Infinity validation for legacy chunk table compatibility.
+"""Focused live Infinity validation: legacy chunk table rejection.
 
-Verifies that ``InfinityDenseVectorIndex`` correctly handles a chunk table
-containing only legacy columns (``text``, ``filename``) and creates only the
-corresponding fulltext indexes, skipping new columns (``filename_kwd``,
-``content_tks``) that do not exist in the legacy schema.
+Verifies that ``InfinityDenseVectorIndex`` rejects a chunk table that is
+missing the required auxiliary text columns (``filename_kwd``,
+``filename_tks``, ``content_tks``, ``content_sm_tks``).
 
 Gated behind ``--run-live-infinity``.
 """
@@ -47,11 +46,11 @@ _LEGACY_EMBEDDING_SIGNATURE = {
 }
 
 
-def test_legacy_chunk_table_creates_only_legacy_indexes(
+def test_legacy_chunk_table_is_rejected_when_auxiliary_fields_are_missing(
     app_settings: Settings,
 ) -> None:
-    """Connecting to a pre-existing legacy chunk table should only create
-    fulltext indexes for columns that actually exist.
+    """Constructing ``InfinityDenseVectorIndex`` against a legacy chunk table
+    that lacks the required auxiliary text columns must raise ``RuntimeError``.
     """
     unique_suffix = uuid4().hex[:12]
     doc_table = f"test_legacy_doc_{unique_suffix}"
@@ -73,41 +72,22 @@ def test_legacy_chunk_table_creates_only_legacy_indexes(
             ConflictType.Error,
         )
 
-        index = InfinityDenseVectorIndex(
-            host=app_settings.infinity_host,
-            port=app_settings.infinity_port,
-            database=app_settings.infinity_database,
-            document_table=doc_table,
-            chunk_table=chunk_table,
-            embedding_dimensions=8,
-            embedding_signature=_LEGACY_EMBEDDING_SIGNATURE,
-        )
-
-        # _ensure_tables has run; verify fulltext indexes.
-        table = db.get_table(chunk_table)
-        index_names = _list_index_names(table)
-
-        # Legacy columns — indexes must exist.
-        expected_legacy = {
-            f"{chunk_table}_text_fulltext_idx",
-            f"{chunk_table}_filename_fulltext_idx",
-        }
-        assert expected_legacy.issubset(index_names), (
-            f"Missing legacy fulltext indexes. "
-            f"Expected {expected_legacy}, got {index_names}"
-        )
-
-        # New columns — indexes must NOT exist because those columns are absent.
-        new_column_indexes = {
-            f"{chunk_table}_filename_kwd_fulltext_idx",
-            f"{chunk_table}_filename_tks_fulltext_idx",
-            f"{chunk_table}_content_tks_fulltext_idx",
-            f"{chunk_table}_content_sm_tks_fulltext_idx",
-        }
-        assert new_column_indexes.isdisjoint(index_names), (
-            f"New-column indexes should not be created for legacy table. "
-            f"Unexpected indexes: {new_column_indexes & index_names}"
-        )
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                "Chunk table .* is missing required auxiliary text columns"
+                "|Chunk table .* is missing required fulltext indexes"
+            ),
+        ):
+            InfinityDenseVectorIndex(
+                host=app_settings.infinity_host,
+                port=app_settings.infinity_port,
+                database=app_settings.infinity_database,
+                document_table=doc_table,
+                chunk_table=chunk_table,
+                embedding_dimensions=8,
+                embedding_signature=_LEGACY_EMBEDDING_SIGNATURE,
+            )
 
     finally:
         # 断开 InfinityDenseVectorIndex 内部连接，防止 assertion 失败时泄漏。

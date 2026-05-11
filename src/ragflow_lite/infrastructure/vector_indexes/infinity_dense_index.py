@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 EmbeddingSignature = dict[str, str | int | None]
 _DDL_RETRY_ATTEMPTS = 5
 _DDL_RETRY_DELAY_SECONDS = 0.05
+_REQUIRED_CHUNK_AUXILIARY_TEXT_COLUMNS = {
+    "filename_kwd",
+    "filename_tks",
+    "content_tks",
+    "content_sm_tks",
+}
 
 
 def _utc_now_iso() -> str:
@@ -398,6 +404,7 @@ class InfinityDenseVectorIndex:
         )
 
         self._validate_chunk_table_dimensions()
+        self._validate_chunk_auxiliary_text_columns()
         self._ensure_fulltext_index()
 
     def _validate_chunk_table_dimensions(self) -> None:
@@ -422,6 +429,20 @@ class InfinityDenseVectorIndex:
                 f"Drop and recreate the table to proceed."
             )
 
+    def _validate_chunk_auxiliary_text_columns(self) -> None:
+        """Require tokenizer-derived chunk text columns for auxiliary retrieval."""
+        available_columns = self._chunk_column_names()
+        missing_columns = sorted(
+            _REQUIRED_CHUNK_AUXILIARY_TEXT_COLUMNS - available_columns
+        )
+        if missing_columns:
+            raise RuntimeError(
+                f"Chunk table '{self._chunk_table}' is missing required auxiliary "
+                f"text columns: {', '.join(missing_columns)}. "
+                "Drop and recreate the table, or re-ingest documents with the "
+                "current chunk auxiliary schema."
+            )
+
     def _ensure_fulltext_index(self) -> None:
         """对 chunk 表的 text、filename 列幂等创建全文索引。"""
         with self._lock:
@@ -433,13 +454,6 @@ class InfinityDenseVectorIndex:
                 f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
                 f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
                 f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
-            }
-            # 迁移窗口：只为表中实际存在的列创建全文索引。
-            available_columns = self._chunk_column_names()
-            required_indexes = {
-                index_name: column_name
-                for index_name, column_name in required_indexes.items()
-                if column_name in available_columns
             }
             existing_indexes = self._list_index_names(chunk_table)
 
