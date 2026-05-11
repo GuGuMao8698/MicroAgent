@@ -218,14 +218,28 @@ class MiniGraphFirstRetriever:
             enriched=enriched_result,
             top_k=answer_top_n,
         )
+        (
+            merged_chunks,
+            merged_selection,
+            merged_supplemental_chunks,
+        ) = self._rebuild_merged_source_selection(
+            merged_chunks=merged_chunks,
+            initial_result=initial_result,
+            enriched_result=enriched_result,
+            top_k=answer_top_n,
+        )
 
         merged_result = TopologyRetrievalResult(
             query=query,
             grounded_query=enriched_result.grounded_query,
             chunks=merged_chunks,
             paths=enriched_result.paths,
-            source_selection=enriched_result.source_selection,
-            metadata=dict(enriched_result.metadata),
+            source_selection=merged_selection,
+            metadata={
+                **dict(enriched_result.metadata),
+                "source_selection": self._source_selection_summary(merged_selection),
+                "supplemental_discourse_chunks": merged_supplemental_chunks,
+            },
         )
         merged_snapshot = snapshot_initial_candidates(merged_result)
         assessment = assess_post_rewrite(merged_snapshot, requested_top_n=answer_top_n)
@@ -248,6 +262,79 @@ class MiniGraphFirstRetriever:
             )
         )
         return merged_result
+
+    def _rebuild_merged_source_selection(
+        self,
+        *,
+        merged_chunks: list[RetrievedChunk],
+        initial_result: TopologyRetrievalResult,
+        enriched_result: TopologyRetrievalResult,
+        top_k: int,
+    ) -> tuple[
+        list[RetrievedChunk],
+        GraphFirstSourceSelection,
+        dict[str, RetrievedChunk],
+    ]:
+        """重建 successful rewrite 合并结果的 source selection 与 chunk metadata。"""
+        source_by_chunk: dict[str, GraphFirstSource] = {}
+        for selection in (initial_result.source_selection, enriched_result.source_selection):
+            if selection is None:
+                continue
+            for source in selection.sources:
+                source_by_chunk[source.chunk_id] = source
+
+        discourse_selection_k = (
+            enriched_result.source_selection.discourse_selection_k
+            if enriched_result.source_selection is not None
+            else max(top_k, len(merged_chunks))
+        )
+        context_token_budget = (
+            enriched_result.source_selection.context_token_budget
+            if enriched_result.source_selection is not None
+            else None
+        )
+        fallback_reason = (
+            enriched_result.source_selection.fallback_reason
+            if enriched_result.source_selection is not None
+            else None
+        )
+
+        rebuilt_sources: list[GraphFirstSource] = []
+        rebuilt_chunks: list[RetrievedChunk] = []
+        for rank, chunk in enumerate(merged_chunks):
+            previous_source = source_by_chunk.get(chunk.chunk_id)
+            rebuilt_source = GraphFirstSource(
+                chunk_id=chunk.chunk_id,
+                rank=rank,
+                score=_merged_chunk_source_score(chunk, previous_source),
+                score_components=_merged_chunk_score_components(chunk, previous_source),
+                supporting_entity_ids=_merged_chunk_list_metadata(
+                    chunk, "supporting_entity_ids", previous_source
+                ),
+                supporting_relation_ids=_merged_chunk_list_metadata(
+                    chunk, "supporting_relation_ids", previous_source
+                ),
+                supporting_path_ids=_merged_chunk_list_metadata(
+                    chunk, "supporting_path_ids", previous_source
+                ),
+                auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(chunk, previous_source),
+                selected_for_answer=True,
+                selected_for_discourse=True,
+                selection_reason=_merged_chunk_selection_reason(chunk, previous_source),
+                metadata=_merged_chunk_source_metadata(chunk, previous_source),
+            )
+            rebuilt_sources.append(rebuilt_source)
+            rebuilt_chunks.append(_with_source_selection_metadata(chunk, rebuilt_source))
+
+        selection = GraphFirstSourceSelection(
+            sources=rebuilt_sources,
+            final_context_k=top_k,
+            discourse_selection_k=discourse_selection_k,
+            context_token_budget=context_token_budget,
+            omitted_source_count=max(0, len(rebuilt_sources) - top_k),
+            fallback_reason=fallback_reason,
+        )
+        return rebuilt_chunks, selection, {}
 
     def _retrieve_context_once(
         self,
@@ -923,6 +1010,90 @@ def _with_fallback_metadata(
         score=chunk.score,
         metadata=metadata,
     )
+
+
+def _merged_chunk_source_score(
+    chunk: RetrievedChunk,
+    source: GraphFirstSource | None,
+) -> float:
+    metadata_score = chunk.metadata.get("source_chunk_score")
+    if isinstance(metadata_score, (int, float)):
+        return float(metadata_score)
+    if source is not None:
+        return source.score
+    return chunk.score
+
+
+def _merged_chunk_score_components(
+    chunk: RetrievedChunk,
+    source: GraphFirstSource | None,
+) -> dict[str, float]:
+    metadata_components = chunk.metadata.get("source_score_components")
+    if isinstance(metadata_components, dict):
+        return {
+            key: float(value)
+            for key, value in metadata_components.items()
+            if isinstance(key, str) and isinstance(value, (int, float))
+        }
+    if source is not None:
+        return dict(source.score_components)
+    return {}
+
+
+def _merged_chunk_list_metadata(
+    chunk: RetrievedChunk,
+    key: str,
+    source: GraphFirstSource | None,
+) -> list[str]:
+    value = chunk.metadata.get(key)
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    if source is None:
+        return []
+    if key == "supporting_entity_ids":
+        return list(source.supporting_entity_ids)
+    if key == "supporting_relation_ids":
+        return list(source.supporting_relation_ids)
+    if key == "supporting_path_ids":
+        return list(source.supporting_path_ids)
+    return []
+
+
+def _merged_chunk_auxiliary_hit(
+    chunk: RetrievedChunk,
+    source: GraphFirstSource | None,
+) -> bool:
+    value = chunk.metadata.get("auxiliary_chunk_hit")
+    if isinstance(value, bool):
+        return value
+    if source is not None:
+        return source.auxiliary_chunk_hit
+    return False
+
+
+def _merged_chunk_selection_reason(
+    chunk: RetrievedChunk,
+    source: GraphFirstSource | None,
+) -> str:
+    value = chunk.metadata.get("selection_reason")
+    if isinstance(value, str) and value:
+        return value
+    if source is not None and source.selection_reason:
+        return source.selection_reason
+    return "retrieval_rewrite_merged_context"
+
+
+def _merged_chunk_source_metadata(
+    chunk: RetrievedChunk,
+    source: GraphFirstSource | None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    if source is not None:
+        metadata.update(source.metadata)
+    if "scoring_policy" in chunk.metadata:
+        metadata["scoring_policy"] = chunk.metadata["scoring_policy"]
+    metadata["supplemental_discourse"] = False
+    return metadata
 
 
 def _entity_ids(candidates: list[MiniEntityCandidate]) -> list[str]:

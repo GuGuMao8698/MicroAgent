@@ -4,6 +4,7 @@ from ragflow_lite.application.services.retrieval_rewrite import (
     assess_post_rewrite,
     build_retrieval_rewrite_metadata,
     decide_grounding_gate,
+    merge_retrieval_results,
 )
 
 from ragflow_lite.domain.models import (
@@ -12,6 +13,7 @@ from ragflow_lite.domain.models import (
     GroundedQuery,
     InitialCandidateSnapshot,
     RetrievedChunk,
+    TopologyRetrievalResult,
 )
 
 
@@ -133,3 +135,48 @@ def test_retrieval_rewrite_metadata_records_failed_fallback() -> None:
     assert (
         metadata["retrieval_rewrite"]["fallback_source"] == "initial_candidate_snapshot"
     )
+
+
+def test_merge_retrieval_results_keeps_union_and_provenance() -> None:
+    initial = TopologyRetrievalResult(
+        query="q",
+        grounded_query=GroundedQuery(
+            query="q",
+            answer_type_keywords=[],
+            entities_from_query=[],
+        ),
+        chunks=[
+            RetrievedChunk(
+                chunk_id="chunk_initial",
+                document_id="doc1",
+                text="initial",
+                score=5.0,
+                metadata={},
+            )
+        ],
+        paths=[],
+    )
+    enriched = TopologyRetrievalResult(
+        query="q",
+        grounded_query=GroundedQuery(
+            query="q",
+            answer_type_keywords=[],
+            entities_from_query=[],
+        ),
+        chunks=[
+            RetrievedChunk(
+                chunk_id="chunk_enriched",
+                document_id="doc1",
+                text="enriched",
+                score=4.0,
+                metadata={},
+            )
+        ],
+        paths=[],
+    )
+
+    merged = merge_retrieval_results(initial=initial, enriched=enriched, top_k=3)
+
+    assert [chunk.chunk_id for chunk in merged] == ["chunk_initial", "chunk_enriched"]
+    assert merged[0].metadata["retrieval_rewrite_sources"] == ["initial"]
+    assert merged[1].metadata["retrieval_rewrite_sources"] == ["enriched"]

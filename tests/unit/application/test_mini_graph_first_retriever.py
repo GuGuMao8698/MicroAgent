@@ -7,6 +7,9 @@ import pytest
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
+from ragflow_lite.application.services.evidence_package_builder import (
+    EvidencePackageBuilder,
+)
 from ragflow_lite.domain.models import (
     CoTGroundingResult,
     EntityEvidence,
@@ -167,6 +170,33 @@ class ManyAuxiliaryRetriever:
                 metadata={},
             )
             for index in range(self.chunk_count)
+        ]
+
+
+class QueryAwareAuxiliaryRetriever:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
+        self.calls.append((query, top_k))
+        if "Solution steps:" in query:
+            return [
+                RetrievedChunk(
+                    chunk_id="chunk_enriched",
+                    document_id="doc1",
+                    text="enriched chunk",
+                    score=4.0,
+                    metadata={"filename": "enriched.md"},
+                )
+            ]
+        return [
+            RetrievedChunk(
+                chunk_id="chunk_initial",
+                document_id="doc1",
+                text="initial chunk",
+                score=5.0,
+                metadata={"filename": "initial.md"},
+            )
         ]
 
 
@@ -1653,3 +1683,47 @@ def test_post_rewrite_gate_failure_marks_notice_without_second_rewrite() -> None
     assert rewrite["triggered"] is True
     assert rewrite["post_rewrite_gate_passed"] is False
     assert rewrite["answer_notice_required"] is True
+
+
+def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> None:
+    auxiliary_retriever = QueryAwareAuxiliaryRetriever()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=EmptyGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        cot_grounding_rewriter=SuccessfulCoTRewriter(),
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=3)
+
+    final_chunk_ids = [chunk.chunk_id for chunk in result.chunks]
+    assert final_chunk_ids == ["chunk_initial", "chunk_enriched"]
+    assert result.metadata["source_selection"]["selected_answer_chunk_ids"] == (
+        final_chunk_ids
+    )
+    assert result.metadata["source_selection"]["selected_discourse_chunk_ids"] == (
+        final_chunk_ids
+    )
+    assert result.metadata["supplemental_discourse_chunks"] == {}
+    assert result.source_selection is not None
+    assert [source.chunk_id for source in result.source_selection.sources] == (
+        final_chunk_ids
+    )
+    assert all(source.selected_for_answer for source in result.source_selection.sources)
+    assert all(
+        source.selected_for_discourse for source in result.source_selection.sources
+    )
+    assert result.chunks[0].metadata["retrieval_rewrite_sources"] == ["initial"]
+    assert result.chunks[1].metadata["retrieval_rewrite_sources"] == ["enriched"]
+
+    package = EvidencePackageBuilder().build(result)
+    initial_item = next(
+        item for item in package.items if item.canonical_chunk_id == "chunk_initial"
+    )
+    assert initial_item.metadata["selected_for_answer"] is True
+    assert initial_item.metadata["selected_for_discourse"] is True
+    assert initial_item.metadata["source_selection_index"] == 0
+    assert initial_item.metadata["retrieval_rewrite_sources"] == ["initial"]
