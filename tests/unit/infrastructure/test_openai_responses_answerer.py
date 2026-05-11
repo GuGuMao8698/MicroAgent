@@ -553,3 +553,42 @@ def test_answer_standard_mode_ignores_blueprint_and_uses_score_order() -> None:
     assert result.metadata["answer_mode"] == "standard"
     assert result.metadata["blueprint_applied"] is False
     assert "blueprint_fallback_reason" not in result.metadata
+
+
+def test_openai_answerer_includes_retrieval_rewrite_notice() -> None:
+    client = FakeOpenAIClient("Evidence is still limited.")
+    answerer = OpenAIResponsesAnswerer(
+        api_key="test-key",
+        base_url="https://code.rayinai.com/v1",
+        model="gpt-5.4-mini",
+        reasoning_effort="medium",
+        store=False,
+        verbosity="medium",
+        client=client,
+        instructions="Answer.",
+    )
+    request = AnswerRequest(
+        query="ambiguous question",
+        contexts=[
+            RetrievedChunk(
+                chunk_id="chunk_a",
+                document_id="doc1",
+                text="limited evidence",
+                score=1.0,
+                metadata={},
+            )
+        ],
+        mode="discorag",
+        metadata={
+            "retrieval_rewrite": {
+                "answer_notice_required": True,
+                "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
+            }
+        },
+    )
+
+    answerer.answer(request)
+
+    sent_input = client.responses.calls[0]["input"]
+    assert "Retrieval rewrite notice:" in sent_input
+    assert "Retrieval rewrite already ran" in sent_input

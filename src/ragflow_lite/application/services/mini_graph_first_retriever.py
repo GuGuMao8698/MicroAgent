@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from ragflow_lite.application.services.retrieval_rewrite import (
+    assess_post_rewrite,
     build_enriched_grounding_input,
     build_retrieval_rewrite_metadata,
     decide_grounding_gate,
@@ -226,22 +227,24 @@ class MiniGraphFirstRetriever:
             source_selection=enriched_result.source_selection,
             metadata=dict(enriched_result.metadata),
         )
-        # Task 7 will add post-rewrite assessment and set status to "degraded" when warranted.
+        merged_snapshot = snapshot_initial_candidates(merged_result)
+        assessment = assess_post_rewrite(merged_snapshot, requested_top_n=answer_top_n)
+        answer_notice_required = not assessment.gate_passed
         merged_result.metadata.update(
             build_retrieval_rewrite_metadata(
                 enabled=True,
                 triggered=True,
                 strategy="cot_grounding",
-                status="succeeded",
+                status="succeeded" if assessment.gate_passed else "degraded",
                 gate_reason=gate.reason,
                 attempts=rewrite.attempts,
                 failure_reason=None,
                 fallback_source=None,
                 initial_candidate_count=len(snapshot.candidates),
                 enriched_candidate_count=len(enriched_result.chunks),
-                post_rewrite_gate_passed=None,
-                post_rewrite_gate_reason=None,
-                answer_notice_required=False,
+                post_rewrite_gate_passed=assessment.gate_passed,
+                post_rewrite_gate_reason=assessment.reason,
+                answer_notice_required=answer_notice_required,
             )
         )
         return merged_result

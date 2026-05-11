@@ -1629,3 +1629,27 @@ def test_success_status_with_empty_steps_is_treated_as_rewrite_failure() -> None
         == "initial_candidate_snapshot"
     )
     assert auxiliary_retriever.calls == [("ambiguous question", 30)]
+
+
+def test_post_rewrite_gate_failure_marks_notice_without_second_rewrite() -> None:
+    # EmptyGrounder ensures both initial and enriched passes yield only auxiliary
+    # chunks, so the merged result still falls below the post-rewrite threshold.
+    grounder = EmptyGrounder()
+    rewriter = SuccessfulCoTRewriter()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=ManyAuxiliaryRetriever(chunk_count=1),
+        cot_grounding_rewriter=rewriter,
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=4)
+
+    assert rewriter.calls == ["ambiguous question"]
+    rewrite = result.metadata["retrieval_rewrite"]
+    assert rewrite["triggered"] is True
+    assert rewrite["post_rewrite_gate_passed"] is False
+    assert rewrite["answer_notice_required"] is True

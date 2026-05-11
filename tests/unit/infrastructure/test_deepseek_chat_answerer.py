@@ -7,6 +7,37 @@ from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
 from ragflow_lite.infrastructure.answerers.deepseek_chat import DeepSeekChatAnswerer
 
 
+def test_deepseek_answerer_includes_retrieval_rewrite_notice() -> None:
+    client = _FakeDeepSeekClient("Evidence is still limited.")
+    answerer = DeepSeekChatAnswerer(client=client, instructions="Answer.")
+    request = AnswerRequest(
+        query="ambiguous question",
+        contexts=[
+            RetrievedChunk(
+                chunk_id="chunk_a",
+                document_id="doc1",
+                text="limited evidence",
+                score=1.0,
+                metadata={},
+            )
+        ],
+        mode="discorag",
+        metadata={
+            "retrieval_rewrite": {
+                "answer_notice_required": True,
+                "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
+            }
+        },
+    )
+
+    answerer.answer(request)
+
+    sent_input = client.calls[0]["input_text"]
+    assert "Retrieval rewrite notice:" in sent_input
+    assert "Retrieval rewrite already ran" in sent_input
+    assert "available evidence still appears insufficient" in sent_input
+
+
 class _FakeDeepSeekClient:
     def __init__(self, output_text: str = "回答<cite:1>。") -> None:
         self.output_text = output_text
