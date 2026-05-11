@@ -1906,6 +1906,8 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
         for source in result.source_selection.sources
         if source.selected_for_discourse and not source.selected_for_answer
     ] == ["chunk_supplemental_valid"]
+    supplemental_source = result.source_selection.sources[2]
+    assert supplemental_source.metadata["supplemental_discourse"] is True
     assert result.source_selection.sources[2].rank == 2
     assert result.source_selection.sources[2].selected_for_answer is False
     assert result.source_selection.sources[2].selected_for_discourse is True
@@ -1923,6 +1925,9 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
     assert supplemental["chunk_supplemental_valid"].metadata[
         "selected_for_discourse"
     ] is True
+    assert supplemental["chunk_supplemental_valid"].metadata[
+        "supplemental_discourse"
+    ] is True
     assert result.chunks[0].metadata["retrieval_rewrite_sources"] == ["initial"]
     assert result.chunks[1].metadata["retrieval_rewrite_sources"] == ["enriched"]
 
@@ -1937,6 +1942,7 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
     assert supplemental_item.metadata["selected_for_answer"] is False
     assert supplemental_item.metadata["selected_for_discourse"] is True
     assert supplemental_item.metadata["source_selection_index"] == 2
+    assert supplemental_item.metadata["supplemental_discourse"] is True
     assert package.metadata["source_selection"]["selected_discourse_chunk_ids"] == [
         "chunk_initial",
         "chunk_enriched",

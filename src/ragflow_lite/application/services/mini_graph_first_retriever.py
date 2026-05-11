@@ -319,25 +319,12 @@ class MiniGraphFirstRetriever:
         rebuilt_chunks: list[RetrievedChunk] = []
         for rank, chunk in enumerate(merged_chunks):
             previous_source = source_by_chunk.get(chunk.chunk_id)
-            rebuilt_source = GraphFirstSource(
-                chunk_id=chunk.chunk_id,
+            rebuilt_source = _rehydrate_merged_source(
+                chunk=chunk,
+                previous_source=previous_source,
                 rank=rank,
-                score=_merged_chunk_source_score(chunk, previous_source),
-                score_components=_merged_chunk_score_components(chunk, previous_source),
-                supporting_entity_ids=_merged_chunk_list_metadata(
-                    chunk, "supporting_entity_ids", previous_source
-                ),
-                supporting_relation_ids=_merged_chunk_list_metadata(
-                    chunk, "supporting_relation_ids", previous_source
-                ),
-                supporting_path_ids=_merged_chunk_list_metadata(
-                    chunk, "supporting_path_ids", previous_source
-                ),
-                auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(chunk, previous_source),
                 selected_for_answer=True,
                 selected_for_discourse=True,
-                selection_reason=_merged_chunk_selection_reason(chunk, previous_source),
-                metadata=_merged_chunk_source_metadata(chunk, previous_source),
             )
             rebuilt_sources.append(rebuilt_source)
             rebuilt_chunks.append(_with_source_selection_metadata(chunk, rebuilt_source))
@@ -1115,14 +1102,54 @@ def _merged_chunk_selection_reason(
 def _merged_chunk_source_metadata(
     chunk: RetrievedChunk,
     source: GraphFirstSource | None,
+    *,
+    selected_for_answer: bool,
+    selected_for_discourse: bool,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {}
     if source is not None:
         metadata.update(source.metadata)
     if "scoring_policy" in chunk.metadata:
         metadata["scoring_policy"] = chunk.metadata["scoring_policy"]
-    metadata["supplemental_discourse"] = False
+    metadata["supplemental_discourse"] = (
+        selected_for_discourse and not selected_for_answer
+    )
     return metadata
+
+
+def _rehydrate_merged_source(
+    *,
+    chunk: RetrievedChunk,
+    previous_source: GraphFirstSource | None,
+    rank: int,
+    selected_for_answer: bool,
+    selected_for_discourse: bool,
+) -> GraphFirstSource:
+    return GraphFirstSource(
+        chunk_id=chunk.chunk_id,
+        rank=rank,
+        score=_merged_chunk_source_score(chunk, previous_source),
+        score_components=_merged_chunk_score_components(chunk, previous_source),
+        supporting_entity_ids=_merged_chunk_list_metadata(
+            chunk, "supporting_entity_ids", previous_source
+        ),
+        supporting_relation_ids=_merged_chunk_list_metadata(
+            chunk, "supporting_relation_ids", previous_source
+        ),
+        supporting_path_ids=_merged_chunk_list_metadata(
+            chunk, "supporting_path_ids", previous_source
+        ),
+        auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(chunk, previous_source),
+        selected_for_answer=selected_for_answer,
+        selected_for_discourse=selected_for_discourse,
+        selection_reason=_merged_chunk_selection_reason(chunk, previous_source),
+        metadata=_merged_chunk_source_metadata(
+            chunk,
+            previous_source,
+            selected_for_answer=selected_for_answer,
+            selected_for_discourse=selected_for_discourse,
+        ),
+    )
 
 
 def _rebuild_valid_supplemental_sources(
@@ -1154,25 +1181,12 @@ def _rebuild_valid_supplemental_sources(
             if base_chunk is None:
                 continue
 
-            rebuilt_source = GraphFirstSource(
-                chunk_id=source.chunk_id,
+            rebuilt_source = _rehydrate_merged_source(
+                chunk=base_chunk,
+                previous_source=source,
                 rank=start_rank + len(rebuilt_sources),
-                score=_merged_chunk_source_score(base_chunk, source),
-                score_components=_merged_chunk_score_components(base_chunk, source),
-                supporting_entity_ids=_merged_chunk_list_metadata(
-                    base_chunk, "supporting_entity_ids", source
-                ),
-                supporting_relation_ids=_merged_chunk_list_metadata(
-                    base_chunk, "supporting_relation_ids", source
-                ),
-                supporting_path_ids=_merged_chunk_list_metadata(
-                    base_chunk, "supporting_path_ids", source
-                ),
-                auxiliary_chunk_hit=_merged_chunk_auxiliary_hit(base_chunk, source),
                 selected_for_answer=False,
                 selected_for_discourse=True,
-                selection_reason=_merged_chunk_selection_reason(base_chunk, source),
-                metadata=_merged_chunk_source_metadata(base_chunk, source),
             )
             rebuilt_sources.append(rebuilt_source)
             rebuilt_chunks[source.chunk_id] = _with_source_selection_metadata(
