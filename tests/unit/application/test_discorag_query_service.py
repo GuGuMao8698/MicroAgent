@@ -33,6 +33,9 @@ from ragflow_lite.domain.models import (
     TopologyPath,
     TopologyRetrievalResult,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (  # noqa: F401
+    StructurerAttemptsExhaustedError,
+)
 from ragflow_lite.shared.observability import (
     bind_request_context,
     clear_request_context,
@@ -177,43 +180,46 @@ class RecordingAnswerer:
 class _ExhaustedBlueprintBuilder:
     """Simulates a blueprint builder that exhausted retry attempts."""
 
-    message: str = (
-        "LLM DiscoRAG blueprint builder failed after 2 attempts: "
-        "chunk_roles keys must exactly match final_answer_chunk_ids."
-    )
-
     def build(
         self,
         package: IntraChunkDiscoursePackage,
         graph: InterChunkDiscourseGraph | None = None,
     ) -> AnswerBlueprint:
-        raise ProcessingError(self.message)
+        raise StructurerAttemptsExhaustedError(
+            stage="blueprint",
+            failure_type="validation_error",
+            attempts=2,
+            max_attempts=2,
+            message="chunk_roles keys must exactly match final_answer_chunk_ids.",
+        )
 
 
 @dataclass
 class _ExhaustedDiscourseExtractor:
     """Simulates a discourse extractor that exhausted retry attempts."""
 
-    message: str = (
-        "DeepSeek discourse extractor failed after 2 attempts: "
-        "unknown canonical_chunk_id 'missing'."
-    )
-
     def extract(self, evidence_package: EvidencePackage) -> IntraChunkDiscoursePackage:
-        raise ProcessingError(self.message)
+        raise StructurerAttemptsExhaustedError(
+            stage="rst_extraction",
+            failure_type="validation_error",
+            attempts=2,
+            max_attempts=2,
+            message="unknown canonical_chunk_id 'missing'.",
+        )
 
 
 @dataclass
 class _ExhaustedGraphBuilder:
     """Simulates a graph builder that exhausted retry attempts."""
 
-    message: str = (
-        "LLM inter-chunk graph builder failed after 2 attempts: "
-        "target_chunk_id 'missing' is unknown."
-    )
-
     def build(self, package: IntraChunkDiscoursePackage) -> InterChunkDiscourseGraph:
-        raise ProcessingError(self.message)
+        raise StructurerAttemptsExhaustedError(
+            stage="inter_chunk_graph",
+            failure_type="validation_error",
+            attempts=2,
+            max_attempts=2,
+            message="target_chunk_id 'missing' is unknown.",
+        )
 
 
 class _ServiceGrounder:
@@ -360,11 +366,11 @@ def test_discorag_query_service_logs_started_and_succeeded_and_records_metric(
 
 
 def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
-    """Non-exhaustion ProcessingError from blueprint builder also triggers fallback.
+    """Plain ProcessingError from blueprint builder propagates as hard failure.
 
-    All ProcessingError from structurer stages (including non-retry errors) are
-    caught and degraded to MiniRAG fallback. Only non-structurer failures remain
-    hard failures.
+    Only StructurerAttemptsExhaustedError triggers MiniRAG fallback. Plain
+    ProcessingError (from validation bugs, promotion errors, etc.) must
+    propagate to the outer RagflowLiteError handler.
     """
     answerer = RecordingAnswerer()
     error = ProcessingError("corrupt discourse plan")
@@ -377,14 +383,10 @@ def test_discorag_query_service_propagates_blueprint_processing_error() -> None:
         answerer=answerer,
     )
 
-    result = service.query("q", top_k=1)
+    with pytest.raises(ProcessingError, match="corrupt discourse plan"):
+        service.query("q", top_k=1)
 
-    assert answerer.last_request is not None
-    assert answerer.last_request.mode == "standard"
-    assert answerer.last_request.blueprint is None
-    assert result.metadata["discorag_degraded"] is True
-    assert result.metadata["answer_mode"] == "minirag_fallback"
-    assert result.metadata["discorag_error"]["stage"] == "blueprint"
+    assert answerer.last_request is None
 
 
 def test_discorag_query_service_logs_failed_and_records_metric_on_domain_error(
@@ -1524,7 +1526,11 @@ def test_discorag_query_service_fallback_metadata_identifies_rst_stage() -> None
     assert result.metadata["discorag_degraded"] is True
     assert result.metadata["answer_mode"] == "minirag_fallback"
     assert result.metadata["discorag_error"]["stage"] == "rst_extraction"
-    assert result.metadata["discorag_error"]["error_type"] == "ProcessingError"
+    assert (
+        result.metadata["discorag_error"]["error_type"]
+        == "StructurerAttemptsExhaustedError"
+    )
+    assert result.metadata["discorag_error"]["failure_type"] == "validation_error"
     assert result.metadata["discorag_error"]["attempts"] == 2
     assert result.metadata["discorag_error"]["max_attempts"] == 2
     assert result.metadata["discorag_error"]["user_visible"] is True
@@ -1548,7 +1554,32 @@ def test_discorag_query_service_fallback_metadata_identifies_graph_stage() -> No
     assert result.metadata["discorag_degraded"] is True
     assert result.metadata["answer_mode"] == "minirag_fallback"
     assert result.metadata["discorag_error"]["stage"] == "inter_chunk_graph"
-    assert result.metadata["discorag_error"]["error_type"] == "ProcessingError"
+    assert (
+        result.metadata["discorag_error"]["error_type"]
+        == "StructurerAttemptsExhaustedError"
+    )
+    assert result.metadata["discorag_error"]["failure_type"] == "validation_error"
     assert result.metadata["discorag_error"]["attempts"] == 2
     assert result.metadata["discorag_error"]["max_attempts"] == 2
     assert result.metadata["discorag_error"]["user_visible"] is True
+
+
+def test_discorag_query_service_fallback_metadata_uses_structured_error() -> None:
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=_ExhaustedBlueprintBuilder(),
+        answerer=RecordingAnswerer(),
+    )
+
+    result = service.query("q", top_k=1)
+
+    error = result.metadata["discorag_error"]
+    assert error["stage"] == "blueprint"
+    assert error["error_type"] == "StructurerAttemptsExhaustedError"
+    assert error["failure_type"] == "validation_error"
+    assert error["attempts"] == 2
+    assert error["max_attempts"] == 2
+    assert error["user_visible"] is True

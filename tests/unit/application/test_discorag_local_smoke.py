@@ -54,6 +54,9 @@ from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_builder import 
 from ragflow_lite.infrastructure.evidence.llm_inter_chunk_graph_builder import (
     LLMInterChunkDiscourseGraphBuilder,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (  # noqa: F401
+    StructurerAttemptsExhaustedError,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1085,15 +1088,18 @@ def test_ac12_blueprint_repair_succeeds_after_validation_failure() -> None:
 
 @dataclass
 class _ExhaustedBlueprintBuilder:
-    """Blueprint builder stub that always raises ProcessingError (simulates exhausted retries)."""
+    """Blueprint builder stub that always raises StructurerAttemptsExhaustedError (simulates exhausted retries)."""
 
     call_count: int = 0
 
     def build(self, package: object, *, graph: object = None) -> None:
         self.call_count += 1
-        raise ProcessingError(
-            "LLM DiscoRAG blueprint builder failed after 2 attempts: "
-            "chunk_roles keys must exactly match final_answer_chunk_ids."
+        raise StructurerAttemptsExhaustedError(
+            stage="blueprint",
+            failure_type="validation_error",
+            attempts=2,
+            max_attempts=2,
+            message="chunk_roles keys must exactly match final_answer_chunk_ids.",
         )
 
 
