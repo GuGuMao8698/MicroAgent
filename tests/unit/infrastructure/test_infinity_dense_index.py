@@ -18,8 +18,7 @@ def test_chunk_hybrid_config_defaults_match_spec() -> None:
     assert config.position_prior_enabled is True
     assert (
         config.match_text_fields
-        == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks,"
-        "filename^10,text"
+        == "filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks"
     )
 
 
