@@ -8,6 +8,7 @@ from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
 from ragflow_lite.domain.models import (
+    CoTGroundingResult,
     EntityEvidence,
     GroundedQuery,
     MiniEntityCandidate,
@@ -380,6 +381,22 @@ def test_mini_graph_first_retriever_returns_source_selection_budget_metadata() -
     assert result.metadata["source_selection"]["selected_discourse_chunk_ids"] == [
         "chunk_a",
     ]
+
+
+@dataclass
+class FailingCoTRewriter:
+    calls: list[str] = field(default_factory=list)
+
+    def rewrite(self, query: str) -> CoTGroundingResult:
+        self.calls.append(query)
+        return CoTGroundingResult(
+            status="failed",
+            strategy="cot_grounding",
+            original_query=query,
+            solution_steps=[],
+            attempts=2,
+            failure_reason="invalid structured output",
+        )
 
 
 @dataclass
@@ -1477,3 +1494,30 @@ def test_default_discourse_window_keeps_top_answer_chunks_separate_from_suppleme
         chunk.metadata["selected_for_answer"] is False
         for chunk in supplemental.values()
     )
+
+
+def test_rewrite_failure_uses_initial_snapshot_without_rerunning_raw_query() -> None:
+    grounder = EmptyGrounder()
+    auxiliary_retriever = ManyAuxiliaryRetriever(chunk_count=1)
+    rewriter = FailingCoTRewriter()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=grounder,
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=auxiliary_retriever,
+        cot_grounding_rewriter=rewriter,
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=4)
+
+    assert rewriter.calls == ["ambiguous question"]
+    assert auxiliary_retriever.calls == [("ambiguous question", 30)]
+    assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_0"]
+    rewrite = result.metadata["retrieval_rewrite"]
+    assert rewrite["triggered"] is True
+    assert rewrite["status"] == "failed"
+    assert rewrite["attempts"] == 2
+    assert rewrite["failure_reason"] == "invalid structured output"
+    assert rewrite["fallback_source"] == "initial_candidate_snapshot"

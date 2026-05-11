@@ -7,9 +7,22 @@ from ragflow_lite.domain.models import (
     GroundingGateDecision,
     InitialCandidateSnapshot,
     PostRewriteAssessment,
+    TopologyRetrievalResult,
 )
 
 RewriteStatus = Literal["not_triggered", "succeeded", "failed", "degraded"]
+
+
+def snapshot_initial_candidates(
+    result: TopologyRetrievalResult,
+) -> InitialCandidateSnapshot:
+    return InitialCandidateSnapshot(
+        query=result.query,
+        grounded_query=result.grounded_query,
+        candidates=list(result.chunks),
+        source_selection=result.source_selection,
+        metadata=dict(result.metadata),
+    )
 
 
 def _selected_answer_candidate_count(snapshot: InitialCandidateSnapshot) -> int:

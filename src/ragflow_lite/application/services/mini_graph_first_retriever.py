@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from ragflow_lite.application.services.retrieval_rewrite import (
+    build_retrieval_rewrite_metadata,
+    decide_grounding_gate,
+    snapshot_initial_candidates,
+)
 from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     GraphFirstSource,
@@ -16,6 +21,7 @@ from ragflow_lite.domain.models import (
 )
 from ragflow_lite.domain.ports.interfaces import (
     ChunkLookup,
+    CoTGroundingRewriter,
     EntityNameIndex,
     QueryGrounder,
     ReasoningPathExpander,
@@ -44,6 +50,7 @@ class MiniGraphFirstRetriever:
         path_expander: ReasoningPathExpander,
         chunk_lookup: ChunkLookup,
         chunk_auxiliary_retriever: Retriever | None = None,
+        cot_grounding_rewriter: CoTGroundingRewriter | None = None,
         mini_internal_candidate_n: int = 60,
         query_entity_limit: int = 5,
         path_hop_limit: int = 2,
@@ -80,6 +87,7 @@ class MiniGraphFirstRetriever:
         self.path_expander = path_expander
         self.chunk_lookup = chunk_lookup
         self.chunk_auxiliary_retriever = chunk_auxiliary_retriever
+        self.cot_grounding_rewriter = cot_grounding_rewriter
         # MiniRAG mini-mode 预算参数
         self.mini_internal_candidate_n = mini_internal_candidate_n
         self.query_entity_limit = query_entity_limit
@@ -115,13 +123,79 @@ class MiniGraphFirstRetriever:
             answer_top_n * _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER
         )
 
-        return self._retrieve_context_once(
+        initial_result = self._retrieve_context_once(
             original_query=query,
             grounding_query=query,
             auxiliary_query=query,
             top_k=answer_top_n,
             discourse_selection_n=discourse_selection_n,
         )
+        if self.cot_grounding_rewriter is None:
+            return initial_result
+
+        snapshot = snapshot_initial_candidates(initial_result)
+        gate = decide_grounding_gate(snapshot, requested_top_n=answer_top_n)
+        if not gate.should_rewrite:
+            initial_result.metadata.update(
+                build_retrieval_rewrite_metadata(
+                    enabled=True,
+                    triggered=False,
+                    strategy=None,
+                    status="not_triggered",
+                    gate_reason=gate.reason,
+                    attempts=0,
+                    failure_reason=None,
+                    fallback_source=None,
+                    initial_candidate_count=len(snapshot.candidates),
+                    enriched_candidate_count=0,
+                    post_rewrite_gate_passed=None,
+                    post_rewrite_gate_reason=None,
+                    answer_notice_required=False,
+                )
+            )
+            return initial_result
+
+        rewrite = self.cot_grounding_rewriter.rewrite(snapshot.query)
+        if rewrite.status == "failed":
+            initial_result.metadata.update(
+                build_retrieval_rewrite_metadata(
+                    enabled=True,
+                    triggered=True,
+                    strategy="cot_grounding",
+                    status="failed",
+                    gate_reason=gate.reason,
+                    attempts=rewrite.attempts,
+                    failure_reason=rewrite.failure_reason,
+                    fallback_source="initial_candidate_snapshot",
+                    initial_candidate_count=len(snapshot.candidates),
+                    enriched_candidate_count=0,
+                    post_rewrite_gate_passed=None,
+                    post_rewrite_gate_reason=None,
+                    answer_notice_required=False,
+                )
+            )
+            return initial_result
+
+        # Task 6 will implement successful rewrite and enriched retrieval here.
+        # For now, treat unexpected success as fallback to initial candidates.
+        initial_result.metadata.update(
+            build_retrieval_rewrite_metadata(
+                enabled=True,
+                triggered=True,
+                strategy="cot_grounding",
+                status="failed",
+                gate_reason=gate.reason,
+                attempts=rewrite.attempts,
+                failure_reason="successful rewrite not yet implemented",
+                fallback_source="initial_candidate_snapshot",
+                initial_candidate_count=len(snapshot.candidates),
+                enriched_candidate_count=0,
+                post_rewrite_gate_passed=None,
+                post_rewrite_gate_reason=None,
+                answer_notice_required=False,
+            )
+        )
+        return initial_result
 
     def _retrieve_context_once(
         self,
