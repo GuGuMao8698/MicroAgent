@@ -118,6 +118,31 @@ def _package_with_two_items() -> EvidencePackage:
     return package
 
 
+def _make_evidence_package_with_two_selected_chunks() -> EvidencePackage:
+    """EvidencePackage with 2 items both marked selected_for_discourse=True."""
+    package = _package()
+    package.items[0].metadata["selected_for_discourse"] = True
+    second = EvidenceItem(
+        canonical_chunk_id="chunk_doc_alpha_1",
+        text="A second discourse-visible chunk.",
+        score=0.75,
+        order=1,
+        provenance=EvidenceProvenance(
+            document_id="doc_alpha",
+            filename="alpha.md",
+            file_type="markdown",
+            chunk_index=1,
+        ),
+        retained_reasons=["discourse_selection"],
+        grounded_entities=["MiniRAG"],
+        answer_type_keywords=["mechanism"],
+        metadata={"selected_for_discourse": True},
+    )
+    package.items.append(second)
+    package.metadata["evidence_count"] = 2
+    return package
+
+
 def _package_with_discourse_items(count: int) -> EvidencePackage:
     package = _package()
     package.items = []
@@ -232,7 +257,17 @@ def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
 
 
 def test_deepseek_discourse_extractor_default_consumes_all_discourse_items() -> None:
-    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    chunks = [
+        {
+            "canonical_chunk_id": f"chunk_doc_alpha_{i}",
+            "units": [{"text": f"Discourse-visible chunk {i}.", "role": "main"}],
+            "relations": [],
+            "main_unit_indexes": [0],
+            "supporting_unit_indexes": [],
+        }
+        for i in range(12)
+    ]
+    client = _FakeDeepSeekClient(json.dumps({"chunks": chunks}))
     extractor = DeepSeekChatIntraChunkDiscourseExtractor(client=client)
 
     package = extractor.extract(_package_with_discourse_items(12))
@@ -253,7 +288,23 @@ def test_deepseek_discourse_extractor_default_consumes_all_discourse_items() -> 
 def test_deepseek_discourse_extractor_explicit_max_chunks_reports_skipped_items() -> (
     None
 ):
-    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    client = _FakeDeepSeekClient(
+        json.dumps(
+            {
+                "chunks": [
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_0",
+                        "units": [
+                            {"text": "MiniRAG first retrieves chunks.", "role": "main"}
+                        ],
+                        "relations": [],
+                        "main_unit_indexes": [0],
+                        "supporting_unit_indexes": [],
+                    }
+                ]
+            }
+        )
+    )
     extractor = DeepSeekChatIntraChunkDiscourseExtractor(
         client=client,
         max_chunks=1,
@@ -1083,7 +1134,23 @@ def test_deepseek_discourse_extractor_timeout_exhausted_raises() -> None:
 
 
 def test_rst_extractor_disables_low_level_retry_for_structurer_attempts() -> None:
-    client = _FakeDeepSeekClient(json.dumps({"chunks": []}))
+    client = _FakeDeepSeekClient(
+        json.dumps(
+            {
+                "chunks": [
+                    {
+                        "canonical_chunk_id": "chunk_doc_alpha_0",
+                        "units": [
+                            {"text": "MiniRAG first retrieves chunks.", "role": "main"}
+                        ],
+                        "relations": [],
+                        "main_unit_indexes": [0],
+                        "supporting_unit_indexes": [],
+                    }
+                ]
+            }
+        )
+    )
     extractor = DeepSeekChatIntraChunkDiscourseExtractor(client=client)
 
     extractor.extract(_package())
@@ -1134,3 +1201,98 @@ def test_rst_extractor_raises_structured_exhaustion_after_validation_failures() 
     assert exc_info.value.failure_type == "validation_error"
     assert exc_info.value.attempts == 2
     assert exc_info.value.max_attempts == 2
+
+
+# --- Constructor guard tests ---
+
+
+def test_discourse_extractor_rejects_non_positive_timeout() -> None:
+    with pytest.raises(ValueError, match="timeout_seconds must be positive"):
+        DeepSeekChatIntraChunkDiscourseExtractor(timeout_seconds=0)
+
+
+def test_discourse_extractor_rejects_zero_max_attempts() -> None:
+    with pytest.raises(ValueError, match="max_attempts must be at least 1"):
+        DeepSeekChatIntraChunkDiscourseExtractor(max_attempts=0)
+
+
+# --- Missing and duplicate chunk structure tests ---
+
+
+def test_discourse_extractor_rejects_missing_selected_chunk_structure() -> None:
+    """LLM returns structure for only one of two selected chunks → StructurerAttemptsExhaustedError."""
+    client = _FakeDeepSeekClient(
+        [
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [
+                                {"text": "MiniRAG retrieves chunks.", "role": "claim"}
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+            json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "canonical_chunk_id": "chunk_doc_alpha_0",
+                            "units": [
+                                {"text": "MiniRAG retrieves chunks.", "role": "claim"}
+                            ],
+                            "relations": [],
+                            "main_unit_indexes": [0],
+                            "supporting_unit_indexes": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=client,
+        max_attempts=2,
+    )
+
+    with pytest.raises(StructurerAttemptsExhaustedError) as exc_info:
+        extractor.extract(_make_evidence_package_with_two_selected_chunks())
+
+    assert exc_info.value.stage == "rst_extraction"
+    assert "missing" in exc_info.value.message.lower()
+
+
+def test_discourse_extractor_rejects_duplicate_chunk_structure() -> None:
+    """LLM returns two structures for the same chunk_id → StructurerAttemptsExhaustedError."""
+    payload = {
+        "chunks": [
+            {
+                "canonical_chunk_id": "chunk_doc_alpha_0",
+                "units": [{"text": "MiniRAG retrieves chunks.", "role": "claim"}],
+                "relations": [],
+                "main_unit_indexes": [0],
+                "supporting_unit_indexes": [],
+            },
+            {
+                "canonical_chunk_id": "chunk_doc_alpha_0",
+                "units": [{"text": "Duplicate structure.", "role": "claim"}],
+                "relations": [],
+                "main_unit_indexes": [0],
+                "supporting_unit_indexes": [],
+            },
+        ]
+    }
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        client=_FakeDeepSeekClient([json.dumps(payload), json.dumps(payload)]),
+        max_attempts=2,
+    )
+
+    with pytest.raises(StructurerAttemptsExhaustedError) as exc_info:
+        extractor.extract(_package())
+
+    assert "duplicate" in exc_info.value.message.lower()

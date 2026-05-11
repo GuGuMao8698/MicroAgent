@@ -351,25 +351,36 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         items: list[EvidenceItem],
     ) -> list[ChunkDiscourseStructure]:
         items_by_id = {item.canonical_chunk_id: item for item in items}
+        expected_ids = set(items_by_id)
+        seen_ids: set[str] = set()
         structures_by_id: dict[str, ChunkDiscourseStructure] = {}
 
         for raw in payload["chunks"]:
             if not isinstance(raw, dict):
                 raise ProcessingError("Discourse chunk must be a JSON object.")
             canonical_chunk_id = _required_text(raw, "canonical_chunk_id")
-            item = items_by_id.get(canonical_chunk_id)
-            if item is None:
+            if canonical_chunk_id not in expected_ids:
                 raise ProcessingError(
                     "Discourse extractor returned unknown canonical_chunk_id "
                     f"{canonical_chunk_id!r}."
                 )
+            if canonical_chunk_id in seen_ids:
+                raise ProcessingError(
+                    "Discourse extractor returned duplicate canonical_chunk_id "
+                    f"{canonical_chunk_id!r}."
+                )
+            seen_ids.add(canonical_chunk_id)
+            item = items_by_id[canonical_chunk_id]
             structures_by_id[canonical_chunk_id] = self._load_structure(raw, item)
 
-        return [
-            structures_by_id[item.canonical_chunk_id]
-            for item in items
-            if item.canonical_chunk_id in structures_by_id
-        ]
+        missing_ids = expected_ids - seen_ids
+        if missing_ids:
+            raise ProcessingError(
+                "Discourse extractor missing structures for selected chunks: "
+                f"{sorted(missing_ids)!r}."
+            )
+
+        return [structures_by_id[item.canonical_chunk_id] for item in items]
 
     def _load_structure(
         self,
