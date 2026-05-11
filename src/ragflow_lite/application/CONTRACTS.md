@@ -88,24 +88,28 @@ Invariant:
 
 ## DiscoRAG Degraded Fallback Contract
 
-Reviewed at: `2026-05-10T20:00:00+08:00`
+Reviewed at: `2026-05-11T12:00:00+08:00`
 Status: Active
 Owner: `DiscoRAGQueryService`
 
 Source of truth:
-- When RST extraction, inter-chunk graph construction, or blueprint planning exhausts structurer attempts, `DiscoRAGQueryService` catches the `ProcessingError` and degrades to MiniRAG direct answer.
+- When RST extraction, inter-chunk graph construction, or blueprint planning exhausts structurer attempts, `DiscoRAGQueryService` catches `StructurerAttemptsExhaustedError` and degrades to MiniRAG direct answer.
 - Fallback uses `retrieval_result.chunks` exactly as contexts, `mode="standard"`, `blueprint=None`.
-- Result metadata includes `discorag_degraded == True` and a user-visible `discorag_error` block with stage, failure type, attempt counts, and message.
+- Result metadata includes `discorag_degraded == True` and a user-visible `discorag_error` block from `exc.safe_metadata()` with stage, error_type, failure_type, attempts, max_attempts, message, and `user_visible=True`.
 - Fallback does not append supplemental discourse chunks and does not use a blueprint.
+- Degraded fallback records success observability (`record_query_outcome("succeeded")`, `query_succeeded` log with `degraded=True`).
 
 Invariant:
-- Only structurer-stage `ProcessingError` (rst_extraction, inter_chunk_graph, blueprint) triggers fallback.
+- Only `StructurerAttemptsExhaustedError` from structurer stages (rst_extraction, inter_chunk_graph, blueprint) triggers fallback.
+- Plain `ProcessingError` from structurer collaborators propagates as hard failure.
 - Runtime invariant failures after a valid blueprint (e.g. promotion runtime errors from `_contexts_with_bounded_promotion`, blueprint-context consistency errors from `_blueprint_for_contexts`) remain hard errors and propagate upward.
 - Non-`ProcessingError` exceptions also propagate upward and do not trigger fallback.
+- Fallback metadata is structured and user-visible without regex parsing.
 
 Forbidden stale interpretations:
-- Do not treat structurer-stage `ProcessingError` as a hard error requiring user retry; the service already degrades.
+- Do not catch all `ProcessingError` for structurer fallback; only `StructurerAttemptsExhaustedError` qualifies.
 - Do not treat post-blueprint runtime errors as recoverable; they remain hard errors.
+- Do not use regex to extract fallback metadata from exception messages.
 
 Verification:
 - [tests/unit/application/test_discorag_query_service.py](../../../tests/unit/application/test_discorag_query_service.py)

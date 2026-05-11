@@ -119,28 +119,40 @@ Verification:
 
 ## Structurer Retry Boundary
 
-Reviewed at: `2026-05-10T20:00:00+08:00`
+Reviewed at: `2026-05-11T12:00:00+08:00`
 Status: Active
 Owner: `LLMInterChunkDiscourseGraphBuilder`, `LLMDiscoRAGAnswerBlueprintBuilder`, `DeepSeekChatIntraChunkDiscourseExtractor`
 
 Source of truth:
-- DiscoRAG structurer calls use bounded attempts controlled by `DiscoRAGStructurerRuntimeConfig.timeout_seconds` (default 90) and `max_attempts` (default 2).
+- DiscoRAG structurer calls use bounded attempts controlled by `DiscoRAGStructurerRuntimeConfig.timeout_seconds` (default 90) and `max_attempts` (default 2), wired through providers.
+- Structurer calls pass `max_retries=0` to `DeepSeekChatCompletionsClient`, ensuring one structurer attempt equals one SDK request.
 - Validation failures are repaired by asking the same structurer model to regenerate a complete JSON object using multi-turn context and a short validation feedback turn (`build_validation_repair_messages` in [structurer_retry.py](structurer_retry.py)).
 - Timeout retries start a fresh original attempt (reset `repair_messages = None`).
-- `StructurerAttemptState` tracks attempt counts, repair counts, and timeout counts per stage.
+- `StructurerAttemptState` tracks attempts, failure type, and failure summaries per stage.
+- Exhausted attempts raise `StructurerAttemptsExhaustedError` (extends `ProcessingError`) with structured `stage`, `failure_type`, `attempts`, `max_attempts`, `message`, and `safe_metadata()`.
+- Plain `ProcessingError` inside an attempt triggers repair when attempts remain.
 - `is_timeout_error()` classifies exceptions by class name and message content.
+- RST extraction rejects missing, duplicate, and unknown chunk structures; incomplete LLM output triggers validation repair.
 - Parsers remain strict; runtime services do not patch invalid structure.
 
 Invariant:
-- Each builder loop raises `ProcessingError` with an `"failed after N attempts"` message when all attempts are exhausted.
+- One structurer attempt = one SDK request (no hidden transport retries).
+- Exhausted attempts raise `StructurerAttemptsExhaustedError`; the caller decides fallback policy.
+- Plain `ProcessingError` from parser validation triggers repair when attempts remain, exhaustion when budget is spent.
 - Validation repair uses `complete_messages_json()` (multi-turn); fresh attempts use `complete_json()` (single-turn).
-- Builders do not fall back to deterministic output on exhaustion; the caller decides fallback policy.
+- Builders do not fall back to deterministic output on exhaustion.
+- Provider wiring forwards `timeout_seconds` and `max_attempts` from `DiscoRAGStructurerRuntimeConfig` to all three structurer constructors.
+
+Forbidden stale interpretations:
+- Do not re-enable low-level DeepSeek retry for structurer calls.
+- Do not catch `StructurerAttemptsExhaustedError` as a generic `ProcessingError` in application services; use the specific type.
 
 Verification:
 - [tests/unit/infrastructure/test_structurer_retry.py](../../../../tests/unit/infrastructure/test_structurer_retry.py)
 - [tests/unit/infrastructure/test_llm_inter_chunk_graph_builder.py](../../../../tests/unit/infrastructure/test_llm_inter_chunk_graph_builder.py)
 - [tests/unit/infrastructure/test_llm_discorag_blueprint_builder.py](../../../../tests/unit/infrastructure/test_llm_discorag_blueprint_builder.py)
 - [tests/unit/infrastructure/test_deepseek_discourse_extractor.py](../../../../tests/unit/infrastructure/test_deepseek_discourse_extractor.py)
+- [tests/unit/api/test_providers.py](../../../../tests/unit/api/test_providers.py)
 
 ## LLM Inter-Chunk Discourse Graph Contract
 
