@@ -57,7 +57,10 @@ from ragflow_lite.infrastructure.evidence import (
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
 )
-from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
+from ragflow_lite.infrastructure.retrievers import (
+    DeepSeekChatQueryGrounder,
+    DeepSeekCoTGroundingRewriter,
+)
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
     ChunkHybridRetrievalConfig,
 )
@@ -188,6 +191,12 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
+    cot_grounding_rewriter = DeepSeekCoTGroundingRewriter(
+        api_key=deepseek_runtime_config.api_key,
+        base_url=deepseek_runtime_config.base_url,
+        model=deepseek_runtime_config.model,
+        reasoning_effort=deepseek_runtime_config.reasoning_effort,
+    )
     # 本地 JSON 图证据索引：仅用于拓扑路径扩展
     local_graph_evidence_index = LocalJsonGraphEvidenceIndex(
         evidence_dir=graph_evidence_dir,
@@ -202,6 +211,7 @@ def build_services(settings: Settings) -> AppServices:
         path_expander=local_graph_evidence_index,
         chunk_lookup=vector_index,
         chunk_auxiliary_retriever=chunk_auxiliary_retriever,
+        cot_grounding_rewriter=cot_grounding_rewriter,
         mini_internal_candidate_n=settings.mini_internal_candidate_n,
         query_entity_limit=settings.query_entity_limit,
     )

@@ -41,7 +41,9 @@ from ragflow_lite.infrastructure.evidence import (
     LLMInterChunkDiscourseGraphBuilder,
     LocalJsonGraphEvidenceIndex,
 )
-from ragflow_lite.infrastructure.retrievers import DeepSeekChatQueryGrounder
+from ragflow_lite.infrastructure.retrievers import (
+    DeepSeekChatQueryGrounder,
+)
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -454,7 +456,9 @@ def test_infrastructure_exports_current_runtime_components() -> None:
     ]
     assert retrievers_module.__all__ == [
         "DeepSeekChatQueryGrounder",
+        "DeepSeekCoTGroundingRewriter",
         "InfinityHybridRetriever",
+        "OpenAIResponsesCoTGroundingRewriter",
         "OpenAIResponsesQueryGrounder",
     ]
     assert not hasattr(infrastructure, "VectorRetriever")
@@ -822,3 +826,26 @@ def test_chunk_and_graph_candidate_configs_are_separate(tmp_path: Path) -> None:
     assert isinstance(graph_index, InfinityGraphCandidateIndex)
     assert vector_index._chunk_hybrid_config.initial_recall_n == 77
     assert graph_index._config.graph_initial_recall_n == 88
+
+
+def test_build_services_wires_cot_grounding_rewriter_non_live(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragflow_lite.api.deps import providers as providers_module
+
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        providers_module,
+        "DeepSeekCoTGroundingRewriter",
+        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+    )
+    settings = _build_settings(tmp_path)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-model")
+
+    services = build_services(settings)
+
+    assert services.retriever.cot_grounding_rewriter is not None
+    assert services.retriever.cot_grounding_rewriter.model == settings.deepseek_model

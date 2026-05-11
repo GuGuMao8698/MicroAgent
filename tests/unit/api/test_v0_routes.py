@@ -155,3 +155,13 @@ class TestQueryRouteTopN:
             mock_router.query.assert_called_once_with("test query", 6, mode="standard")
         finally:
             app.dependency_overrides.pop(get_query_router, None)
+
+
+def test_query_request_does_not_expose_retrieval_rewrite_strategy() -> None:
+    from ragflow_lite.api.schemas.v0 import QueryRequest
+
+    fields = set(QueryRequest.model_fields)
+
+    assert "rewrite_strategy" not in fields
+    assert "retrieval_rewrite" not in fields
+    assert "cot_grounding" not in fields
