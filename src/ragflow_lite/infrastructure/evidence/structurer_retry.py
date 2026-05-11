@@ -64,16 +64,6 @@ class StructurerAttemptState:
     def record_success_attempt(self) -> None:
         self.attempts += 1
 
-    def safe_metadata(self) -> dict[str, object]:
-        metadata: dict[str, object] = {
-            "structurer_attempts": self.attempts,
-            "structurer_repair_count": self.repair_count,
-            "structurer_timeout_count": self.timeout_count,
-        }
-        if self.last_failure_type is not None:
-            metadata["structurer_last_failure_type"] = self.last_failure_type
-        return metadata
-
     def exhausted_error(self) -> StructurerAttemptsExhaustedError:
         failure_type = self.last_failure_type or "validation_error"
         message = self.failure_summaries[-1] if self.failure_summaries else "unknown"

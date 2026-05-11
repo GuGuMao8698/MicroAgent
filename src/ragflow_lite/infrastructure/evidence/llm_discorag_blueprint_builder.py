@@ -158,7 +158,6 @@ class LLMDiscoRAGAnswerBlueprintBuilder:
         answer_items, supplemental_items = _classify_items(items)
         answer_chunk_ids = [it.canonical_chunk_id for it in answer_items]
         supplemental_chunk_ids = [it.canonical_chunk_id for it in supplemental_items]
-        all_items = _dedupe_items(answer_items + supplemental_items)
 
         # 2. Derive top_k from source_selection metadata
         top_k = _resolve_top_k(package)
@@ -284,18 +283,6 @@ def _classify_items(
         ):
             supplemental.append(item)
     return answer, supplemental
-
-
-def _dedupe_items(items: list[EvidenceItem]) -> list[EvidenceItem]:
-    """Deduplicate items by canonical_chunk_id, keeping first occurrence."""
-    seen: set[str] = set()
-    result: list[EvidenceItem] = []
-    for item in items:
-        if item.canonical_chunk_id in seen:
-            continue
-        seen.add(item.canonical_chunk_id)
-        result.append(item)
-    return result
 
 
 def _resolve_top_k(package: IntraChunkDiscoursePackage) -> int:

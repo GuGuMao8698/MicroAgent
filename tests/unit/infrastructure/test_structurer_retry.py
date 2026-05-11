@@ -51,22 +51,6 @@ def test_structurer_attempt_state_records_success() -> None:
     assert state.repair_count == 1
 
 
-def test_structurer_attempt_state_safe_metadata() -> None:
-    state = StructurerAttemptState(stage="blueprint", max_attempts=2)
-    state.record_failure("validation_error", "bad role")
-    metadata = state.safe_metadata()
-    assert metadata["structurer_attempts"] == 1
-    assert metadata["structurer_repair_count"] == 1
-    assert metadata["structurer_timeout_count"] == 0
-    assert metadata["structurer_last_failure_type"] == "validation_error"
-
-
-def test_structurer_attempt_state_safe_metadata_no_failure() -> None:
-    state = StructurerAttemptState(stage="graph", max_attempts=2)
-    metadata = state.safe_metadata()
-    assert "structurer_last_failure_type" not in metadata
-
-
 def test_is_timeout_error_recognizes_timeout() -> None:
     assert is_timeout_error(TimeoutError("timed out")) is True
     assert is_timeout_error(Exception("request timed out")) is True
