@@ -1564,6 +1564,29 @@ def test_discorag_query_service_fallback_metadata_identifies_graph_stage() -> No
     assert result.metadata["discorag_error"]["user_visible"] is True
 
 
+def test_discorag_query_service_records_success_for_minirag_fallback(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes: list[str] = []
+    monkeypatch.setattr(discorag_module, "record_query_outcome", outcomes.append)
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=_ExhaustedBlueprintBuilder(),
+        answerer=RecordingAnswerer(),
+    )
+
+    with caplog.at_level(logging.INFO, logger=QUERY_LOGGER):
+        result = service.query("q", top_k=1)
+
+    assert result.metadata["discorag_degraded"] is True
+    assert "query_succeeded" in _event_names(caplog)
+    assert outcomes == ["succeeded"]
+
+
 def test_discorag_query_service_fallback_metadata_uses_structured_error() -> None:
     service = DiscoRAGQueryService(
         retriever=FakeTopologyRetriever(),

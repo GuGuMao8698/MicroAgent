@@ -259,6 +259,7 @@ class DiscoRAGQueryService:
             except StructurerAttemptsExhaustedError as exc:
                 return self._answer_with_minirag_fallback(
                     query=query,
+                    top_k=top_k,
                     retrieval_result=retrieval_result,
                     exc=exc,
                 )
@@ -270,6 +271,7 @@ class DiscoRAGQueryService:
             except StructurerAttemptsExhaustedError as exc:
                 return self._answer_with_minirag_fallback(
                     query=query,
+                    top_k=top_k,
                     retrieval_result=retrieval_result,
                     exc=exc,
                 )
@@ -282,6 +284,7 @@ class DiscoRAGQueryService:
             except StructurerAttemptsExhaustedError as exc:
                 return self._answer_with_minirag_fallback(
                     query=query,
+                    top_k=top_k,
                     retrieval_result=retrieval_result,
                     exc=exc,
                 )
@@ -305,16 +308,7 @@ class DiscoRAGQueryService:
                     },
                 )
             )
-            log_query_event(
-                logger,
-                logging.INFO,
-                "query_succeeded",
-                query,
-                top_k,
-                outcome="succeeded",
-                context_count=len(result.contexts),
-            )
-            record_query_outcome("succeeded")
+            self._record_success(query, top_k, result)
             return result
         except RagflowLiteError as exc:
             log_query_event(
@@ -345,6 +339,7 @@ class DiscoRAGQueryService:
         self,
         *,
         query: str,
+        top_k: int,
         retrieval_result: TopologyRetrievalResult,
         exc: StructurerAttemptsExhaustedError,
     ) -> AnswerResult:
@@ -362,4 +357,18 @@ class DiscoRAGQueryService:
             )
         )
         result.metadata.update(metadata)
+        self._record_success(query, top_k, result)
         return result
+
+    def _record_success(self, query: str, top_k: int, result: AnswerResult) -> None:
+        log_query_event(
+            logger,
+            logging.INFO,
+            "query_succeeded",
+            query,
+            top_k,
+            outcome="succeeded",
+            context_count=len(result.contexts),
+            degraded=result.metadata.get("discorag_degraded") is True,
+        )
+        record_query_outcome("succeeded")
