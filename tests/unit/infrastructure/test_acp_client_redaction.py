@@ -66,7 +66,10 @@ def test_redact_acp_event_removes_backend_only_fields() -> None:
         ("claude-code failed", "MicroRAG agent runtime failed."),
         ("see /tmp/runtime/session.jsonl", "MicroRAG agent runtime failed."),
         ("transcript_path missing", "MicroRAG agent runtime failed."),
+        (r"windows runtime path C:\agent\session.jsonl", "MicroRAG agent runtime failed."),
         ("plain failure", "plain failure"),
+        ("progress 1/2 complete", "progress 1/2 complete"),
+        (r"ratio a\b mismatch", r"ratio a\b mismatch"),
     ],
 )
 def test_redact_acp_error_rewrites_backend_runtime_details(

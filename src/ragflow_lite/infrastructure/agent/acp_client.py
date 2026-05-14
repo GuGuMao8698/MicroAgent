@@ -23,8 +23,12 @@ _SENSITIVE_ERROR_MARKERS = (
     "claude-code",
     "transcript",
     "transcript_path",
-    "/",
-    "\\",
+    "/tmp/",
+    ".jsonl",
+    "runtime path",
+    "cwd=",
+    "cwd:",
+    r":\\",
 )
 
 
