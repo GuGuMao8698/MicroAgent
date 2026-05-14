@@ -54,7 +54,9 @@ def redact_acp_event(event: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def redact_acp_error(message: str) -> str:
+def redact_acp_error(message: str, *, raw_runtime: bool = False) -> str:
+    if raw_runtime:
+        return "MicroRAG agent runtime failed."
     lowered = message.lower()
     for marker in _SENSITIVE_ERROR_MARKERS:
         if marker.lower() in lowered:
@@ -86,11 +88,14 @@ class AcpClient:
         self._next_id = 1
 
     def start(self) -> None:
-        self._process = self._process_factory(
-            self._config.command,
-            self._config.args,
-            self._config.cwd,
-        )
+        try:
+            self._process = self._process_factory(
+                self._config.command,
+                self._config.args,
+                self._config.cwd,
+            )
+        except Exception as exc:
+            raise RuntimeError(redact_acp_error("", raw_runtime=True)) from exc
 
     def initialize(self) -> dict[str, Any]:
         return self._request("initialize", {})
@@ -131,7 +136,9 @@ class AcpClient:
         response = json.loads(line)
         error = response.get("error")
         if isinstance(error, Mapping):
-            raise RuntimeError(redact_acp_error(str(error.get("message", "ACP request failed."))))
+            raise RuntimeError(
+                redact_acp_error(str(error.get("message", "ACP request failed.")), raw_runtime=True)
+            )
 
         result = response.get("result", {})
         if not isinstance(result, Mapping):

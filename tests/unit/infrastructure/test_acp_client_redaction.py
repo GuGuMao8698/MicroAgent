@@ -183,3 +183,46 @@ def test_request_raises_redacted_runtime_error() -> None:
 
     with pytest.raises(RuntimeError, match="MicroRAG agent runtime failed\\."):
         client.initialize()
+
+
+def test_request_hides_plain_runtime_error_message() -> None:
+    client, _process = _build_client(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {
+                        "message": "plain failure",
+                    },
+                }
+            )
+            + "\n"
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="MicroRAG agent runtime failed\\.") as exc_info:
+        client.initialize()
+
+    assert "plain failure" not in str(exc_info.value)
+
+
+def test_start_hides_process_factory_command_and_cwd_details() -> None:
+    config = AcpRuntimeConfig(
+        command="missing-acp-agent",
+        args=["--stdio"],
+        cwd="/definitely/missing/cwd",
+    )
+    client = AcpClient(
+        config=config,
+        process_factory=lambda command, args, cwd: (_ for _ in ()).throw(
+            FileNotFoundError(f"{command} failed in {cwd}")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="MicroRAG agent runtime failed\\.") as exc_info:
+        client.start()
+
+    message = str(exc_info.value)
+    assert "missing-acp-agent" not in message
+    assert "/definitely/missing/cwd" not in message
