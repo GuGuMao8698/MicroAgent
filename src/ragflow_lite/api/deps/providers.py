@@ -32,6 +32,7 @@ from ragflow_lite.domain.ports.interfaces import (
     IngestionTaskStore,
     Retriever,
 )
+from ragflow_lite.infrastructure.agent import AgentSessionStore
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     BackgroundTaskRunner,
@@ -71,6 +72,7 @@ class AppServices:
     """集中保存应用启动后可复用的核心服务对象。"""
 
     settings: Settings
+    agent_session_store: AgentSessionStore
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
@@ -126,6 +128,9 @@ def build_services(settings: Settings) -> AppServices:
     )
 
     document_store = LocalDocumentStore(settings.uploads_dir, settings.temp_dir)
+    agent_session_store = AgentSessionStore(
+        settings.local_index_dir / "agent_sessions.sqlite3"
+    )
     parser = CompositeParser()
     chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
@@ -269,6 +274,7 @@ def build_services(settings: Settings) -> AppServices:
 
     return AppServices(
         settings=settings,
+        agent_session_store=agent_session_store,
         ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=query_service,
