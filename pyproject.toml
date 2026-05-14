@@ -29,6 +29,9 @@ dev = [
     "ruff>=0.15,<0.16",
 ]
 
+[project.scripts]
+mcrag = "ragflow_lite.cli.mcrag:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
