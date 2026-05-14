@@ -102,6 +102,25 @@ def test_query_orchestrates_retrieve_then_answer() -> None:
     )
 
 
+def test_build_answer_request_returns_standard_request_without_calling_answerer() -> (
+    None
+):
+    chunks = [_chunk("a"), _chunk("b")]
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeRetriever(results=chunks),
+        answerer=answerer,
+    )
+
+    request = service.build_answer_request("q", top_k=5)
+
+    assert request == AnswerRequest(
+        query="q",
+        contexts=chunks,
+    )
+    assert answerer.last_request is None
+
+
 def test_query_preserves_retrieval_rewrite_metadata_from_topology_retriever() -> None:
     chunks = [_chunk("a")]
     answerer = FakeAnswerer(answer_text="yes")
@@ -132,6 +151,41 @@ def test_query_preserves_retrieval_rewrite_metadata_from_topology_retriever() ->
             }
         },
     )
+
+
+def test_build_answer_request_preserves_retrieval_rewrite_metadata_from_topology_retriever() -> (
+    None
+):
+    chunks = [_chunk("a")]
+    answerer = FakeAnswerer(answer_text="yes")
+    service = QueryService(
+        retriever=FakeTopologyRetriever(
+            results=chunks,
+            retrieval_metadata={
+                "retrieval_rewrite": {
+                    "enabled": True,
+                    "triggered": True,
+                    "status": "degraded",
+                }
+            },
+        ),
+        answerer=answerer,
+    )
+
+    request = service.build_answer_request("q", top_k=5)
+
+    assert request == AnswerRequest(
+        query="q",
+        contexts=chunks,
+        metadata={
+            "retrieval_rewrite": {
+                "enabled": True,
+                "triggered": True,
+                "status": "degraded",
+            }
+        },
+    )
+    assert answerer.last_request is None
 
 
 def test_query_passes_through_ragflow_lite_error() -> None:

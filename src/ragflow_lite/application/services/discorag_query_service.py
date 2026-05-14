@@ -245,6 +245,10 @@ class DiscoRAGQueryService:
         self.blueprint_builder = blueprint_builder
         self.answerer = answerer
 
+    def build_answer_request(self, query: str, top_k: int) -> AnswerRequest:
+        retrieval_result = self.retriever.retrieve_context(query, top_k)
+        return self._build_answer_request_from_retrieval(query, retrieval_result)
+
     def query(self, query: str, top_k: int) -> AnswerResult:
         log_query_event(
             logger,
@@ -256,23 +260,10 @@ class DiscoRAGQueryService:
         )
         try:
             retrieval_result = self.retriever.retrieve_context(query, top_k)
-            evidence_package = self.evidence_package_builder.build(retrieval_result)
-
-            # Structurer stages: catch StructurerAttemptsExhaustedError and degrade to MiniRAG.
-            # Plain ProcessingError propagates to outer RagflowLiteError handler.
             try:
-                discourse_package = self.discourse_extractor.extract(evidence_package)
-            except StructurerAttemptsExhaustedError as exc:
-                return self._answer_with_minirag_fallback(
-                    query=query,
-                    top_k=top_k,
-                    retrieval_result=retrieval_result,
-                    exc=exc,
-                )
-
-            try:
-                inter_chunk_graph = self.inter_chunk_graph_builder.build(
-                    discourse_package
+                request = self._build_answer_request_from_retrieval(
+                    query,
+                    retrieval_result,
                 )
             except StructurerAttemptsExhaustedError as exc:
                 return self._answer_with_minirag_fallback(
@@ -281,42 +272,7 @@ class DiscoRAGQueryService:
                     retrieval_result=retrieval_result,
                     exc=exc,
                 )
-
-            try:
-                blueprint = self.blueprint_builder.build(
-                    discourse_package,
-                    graph=inter_chunk_graph,
-                )
-            except StructurerAttemptsExhaustedError as exc:
-                return self._answer_with_minirag_fallback(
-                    query=query,
-                    top_k=top_k,
-                    retrieval_result=retrieval_result,
-                    exc=exc,
-                )
-
-            answer_contexts = _contexts_with_bounded_promotion(
-                retrieval_result.chunks,
-                retrieval_result,
-                blueprint,
-            )
-            answer_blueprint = _blueprint_for_contexts(blueprint, answer_contexts)
-            answer_metadata: dict[str, object] = {
-                "source_selection": retrieval_result.metadata.get("source_selection"),
-            }
-            if "retrieval_rewrite" in retrieval_result.metadata:
-                answer_metadata["retrieval_rewrite"] = retrieval_result.metadata[
-                    "retrieval_rewrite"
-                ]
-            result = self.answerer.answer(
-                AnswerRequest(
-                    query=query,
-                    contexts=answer_contexts,
-                    mode="discorag",
-                    blueprint=answer_blueprint,
-                    metadata=answer_metadata,
-                )
-            )
+            result = self.answerer.answer(request)
             self._record_success(query, top_k, result)
             return result
         except RagflowLiteError as exc:
@@ -343,6 +299,39 @@ class DiscoRAGQueryService:
             )
             record_query_outcome("failed")
             raise
+
+    def _build_answer_request_from_retrieval(
+        self,
+        query: str,
+        retrieval_result: TopologyRetrievalResult,
+    ) -> AnswerRequest:
+        evidence_package = self.evidence_package_builder.build(retrieval_result)
+        discourse_package = self.discourse_extractor.extract(evidence_package)
+        inter_chunk_graph = self.inter_chunk_graph_builder.build(discourse_package)
+        blueprint = self.blueprint_builder.build(
+            discourse_package,
+            graph=inter_chunk_graph,
+        )
+        answer_contexts = _contexts_with_bounded_promotion(
+            retrieval_result.chunks,
+            retrieval_result,
+            blueprint,
+        )
+        answer_blueprint = _blueprint_for_contexts(blueprint, answer_contexts)
+        answer_metadata: dict[str, object] = {
+            "source_selection": retrieval_result.metadata.get("source_selection"),
+        }
+        if "retrieval_rewrite" in retrieval_result.metadata:
+            answer_metadata["retrieval_rewrite"] = retrieval_result.metadata[
+                "retrieval_rewrite"
+            ]
+        return AnswerRequest(
+            query=query,
+            contexts=answer_contexts,
+            mode="discorag",
+            blueprint=answer_blueprint,
+            metadata=answer_metadata,
+        )
 
     def _answer_with_minirag_fallback(
         self,

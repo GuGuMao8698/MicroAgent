@@ -325,6 +325,42 @@ def test_discorag_query_service_orchestrates_blueprint_answering() -> None:
     )
 
 
+def test_discorag_build_answer_request_returns_discorag_request_without_calling_answerer() -> (
+    None
+):
+    retriever = FakeTopologyRetriever()
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    request = service.build_answer_request(
+        "How does MiniRAG organize evidence?",
+        top_k=3,
+    )
+
+    assert retriever.calls == [("How does MiniRAG organize evidence?", 3)]
+    assert request == AnswerRequest(
+        query="How does MiniRAG organize evidence?",
+        contexts=retriever.result.chunks,
+        mode="discorag",
+        blueprint=AnswerBlueprint(
+            ordered_chunk_ids=["chunk_a"],
+            chunk_roles={"chunk_a": "context"},
+            answer_constraints=["Follow ordered_chunk_ids."],
+            plan_steps=["Start from the first ordered chunk."],
+            metadata={"status": "ok", "answer_context_chunk_ids": ["chunk_a"]},
+        ),
+        metadata={"source_selection": None},
+    )
+    assert answerer.last_request is None
+
+
 def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
     answerer = RecordingAnswerer()
     service = DiscoRAGQueryService(
@@ -1180,6 +1216,59 @@ def test_discorag_query_service_raises_when_blueprint_misses_final_context() -> 
     assert answerer.last_request is None
 
 
+def test_discorag_build_answer_request_raises_when_blueprint_misses_final_context() -> (
+    None
+):
+    answer_chunks = [
+        _chunk("chunk_a"),
+        _chunk("chunk_b"),
+    ]
+    supplemental_chunk = RetrievedChunk(
+        chunk_id="chunk_supplemental",
+        document_id="doc_alpha",
+        text="Supplemental qualifier",
+        score=0.4,
+        metadata={
+            "selected_for_answer": False,
+            "selected_for_discourse": True,
+            "supplemental_discourse": True,
+        },
+    )
+    retrieval_result = _retrieval_result(chunks=answer_chunks)
+    retrieval_result.metadata["supplemental_discourse_chunks"] = {
+        "chunk_supplemental": supplemental_chunk
+    }
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk_a"],
+        chunk_roles={"chunk_a": "lead", "chunk_supplemental": "context"},
+        answer_constraints=[],
+        plan_steps=[],
+        metadata={
+            "promotions": [
+                {
+                    "replace_chunk_id": "chunk_b",
+                    "with_chunk_id": "chunk_supplemental",
+                    "reason": "supplemental replaces chunk_b",
+                }
+            ],
+        },
+    )
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=RecordingBlueprintBuilder(blueprint=blueprint),
+        answerer=answerer,
+    )
+
+    with pytest.raises(ProcessingError, match="missing final context ids"):
+        service.build_answer_request("How does MiniRAG organize evidence?", top_k=2)
+
+    assert answerer.last_request is None
+
+
 def test_discorag_query_service_raises_when_promotion_metadata_is_stale() -> None:
     answer_chunks = [
         _chunk("chunk_a"),
@@ -1687,3 +1776,23 @@ def test_discorag_query_service_fallback_preserves_retrieval_rewrite_metadata() 
         "status": "failed",
         "fallback_source": "initial_candidate_snapshot",
     }
+
+
+def test_discorag_query_service_fallback_reuses_single_retrieval_result() -> None:
+    retriever = FakeTopologyRetriever()
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=retriever,
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=_ExhaustedBlueprintBuilder(),
+        answerer=answerer,
+    )
+
+    result = service.query("How does MiniRAG organize evidence?", top_k=2)
+
+    assert retriever.calls == [("How does MiniRAG organize evidence?", 2)]
+    assert answerer.last_request is not None
+    assert answerer.last_request.mode == "standard"
+    assert result.metadata["answer_mode"] == "minirag_fallback"
