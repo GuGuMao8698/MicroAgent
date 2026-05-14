@@ -7,9 +7,13 @@ from ragflow_lite.infrastructure.answerers import FALLBACK_ANSWER
 from ragflow_lite.infrastructure.answerers.deepseek_chat import DeepSeekChatAnswerer
 
 
-def test_deepseek_answerer_includes_retrieval_rewrite_notice() -> None:
+def test_deepseek_answerer_excludes_retrieval_rewrite_notice_from_prompt() -> None:
     client = _FakeDeepSeekClient("Evidence is still limited.")
     answerer = DeepSeekChatAnswerer(client=client, instructions="Answer.")
+    retrieval_rewrite = {
+        "answer_notice_required": True,
+        "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
+    }
     request = AnswerRequest(
         query="ambiguous question",
         contexts=[
@@ -22,25 +26,17 @@ def test_deepseek_answerer_includes_retrieval_rewrite_notice() -> None:
             )
         ],
         mode="discorag",
-        metadata={
-            "retrieval_rewrite": {
-                "answer_notice_required": True,
-                "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
-            }
-        },
+        metadata={"retrieval_rewrite": retrieval_rewrite},
     )
 
-    answerer.answer(request)
+    result = answerer.answer(request)
 
     sent_input = client.calls[0]["input_text"]
-    assert (
-        "Retrieval rewrite notice:\n"
-        "- Retrieval rewrite already ran, but the available evidence still appears insufficient.\n"
-        "- Likely causes include missing relevant documents in the knowledge base or a query that is still too ambiguous.\n"
-        "- Tell the user that they may need to rephrase the query or add the needed documents.\n"
-        "\n"
-        "Contexts:"
-    ) in sent_input
+    assert "Retrieval rewrite notice:" not in sent_input
+    assert "Retrieval rewrite already ran" not in sent_input
+    assert "Contexts:" in sent_input
+    assert result.metadata["retrieval_rewrite"] == retrieval_rewrite
+    assert request.metadata == {"retrieval_rewrite": retrieval_rewrite}
 
 
 class _FakeDeepSeekClient:
@@ -108,28 +104,45 @@ def test_deepseek_answerer_cleans_citations_and_records_metadata() -> None:
     assert result.metadata["reasoning_effort"] == "high"
 
 
-def test_deepseek_answerer_orders_contexts_by_score() -> None:
+def test_deepseek_answerer_orders_standard_contexts_in_u_shaped_order() -> None:
     client = _FakeDeepSeekClient("回答")
     answerer = DeepSeekChatAnswerer(
         model="deepseek-v4-flash",
         reasoning_effort="high",
         client=client,
     )
-    low = _chunk("low", 0.2)
-    high = _chunk("high", 0.9)
+    contexts = [
+        _chunk("2", 0.8),
+        _chunk("4", 0.6),
+        _chunk("1", 0.9),
+        _chunk("3", 0.7),
+    ]
 
-    result = answerer.answer(_request([low, high]))
+    result = answerer.answer(_request(contexts))
 
-    assert result.contexts == [high, low]
-    assert client.calls[0]["input_text"].index("chunk-high") < client.calls[0][
+    assert [chunk.chunk_id for chunk in result.contexts] == [
+        "chunk-1",
+        "chunk-3",
+        "chunk-4",
+        "chunk-2",
+    ]
+    assert client.calls[0]["input_text"].index("chunk-1") < client.calls[0][
         "input_text"
-    ].index("chunk-low")
+    ].index("chunk-3")
+    assert client.calls[0]["input_text"].index("chunk-3") < client.calls[0][
+        "input_text"
+    ].index("chunk-4")
+    assert client.calls[0]["input_text"].index("chunk-4") < client.calls[0][
+        "input_text"
+    ].index("chunk-2")
 
 
 # -- blueprint fallback --
 
 
-def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
+def test_deepseek_answerer_discorag_uses_score_desc_order_after_blueprint_validation() -> (
+    None
+):
     client = _FakeDeepSeekClient("回答")
     answerer = DeepSeekChatAnswerer(
         model="deepseek-v4-flash",
@@ -149,9 +162,9 @@ def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> Non
         _request([low, high], mode="discorag", blueprint=blueprint)
     )
 
-    assert result.contexts == [low, high]
+    assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is True
+    assert result.metadata["blueprint_validated"] is True
 
 
 def test_deepseek_answerer_prompt_includes_blueprint_section_when_present() -> None:
@@ -173,10 +186,43 @@ def test_deepseek_answerer_prompt_includes_blueprint_section_when_present() -> N
 
     call_input = client.calls[0]["input_text"]
     assert "Blueprint:" in call_input
-    assert "ordered_chunk_ids: chunk-b, chunk-a" in call_input
     assert "chunk_roles: chunk-b=thesis; chunk-a=qualifier" in call_input
     assert "answer_constraints: Mention the qualifier." in call_input
     assert "plan_steps: Open with the thesis. | Add the qualifier second." in call_input
+    assert "ordered_chunk_ids: chunk-b, chunk-a" in call_input
+    assert call_input.index("chunk_roles: chunk-b=thesis; chunk-a=qualifier") < call_input.index(
+        "answer_constraints: Mention the qualifier."
+    )
+    assert call_input.index("answer_constraints: Mention the qualifier.") < call_input.index(
+        "plan_steps: Open with the thesis. | Add the qualifier second."
+    )
+    assert call_input.index(
+        "plan_steps: Open with the thesis. | Add the qualifier second."
+    ) < call_input.index("ordered_chunk_ids: chunk-b, chunk-a")
+
+
+def test_deepseek_answerer_prompt_orders_sections_question_then_contexts_then_blueprint() -> (
+    None
+):
+    client = _FakeDeepSeekClient("回答")
+    answerer = DeepSeekChatAnswerer(
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        client=client,
+    )
+    contexts = [_chunk("a", 0.9), _chunk("b", 0.4)]
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-b", "chunk-a"],
+        chunk_roles={"chunk-b": "thesis", "chunk-a": "qualifier"},
+        answer_constraints=["Mention the qualifier."],
+        plan_steps=["Open with the thesis.", "Add the qualifier second."],
+    )
+
+    answerer.answer(_request(contexts, mode="discorag", blueprint=blueprint))
+
+    call_input = client.calls[0]["input_text"]
+    assert call_input.index("Question:") < call_input.index("Contexts:")
+    assert call_input.index("Contexts:") < call_input.index("Blueprint:")
 
 
 def test_deepseek_answerer_discorag_without_blueprint_falls_back_to_score_order() -> (
@@ -195,7 +241,7 @@ def test_deepseek_answerer_discorag_without_blueprint_falls_back_to_score_order(
 
     assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "missing_blueprint"
 
 
@@ -220,31 +266,42 @@ def test_deepseek_answerer_invalid_blueprint_falls_back_to_score_order() -> None
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
-def test_deepseek_answerer_standard_mode_ignores_blueprint() -> None:
+def test_deepseek_answerer_standard_mode_ignores_blueprint_and_uses_standard_order() -> (
+    None
+):
     client = _FakeDeepSeekClient("回答")
     answerer = DeepSeekChatAnswerer(
         model="deepseek-v4-flash",
         reasoning_effort="high",
         client=client,
     )
-    low = _chunk("low", 0.2)
-    high = _chunk("high", 0.9)
+    contexts = [
+        _chunk("2", 0.8),
+        _chunk("4", 0.6),
+        _chunk("1", 0.9),
+        _chunk("3", 0.7),
+    ]
     blueprint = AnswerBlueprint(
-        ordered_chunk_ids=["chunk-low", "chunk-high"],
-        chunk_roles={"chunk-low": "thesis", "chunk-high": "support"},
+        ordered_chunk_ids=["chunk-2", "chunk-1", "chunk-4", "chunk-3"],
+        chunk_roles={"chunk-2": "thesis", "chunk-1": "support"},
         answer_constraints=["Follow ordered_chunk_ids."],
         plan_steps=["State the thesis first."],
     )
 
-    result = answerer.answer(_request([low, high], blueprint=blueprint))
+    result = answerer.answer(_request(contexts, blueprint=blueprint))
 
-    assert result.contexts == [high, low]
+    assert [chunk.chunk_id for chunk in result.contexts] == [
+        "chunk-1",
+        "chunk-3",
+        "chunk-4",
+        "chunk-2",
+    ]
     assert result.metadata["answer_mode"] == "standard"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert "blueprint_fallback_reason" not in result.metadata
 
 
@@ -270,7 +327,7 @@ def test_deepseek_answerer_partially_invalid_blueprint_falls_back() -> None:
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
@@ -295,5 +352,5 @@ def test_deepseek_answerer_incomplete_blueprint_falls_back() -> None:
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"

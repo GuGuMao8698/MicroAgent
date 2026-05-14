@@ -156,7 +156,7 @@ def test_answer_returns_fallback_without_calling_openai_when_contexts_are_empty(
     assert result.metadata == {
         "strategy": "fallback",
         "answer_mode": "standard",
-        "blueprint_applied": False,
+        "blueprint_validated": False,
     }
     assert client.responses.calls == []
 
@@ -164,27 +164,42 @@ def test_answer_returns_fallback_without_calling_openai_when_contexts_are_empty(
 # -- 排序与返回顺序 --
 
 
-def test_answer_returns_contexts_sorted_by_score_descending() -> None:
+def test_answer_returns_standard_contexts_in_u_shaped_order() -> None:
     client = FakeOpenAIClient(output_text="回答")
     answerer = _build_answerer(client)
-    low = _make_chunk("low", 0.2)
-    high = _make_chunk("high", 0.9)
+    contexts = [
+        _make_chunk("2", 0.8),
+        _make_chunk("4", 0.6),
+        _make_chunk("1", 0.9),
+        _make_chunk("3", 0.7),
+    ]
 
-    result = answerer.answer(_make_request([low, high]))
+    result = answerer.answer(_make_request(contexts))
 
-    assert result.contexts == [high, low]
+    assert [chunk.chunk_id for chunk in result.contexts] == [
+        "chunk-1",
+        "chunk-3",
+        "chunk-4",
+        "chunk-2",
+    ]
 
 
-def test_answer_prompt_contexts_are_numbered_by_score_order() -> None:
+def test_answer_prompt_contexts_are_numbered_by_standard_u_shaped_order() -> None:
     client = FakeOpenAIClient(output_text="回答")
     answerer = _build_answerer(client)
-    low = _make_chunk("low", 0.2)
-    high = _make_chunk("high", 0.9)
+    contexts = [
+        _make_chunk("2", 0.8),
+        _make_chunk("4", 0.6),
+        _make_chunk("1", 0.9),
+        _make_chunk("3", 0.7),
+    ]
 
-    answerer.answer(_make_request([low, high]))
+    answerer.answer(_make_request(contexts))
 
     call_input = client.responses.calls[0]["input"]
-    assert call_input.index("chunk-high") < call_input.index("chunk-low")
+    assert call_input.index("chunk-1") < call_input.index("chunk-3")
+    assert call_input.index("chunk-3") < call_input.index("chunk-4")
+    assert call_input.index("chunk-4") < call_input.index("chunk-2")
 
 
 # -- citation 清洗 --
@@ -288,7 +303,7 @@ def test_answer_calls_responses_api_with_expected_parameters() -> None:
         "reasoning_effort": "medium",
         "store": False,
         "answer_mode": "standard",
-        "blueprint_applied": False,
+        "blueprint_validated": False,
     }
 
     assert len(client.responses.calls) == 1
@@ -415,7 +430,9 @@ def test_build_input_omits_page_info_when_absent() -> None:
     assert "pages:" not in result
 
 
-def test_answer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
+def test_answer_discorag_mode_keeps_score_desc_order_after_blueprint_validation() -> (
+    None
+):
     client = FakeOpenAIClient(output_text="回答")
     answerer = _build_answerer(client)
     low = _make_chunk("low", 0.2)
@@ -431,9 +448,9 @@ def test_answer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
         _make_request([low, high], mode="discorag", blueprint=blueprint)
     )
 
-    assert result.contexts == [low, high]
+    assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is True
+    assert result.metadata["blueprint_validated"] is True
 
 
 def test_answer_prompt_includes_blueprint_section_when_present() -> None:
@@ -451,10 +468,37 @@ def test_answer_prompt_includes_blueprint_section_when_present() -> None:
 
     call_input = client.responses.calls[0]["input"]
     assert "Blueprint:" in call_input
-    assert "ordered_chunk_ids: chunk-b, chunk-a" in call_input
     assert "chunk_roles: chunk-b=thesis; chunk-a=qualifier" in call_input
     assert "answer_constraints: Mention the qualifier." in call_input
     assert "plan_steps: Open with the thesis. | Add the qualifier second." in call_input
+    assert "ordered_chunk_ids: chunk-b, chunk-a" in call_input
+    assert call_input.index("chunk_roles: chunk-b=thesis; chunk-a=qualifier") < call_input.index(
+        "answer_constraints: Mention the qualifier."
+    )
+    assert call_input.index("answer_constraints: Mention the qualifier.") < call_input.index(
+        "plan_steps: Open with the thesis. | Add the qualifier second."
+    )
+    assert call_input.index(
+        "plan_steps: Open with the thesis. | Add the qualifier second."
+    ) < call_input.index("ordered_chunk_ids: chunk-b, chunk-a")
+
+
+def test_answer_prompt_orders_sections_question_then_contexts_then_blueprint() -> None:
+    client = FakeOpenAIClient(output_text="回答")
+    answerer = _build_answerer(client)
+    contexts = [_make_chunk("a", 0.9), _make_chunk("b", 0.4)]
+    blueprint = AnswerBlueprint(
+        ordered_chunk_ids=["chunk-b", "chunk-a"],
+        chunk_roles={"chunk-b": "thesis", "chunk-a": "qualifier"},
+        answer_constraints=["Mention the qualifier."],
+        plan_steps=["Open with the thesis.", "Add the qualifier second."],
+    )
+
+    answerer.answer(_make_request(contexts, mode="discorag", blueprint=blueprint))
+
+    call_input = client.responses.calls[0]["input"]
+    assert call_input.index("Question:") < call_input.index("Contexts:")
+    assert call_input.index("Contexts:") < call_input.index("Blueprint:")
 
 
 def test_answer_discorag_mode_without_blueprint_falls_back_to_score_order() -> None:
@@ -467,7 +511,7 @@ def test_answer_discorag_mode_without_blueprint_falls_back_to_score_order() -> N
 
     assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "missing_blueprint"
 
 
@@ -488,7 +532,7 @@ def test_answer_invalid_blueprint_falls_back_to_score_order() -> None:
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
@@ -510,7 +554,7 @@ def test_answer_partially_invalid_blueprint_falls_back() -> None:
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
@@ -531,31 +575,40 @@ def test_answer_incomplete_blueprint_falls_back() -> None:
     )
 
     assert result.contexts == [high, low]
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
-def test_answer_standard_mode_ignores_blueprint_and_uses_score_order() -> None:
+def test_answer_standard_mode_ignores_blueprint_and_uses_standard_order() -> None:
     client = FakeOpenAIClient(output_text="回答")
     answerer = _build_answerer(client)
-    low = _make_chunk("low", 0.2)
-    high = _make_chunk("high", 0.9)
+    contexts = [
+        _make_chunk("2", 0.8),
+        _make_chunk("4", 0.6),
+        _make_chunk("1", 0.9),
+        _make_chunk("3", 0.7),
+    ]
     blueprint = AnswerBlueprint(
-        ordered_chunk_ids=["chunk-low", "chunk-high"],
-        chunk_roles={"chunk-low": "thesis", "chunk-high": "support"},
+        ordered_chunk_ids=["chunk-2", "chunk-1", "chunk-4", "chunk-3"],
+        chunk_roles={"chunk-2": "thesis", "chunk-1": "support"},
         answer_constraints=["Follow ordered_chunk_ids."],
         plan_steps=["State the thesis first."],
     )
 
-    result = answerer.answer(_make_request([low, high], blueprint=blueprint))
+    result = answerer.answer(_make_request(contexts, blueprint=blueprint))
 
-    assert result.contexts == [high, low]
+    assert [chunk.chunk_id for chunk in result.contexts] == [
+        "chunk-1",
+        "chunk-3",
+        "chunk-4",
+        "chunk-2",
+    ]
     assert result.metadata["answer_mode"] == "standard"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert "blueprint_fallback_reason" not in result.metadata
 
 
-def test_openai_answerer_includes_retrieval_rewrite_notice() -> None:
+def test_openai_answerer_excludes_retrieval_rewrite_notice_from_prompt() -> None:
     client = FakeOpenAIClient("Evidence is still limited.")
     answerer = OpenAIResponsesAnswerer(
         api_key="test-key",
@@ -567,6 +620,10 @@ def test_openai_answerer_includes_retrieval_rewrite_notice() -> None:
         client=client,
         instructions="Answer.",
     )
+    retrieval_rewrite = {
+        "answer_notice_required": True,
+        "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
+    }
     request = AnswerRequest(
         query="ambiguous question",
         contexts=[
@@ -579,16 +636,14 @@ def test_openai_answerer_includes_retrieval_rewrite_notice() -> None:
             )
         ],
         mode="discorag",
-        metadata={
-            "retrieval_rewrite": {
-                "answer_notice_required": True,
-                "post_rewrite_gate_reason": "selected_answer_candidate_count_below_threshold",
-            }
-        },
+        metadata={"retrieval_rewrite": retrieval_rewrite},
     )
 
-    answerer.answer(request)
+    result = answerer.answer(request)
 
     sent_input = client.responses.calls[0]["input"]
-    assert "Retrieval rewrite notice:" in sent_input
-    assert "Retrieval rewrite already ran" in sent_input
+    assert "Retrieval rewrite notice:" not in sent_input
+    assert "Retrieval rewrite already ran" not in sent_input
+    assert "Contexts:" in sent_input
+    assert result.metadata["retrieval_rewrite"] == retrieval_rewrite
+    assert request.metadata == {"retrieval_rewrite": retrieval_rewrite}

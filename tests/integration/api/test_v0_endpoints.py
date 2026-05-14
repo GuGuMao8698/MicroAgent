@@ -426,7 +426,7 @@ def test_upload_txt_then_query_returns_answer_and_contexts(
     assert payload["metadata"]["model"] == "deepseek-v4-flash"
     assert payload["metadata"]["reasoning_effort"] == "high"
     assert payload["metadata"]["answer_mode"] == "standard"
-    assert payload["metadata"]["blueprint_applied"] is False
+    assert payload["metadata"]["blueprint_validated"] is False
     assert any(
         "txt" in context["text"] or "md" in context["text"]
         for context in payload["contexts"]
@@ -572,7 +572,7 @@ def test_query_with_empty_index_returns_fallback_answer(client) -> None:
         "metadata": {
             "strategy": "fallback",
             "answer_mode": "standard",
-            "blueprint_applied": False,
+            "blueprint_validated": False,
         },
     }
 

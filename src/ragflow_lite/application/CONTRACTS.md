@@ -117,7 +117,7 @@ Verification:
 
 ## Contract E: MiniRAG Retrieval Rewrite Contract
 
-Reviewed at: 2026-05-11
+Reviewed at: 2026-05-14
 Status: Active
 Owner: `MiniGraphFirstRetriever`
 
@@ -132,13 +132,15 @@ Owner: `MiniGraphFirstRetriever`
 - CoT rewrite may run at most once. Post-rewrite assessment may mark retrieval degraded but must not trigger recursive rewrite.
 - If CoT rewrite exhausts attempts, retrieval falls back to the cached initial candidate snapshot and must not rerun raw-query MiniRAG retrieval.
 - `DiscoRAGQueryService` receives the resolved MiniRAG retrieval result and does not own rewrite decisions.
-- Answer-facing degraded retrieval notice is injected via `format_retrieval_rewrite_notice` in `infrastructure/answerers/_input_formatting.py` into answerer input text when `answer_notice_required` is true.
+- Retrieval rewrite metadata remains a runtime side-channel for callers that need degraded retrieval state.
+- `format_retrieval_rewrite_notice` in `infrastructure/answerers/_input_formatting.py` does not emit prompt text; answerer prompts do not include deterministic degraded-retrieval notices.
 
 ### Forbidden stale interpretations
 - `cot_grounding` does not output entities, relations, or answer-type keywords directly.
 - Post-rewrite assessment is observation-only; it never triggers a second rewrite.
 - Rewrite failure and DiscoRAG structurer exhaustion are separate fallback paths.
 - Do not treat hidden model chain-of-thought as a runtime contract.
+- Do not infer retrieval quality warnings from generated answer text; use structured runtime/UI state instead.
 
 ### Verification
 ```

@@ -5,7 +5,7 @@ from ragflow_lite.infrastructure.answerers._input_formatting import (
 )
 
 
-def test_format_retrieval_rewrite_notice_returns_exact_notice_lines() -> None:
+def test_format_retrieval_rewrite_notice_returns_empty_when_notice_required() -> None:
     assert format_retrieval_rewrite_notice(
         {
             "retrieval_rewrite": {
@@ -15,13 +15,7 @@ def test_format_retrieval_rewrite_notice_returns_exact_notice_lines() -> None:
                 ),
             }
         }
-    ) == [
-        "Retrieval rewrite notice:",
-        "- Retrieval rewrite already ran, but the available evidence still appears insufficient.",
-        "- Likely causes include missing relevant documents in the knowledge base or a query that is still too ambiguous.",
-        "- Tell the user that they may need to rephrase the query or add the needed documents.",
-        "",
-    ]
+    ) == []
 
 
 def test_format_retrieval_rewrite_notice_returns_empty_when_notice_not_required() -> (

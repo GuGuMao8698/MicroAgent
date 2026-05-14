@@ -344,7 +344,7 @@ def test_complete_messages_rejects_empty_content() -> None:
         client.complete_messages([{"role": "user", "content": "   "}])
 
 
-def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> None:
+def test_deepseek_answerer_keeps_score_desc_order_after_blueprint_validation() -> None:
     client = _FakeAnswerClient("回答")
     answerer = DeepSeekChatAnswerer(
         client=client,
@@ -368,9 +368,9 @@ def test_deepseek_answerer_uses_blueprint_chunk_order_for_discorag_mode() -> Non
         )
     )
 
-    assert result.contexts == [low, high]
+    assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is True
+    assert result.metadata["blueprint_validated"] is True
 
     call_input = client.calls[0][1]
     assert "Blueprint:" in call_input
@@ -397,7 +397,7 @@ def test_deepseek_answerer_discorag_mode_without_blueprint_marks_fallback() -> N
 
     assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "missing_blueprint"
     assert "Blueprint:" not in client.calls[0][1]
 
@@ -428,7 +428,7 @@ def test_deepseek_answerer_invalid_blueprint_falls_back_to_score_order() -> None
 
     assert result.contexts == [high, low]
     assert result.metadata["answer_mode"] == "discorag"
-    assert result.metadata["blueprint_applied"] is False
+    assert result.metadata["blueprint_validated"] is False
     assert result.metadata["blueprint_fallback_reason"] == "invalid_blueprint"
 
 
