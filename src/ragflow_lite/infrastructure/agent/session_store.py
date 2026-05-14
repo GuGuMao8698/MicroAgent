@@ -92,7 +92,7 @@ class AgentSessionStore:
                     last_error,
                     ui_metadata_json
                 FROM agent_sessions
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, created_at DESC, id DESC
                 """
             ).fetchall()
         return [_row_to_metadata(row) for row in rows]
@@ -132,6 +132,9 @@ class AgentSessionStore:
             )
 
     def debug_columns(self, table: str) -> list[str]:
+        if table != "agent_sessions":
+            msg = f"unsupported debug table: {table}"
+            raise ValueError(msg)
         with self._connect() as connection:
             rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
         return [str(row["name"]) for row in rows]

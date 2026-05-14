@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from ragflow_lite.infrastructure.agent import session_store as session_store_module
 from ragflow_lite.infrastructure.agent.session_store import AgentSessionStore
 
 
@@ -55,3 +58,44 @@ def test_session_store_gets_and_marks_error(tmp_path: Path) -> None:
     assert updated is not None
     assert updated.last_error == "boom"
     assert updated.updated_at >= updated.created_at
+
+
+def test_session_store_lists_same_timestamp_sessions_deterministically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = AgentSessionStore(tmp_path / "agent_sessions.sqlite3")
+    monkeypatch.setattr(
+        session_store_module,
+        "_now_iso",
+        lambda: "2026-05-15T12:00:00+00:00",
+    )
+    ids = iter(["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000003", "00000000-0000-0000-0000-000000000002"])
+    monkeypatch.setattr(session_store_module.uuid, "uuid4", lambda: next(ids))
+
+    store.create_session(
+        title="First",
+        claude_session_id="claude-1",
+        transcript_path="/internal/1.jsonl",
+        runtime_cwd="/internal/cwd",
+    )
+    store.create_session(
+        title="Second",
+        claude_session_id="claude-2",
+        transcript_path="/internal/2.jsonl",
+        runtime_cwd="/internal/cwd",
+    )
+    store.create_session(
+        title="Third",
+        claude_session_id="claude-3",
+        transcript_path="/internal/3.jsonl",
+        runtime_cwd="/internal/cwd",
+    )
+
+    sessions = store.list_sessions()
+
+    assert [session.id for session in sessions] == [
+        "00000000-0000-0000-0000-000000000003",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000001",
+    ]
