@@ -32,7 +32,6 @@ from ragflow_lite.domain.ports.interfaces import (
     IngestionTaskStore,
     Retriever,
 )
-from ragflow_lite.infrastructure.agent import AgentSessionStore
 from ragflow_lite.infrastructure import (
     ArkMultimodalTextEmbedder,
     BackgroundTaskRunner,
@@ -46,6 +45,11 @@ from ragflow_lite.infrastructure import (
     InMemoryTaskStore,
     LocalDocumentStore,
     RecursiveCharacterChunker,
+)
+from ragflow_lite.infrastructure.agent import (
+    AcpClient,
+    AcpRuntimeConfig,
+    AgentSessionStore,
 )
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
@@ -73,6 +77,7 @@ class AppServices:
 
     settings: Settings
     agent_session_store: AgentSessionStore
+    acp_client: AcpClient
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
@@ -83,6 +88,16 @@ class AppServices:
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
     stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
     structurer_config: DiscoRAGStructurerRuntimeConfig | None = None
+
+
+def _build_acp_client(settings: Settings) -> AcpClient:
+    agent_cwd = settings.agent_cwd or str(settings.project_root)
+    config = AcpRuntimeConfig(
+        command=settings.agent_command,
+        args=settings.agent_args.split(),
+        cwd=agent_cwd,
+    )
+    return AcpClient(config=config)
 
 
 def _build_vector_index(
@@ -131,6 +146,7 @@ def build_services(settings: Settings) -> AppServices:
     agent_session_store = AgentSessionStore(
         settings.local_index_dir / "agent_sessions.sqlite3"
     )
+    acp_client = _build_acp_client(settings)
     parser = CompositeParser()
     chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
@@ -275,6 +291,7 @@ def build_services(settings: Settings) -> AppServices:
     return AppServices(
         settings=settings,
         agent_session_store=agent_session_store,
+        acp_client=acp_client,
         ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=query_service,
