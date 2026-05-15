@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from ragflow_lite.api.deps.providers import AppServices, build_services
 from ragflow_lite.api.observability import install_observability
 from ragflow_lite.api.routes.agent import router as agent_router
+from ragflow_lite.api.routes.ui import router as ui_router
 from ragflow_lite.api.routes.v0 import router as v0_router
 from ragflow_lite.config.settings import Settings
 from ragflow_lite.shared.observability import (
@@ -109,6 +112,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             agent_router,
             prefix=f"{resolved_settings.api_prefix}/agent",
         )
+        # UI shell and static assets
+        app.include_router(ui_router)
+        _static_dir = Path(__file__).resolve().parent / "static"
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
         return app
     except Exception:
         _log_startup_failure()
