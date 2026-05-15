@@ -288,7 +288,7 @@ def test_setup_error_goes_to_stderr_and_empty_stdout(
     captured = capsys.readouterr()
     assert exit_code == 2
     assert captured.out == ""
-    assert "Setup error:" in captured.err
+    assert "setup error:" in captured.err
     assert "missing config" in captured.err
 
 
@@ -475,3 +475,21 @@ def test_agent_setup_does_not_build_runtime_services(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.err == ""
+
+
+def test_runtime_setup_error_marker_is_lowercase(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from ragflow_lite.cli.mcrag import main
+
+    def failing_factory() -> AppServices:
+        raise RuntimeError("missing config")
+
+    exit_code = main(
+        ["retrieve", "--query", "q", "--json"],
+        services_factory=failing_factory,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.err.startswith("setup error: missing config")

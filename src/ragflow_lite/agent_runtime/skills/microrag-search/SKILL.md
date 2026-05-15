@@ -34,7 +34,7 @@ Treat stdout JSON as evidence. stderr diagnostics are not evidence.
 
 ## Error Handling
 
-If the command fails with `setup error:`, tell the user MicroRAG is not ready in product terms.
+If the command reports a setup error, tell the user MicroRAG is not ready in product terms.
 
 If retrieval returns no usable evidence, say that MicroRAG did not find enough evidence and ask the user to clarify or provide more specific terms.
 

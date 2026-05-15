@@ -198,3 +198,16 @@ def test_validate_agent_runtime_paths_rejects_home_config_dir(
         assert str(exc) == SETUP_INCOMPLETE_MESSAGE
     else:
         raise AssertionError("home config dir must be rejected")
+
+
+def test_product_skill_uses_case_insensitive_setup_error_guidance(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    setup_agent_runtime(paths)
+    skill = (
+        paths.workspace_dir / ".claude" / "skills" / "microrag-search" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "reports a setup error" in skill
+    assert "`setup error:`" not in skill

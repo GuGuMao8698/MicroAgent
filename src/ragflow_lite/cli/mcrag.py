@@ -173,7 +173,7 @@ def main(
     try:
         services = factory()
     except Exception as exc:
-        print(f"Setup error: {exc}", file=sys.stderr)
+        print(f"setup error: {exc}", file=sys.stderr)
         return 2
 
     try:
