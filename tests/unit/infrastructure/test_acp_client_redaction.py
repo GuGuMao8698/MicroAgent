@@ -21,14 +21,18 @@ class _FakeProcess:
         self.stderr = io.StringIO(stderr_text)
 
 
-def _build_client(*, stdout_lines: list[str], stderr_text: str = "") -> tuple[AcpClient, _FakeProcess]:
+def _build_client(
+    *, stdout_lines: list[str], stderr_text: str = ""
+) -> tuple[AcpClient, _FakeProcess]:
     process = _FakeProcess(stdout_lines=stdout_lines, stderr_text=stderr_text)
     config = AcpRuntimeConfig(
         command="acp-agent",
         args=["--stdio"],
         cwd="/runtime/cwd",
     )
-    client = AcpClient(config=config, process_factory=lambda command, args, cwd: process)
+    client = AcpClient(
+        config=config, process_factory=lambda command, args, cwd: process
+    )
     client.start()
     return client, process
 
@@ -67,7 +71,10 @@ def test_redact_acp_event_removes_backend_only_fields() -> None:
         ("claude-code failed", "MicroRAG agent runtime failed."),
         ("see /tmp/runtime/session.jsonl", "MicroRAG agent runtime failed."),
         ("transcript_path missing", "MicroRAG agent runtime failed."),
-        (r"windows runtime path C:\agent\session.jsonl", "MicroRAG agent runtime failed."),
+        (
+            r"windows runtime path C:\agent\session.jsonl",
+            "MicroRAG agent runtime failed.",
+        ),
         ("plain failure", "plain failure"),
         ("progress 1/2 complete", "progress 1/2 complete"),
         (r"ratio a\b mismatch", r"ratio a\b mismatch"),
@@ -105,7 +112,11 @@ def test_initialize_writes_json_rpc_and_redacts_result() -> None:
     assert request["id"] == 1
     assert request["method"] == "initialize"
     assert request["params"] == {}
-    assert result == {"session_id": "session-1"}
+    assert result == {
+        "session_id": "session-1",
+        "agentInfo": {"name": "Claude Code"},
+        "transcript_path": "/runtime/session.jsonl",
+    }
 
 
 def test_resume_session_writes_session_load_and_redacts_result() -> None:
@@ -134,6 +145,7 @@ def test_resume_session_writes_session_load_and_redacts_result() -> None:
     assert result == {
         "session_id": "session-1",
         "title": "loaded",
+        "cwd": "/runtime/cwd",
     }
 
 
@@ -163,7 +175,11 @@ def test_send_message_writes_session_prompt_and_redacts_result() -> None:
         "sessionId": "claude-session-1",
         "prompt": "hello",
     }
-    assert result == {"message": "done"}
+    assert result == {
+        "message": "done",
+        "_meta": {"usage": 12},
+        "stderr": "trace",
+    }
 
 
 def test_request_raises_redacted_runtime_error() -> None:
@@ -202,7 +218,9 @@ def test_request_hides_plain_runtime_error_message() -> None:
         ]
     )
 
-    with pytest.raises(RuntimeError, match="MicroRAG agent runtime failed\\.") as exc_info:
+    with pytest.raises(
+        RuntimeError, match="MicroRAG agent runtime failed\\."
+    ) as exc_info:
         client.initialize()
 
     assert "plain failure" not in str(exc_info.value)
@@ -221,11 +239,15 @@ def test_start_hides_process_factory_command_and_cwd_details() -> None:
         ),
     )
 
-    with pytest.raises(RuntimeError, match="MicroRAG agent runtime failed\\.") as exc_info:
+    with pytest.raises(
+        RuntimeError, match="MicroRAG agent runtime failed\\."
+    ) as exc_info:
         client.start()
 
     message = str(exc_info.value)
-    formatted = "".join(traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb))
+    formatted = "".join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
+    )
 
     assert exc_info.value.__cause__ is None
     assert "missing-acp-agent" not in message

@@ -129,7 +129,11 @@ class TestCreateSession:
         store.create_session.return_value = session
 
         acp = MagicMock()
-        acp.initialize.return_value = {"sessionId": _SENTINEL_CLAUDE_ID}
+        acp.initialize.return_value = {
+            "sessionId": _SENTINEL_CLAUDE_ID,
+            "transcript_path": "/runtime/session.jsonl",
+            "cwd": "/runtime/cwd",
+        }
 
         app = _build_app(acp_client=acp, session_store=store)
         client = TestClient(app)
@@ -156,6 +160,8 @@ class TestCreateSession:
         store.create_session.assert_called_once()
         call_kwargs = store.create_session.call_args
         assert call_kwargs.kwargs["claude_session_id"] == _SENTINEL_CLAUDE_ID
+        assert call_kwargs.kwargs["transcript_path"] == "/runtime/session.jsonl"
+        assert call_kwargs.kwargs["runtime_cwd"] == "/runtime/cwd"
 
 
 class TestResumeSession:
@@ -231,7 +237,11 @@ class TestSendMessage:
 
         acp = MagicMock()
         acp.resume_session.return_value = {"status": "loaded"}
-        acp.send_message.return_value = {"message": "Hello from agent"}
+        acp.send_message.return_value = {
+            "message": "Hello from agent",
+            "transcript_path": "/runtime/session.jsonl",
+            "cwd": "/runtime/cwd",
+        }
 
         app = _build_app(acp_client=acp, session_store=store)
         client = TestClient(app)
@@ -250,6 +260,8 @@ class TestSendMessage:
         raw = json.dumps(item)
         assert "claude-session-id" not in raw
         assert "Claude Code" not in raw
+        assert "transcript_path" not in item
+        assert "cwd" not in item
 
         # resume_session called before send_message
         acp.resume_session.assert_called_once_with(_SENTINEL_CLAUDE_ID)

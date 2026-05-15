@@ -143,7 +143,7 @@ class AcpClient:
         result = response.get("result", {})
         if not isinstance(result, Mapping):
             raise RuntimeError("ACP response result must be an object.")
-        return redact_acp_event(result)
+        return dict(result)
 
     def _require_process(self) -> _AcpProcess:
         if self._process is None:

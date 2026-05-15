@@ -54,8 +54,8 @@ def create_session(body: CreateSessionRequest, request: Request) -> SessionRespo
     session = services.agent_session_store.create_session(
         title=body.title,
         claude_session_id=claude_session_id,
-        transcript_path="",
-        runtime_cwd="",
+        transcript_path=init_result.get("transcript_path", ""),
+        runtime_cwd=init_result.get("cwd", ""),
     )
     return _session_to_response(session)
 
