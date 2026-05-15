@@ -7,8 +7,6 @@ reaching the UI.
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ragflow_lite.api.schemas.agent import (
@@ -18,8 +16,6 @@ from ragflow_lite.api.schemas.agent import (
     SendMessageResponse,
     SessionResponse,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["agent"])
 
