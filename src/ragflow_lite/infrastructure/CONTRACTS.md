@@ -96,9 +96,10 @@ Source of truth:
 
 Invariant:
 - `AcpClient.start()` uses `from None` to break exception chains; `__cause__` is always `None` on startup failure.
-- `_request()` passes all JSON-RPC errors through `redact_acp_error(raw_runtime=True)`, producing a fixed generic message.
-- `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only).
+- `_request()` returns raw ACP JSON-RPC result dicts (unfiltered). Backend-only keys (`transcript_path`, `cwd`, etc.) remain available to internal callers. Redaction happens at the HTTP route/response schema boundary, not inside `AcpClient`.
+- `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only). Available as a public utility but not called by `_request()`.
 - `redact_acp_error()` replaces messages containing sensitive markers with a fixed generic message.
+- `AcpClient` is wired into `AppServices` via `_build_acp_client(settings)` in `build_services()`. Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, falls back to `project_root`).
 - `AgentSessionStore` schema has no `messages`, `conversation`, or `transcript_json` columns.
 - Session ordering is `ORDER BY updated_at DESC, created_at DESC, id DESC` for deterministic tiebreaking.
 
@@ -110,6 +111,7 @@ Forbidden stale interpretations:
 Verification:
 - [tests/unit/infrastructure/test_acp_client_redaction.py](../../../tests/unit/infrastructure/test_acp_client_redaction.py)
 - [tests/unit/infrastructure/test_agent_session_store.py](../../../tests/unit/infrastructure/test_agent_session_store.py)
+- [tests/unit/api/test_acp_wiring.py](../../../tests/unit/api/test_acp_wiring.py)
 
 ## Known Submodule Contracts
 

@@ -64,7 +64,8 @@ Endpoints:
 Redaction boundary:
 - `/api/v0/queries` remains answer-producing.
 - `/api/v0/agent/**` exposes MicroRAG-owned session/message UI metadata only.
-- Raw ACP fields (`agentInfo`, `sessionId`, `transcript_path`, `cwd`, `runtime_cwd`), external runtime branding (`Claude Code`, `claude-code`), raw stderr, raw command lines must never appear in responses.
+- ACP client returns raw results to internal callers. Routes extract internal metadata (`transcript_path`, `cwd`) for session store persistence, but only return UI-safe fields via response schemas (`SessionResponse`, `SendMessageResponse`, `ResumeSessionResponse`).
+- Raw ACP fields (`agentInfo`, `sessionId`, `transcript_path`, `cwd`, `runtime_cwd`), external runtime branding (`Claude Code`, `claude-code`), raw stderr, raw command lines must never appear in HTTP responses.
 - Recoverable errors from ACP runtime are returned as `status="recoverable_error"` with sanitized error messages.
 
 UI shell:
@@ -79,3 +80,4 @@ UI shell:
 
 - Route wiring: [tests/unit/api](../../../tests/unit/api)
 - Provider wiring: [tests/unit/api/test_providers.py](../../../tests/unit/api/test_providers.py)
+- ACP wiring: [tests/unit/api/test_acp_wiring.py](../../../tests/unit/api/test_acp_wiring.py)
