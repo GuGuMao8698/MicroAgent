@@ -1,3 +1,6 @@
+from ragflow_lite.application.services.agent_retrieval_service import (
+    AgentRetrievalService,
+)
 from ragflow_lite.application.services.discorag_query_service import (
     DiscoRAGQueryService,
 )
@@ -15,6 +18,7 @@ from ragflow_lite.application.services.query_service import QueryService
 from ragflow_lite.application.services.text_normalization import normalize_text
 
 __all__ = [
+    "AgentRetrievalService",
     "DiscoRAGQueryService",
     "EvidencePackageBuilder",
     "MiniGraphFirstRetriever",

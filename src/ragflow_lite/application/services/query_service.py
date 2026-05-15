@@ -40,17 +40,8 @@ class QueryService:
             outcome="started",
         )
         try:
-            contexts, request_metadata = self._retrieve_contexts_and_metadata(
-                query,
-                top_k,
-            )
-            result = self.answerer.answer(
-                AnswerRequest(
-                    query=query,
-                    contexts=contexts,
-                    metadata=request_metadata,
-                )
-            )
+            request = self.build_answer_request(query, top_k)
+            result = self.answerer.answer(request)
             log_query_event(
                 logger,
                 logging.INFO,
@@ -86,6 +77,17 @@ class QueryService:
             )
             record_query_outcome("failed")
             raise ProcessingError("Failed to answer query.") from exc
+
+    def build_answer_request(self, query: str, top_k: int) -> AnswerRequest:
+        contexts, request_metadata = self._retrieve_contexts_and_metadata(
+            query,
+            top_k,
+        )
+        return AnswerRequest(
+            query=query,
+            contexts=contexts,
+            metadata=request_metadata,
+        )
 
     def _retrieve_contexts_and_metadata(
         self,

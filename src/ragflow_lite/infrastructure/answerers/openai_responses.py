@@ -17,14 +17,15 @@ from openai import (
     RateLimitError,
 )
 
+from ragflow_lite.application.services.model_facing_retrieval import (
+    order_discorag_contexts_for_model,
+    order_standard_contexts_for_model,
+)
 from ragflow_lite.domain.models import (
     AnswerBlueprint,
     AnswerRequest,
     AnswerResult,
     RetrievedChunk,
-)
-from ragflow_lite.infrastructure.answerers._input_formatting import (
-    format_retrieval_rewrite_notice,
 )
 from ragflow_lite.infrastructure.answerers.constants import FALLBACK_ANSWER
 
@@ -144,11 +145,11 @@ class OpenAIResponsesAnswerer:
                 metadata={
                     "strategy": "fallback",
                     "answer_mode": request.mode,
-                    "blueprint_applied": False,
+                    "blueprint_validated": False,
                 },
             )
 
-        ordered_contexts, blueprint_applied, fallback_reason = self._order_contexts(
+        ordered_contexts, blueprint_validated, fallback_reason = self._order_contexts(
             request
         )
         input_text = self._build_input(request, ordered_contexts)
@@ -159,22 +160,26 @@ class OpenAIResponsesAnswerer:
             answer_text = self._clean_citations(raw_answer, len(ordered_contexts))
         else:
             answer_text = self._strip_citation_residuals(raw_answer)
+        result_metadata = {
+            "strategy": "openai_responses",
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "store": self.store,
+            "answer_mode": request.mode,
+            "blueprint_validated": blueprint_validated,
+            **(
+                {"blueprint_fallback_reason": fallback_reason}
+                if fallback_reason is not None
+                else {}
+            ),
+        }
+        retrieval_rewrite = request.metadata.get("retrieval_rewrite")
+        if retrieval_rewrite is not None:
+            result_metadata["retrieval_rewrite"] = dict(retrieval_rewrite)
         return AnswerResult(
             answer=answer_text,
             contexts=ordered_contexts,
-            metadata={
-                "strategy": "openai_responses",
-                "model": self.model,
-                "reasoning_effort": self.reasoning_effort,
-                "store": self.store,
-                "answer_mode": request.mode,
-                "blueprint_applied": blueprint_applied,
-                **(
-                    {"blueprint_fallback_reason": fallback_reason}
-                    if fallback_reason is not None
-                    else {}
-                ),
-            },
+            metadata=result_metadata,
         )
 
     def _create_response(
@@ -230,27 +235,8 @@ class OpenAIResponsesAnswerer:
             "Question:",
             request.query.strip(),
             "",
+            "Contexts:",
         ]
-
-        notice_lines = format_retrieval_rewrite_notice(request.metadata)
-        if notice_lines:
-            lines.extend(notice_lines)
-
-        blueprint_lines = _format_blueprint_lines(request.blueprint)
-        if blueprint_lines:
-            lines.extend(
-                [
-                    "Blueprint:",
-                    *blueprint_lines,
-                    "",
-                ]
-            )
-
-        lines.extend(
-            [
-                "Contexts:",
-            ]
-        )
 
         for index, context in enumerate(contexts, start=1):
             metadata = context.metadata or {}
@@ -276,28 +262,31 @@ class OpenAIResponsesAnswerer:
                 ]
             )
 
+        blueprint_lines = _format_blueprint_lines(request.blueprint)
+        if blueprint_lines:
+            lines.extend(
+                [
+                    "Blueprint:",
+                    *blueprint_lines,
+                ]
+            )
+
         return "\n".join(lines).strip()
 
     @staticmethod
     def _order_contexts(
         request: AnswerRequest,
     ) -> tuple[list[RetrievedChunk], bool, str | None]:
-        score_ordered = sorted(
-            request.contexts, key=lambda context: context.score, reverse=True
-        )
-
         if request.mode != "discorag":
-            return score_ordered, False, None
+            return order_standard_contexts_for_model(request.contexts), False, None
+
+        ordered_contexts = order_discorag_contexts_for_model(request.contexts)
 
         if request.blueprint is None:
-            return score_ordered, False, "missing_blueprint"
+            return ordered_contexts, False, "missing_blueprint"
 
-        ordered_contexts = _order_contexts_by_blueprint(
-            score_ordered,
-            request.blueprint,
-        )
-        if ordered_contexts is None:
-            return score_ordered, False, "invalid_blueprint"
+        if not _has_valid_blueprint_alignment(ordered_contexts, request.blueprint):
+            return ordered_contexts, False, "invalid_blueprint"
         return ordered_contexts, True, None
 
 
@@ -326,31 +315,26 @@ def _supports_text_verbosity(base_url: str) -> bool:
     return not host.endswith("volces.com")
 
 
-def _order_contexts_by_blueprint(
+def _has_valid_blueprint_alignment(
     contexts: list[RetrievedChunk],
     blueprint: AnswerBlueprint,
-) -> list[RetrievedChunk] | None:
+) -> bool:
     contexts_by_id = {context.chunk_id: context for context in contexts}
     context_ids = set(contexts_by_id)
 
-    # Blueprint references unknown chunks — treat as invalid.
     unknown_ids = set(blueprint.ordered_chunk_ids) - context_ids
     if unknown_ids:
-        return None
+        return False
 
-    selected: list[RetrievedChunk] = []
     seen_ids: set[str] = set()
-
     for chunk_id in blueprint.ordered_chunk_ids:
         if chunk_id in seen_ids:
-            return None
-        selected.append(contexts_by_id[chunk_id])
+            return False
         seen_ids.add(chunk_id)
 
     if seen_ids != context_ids:
-        return None
-
-    return selected
+        return False
+    return True
 
 
 def _format_blueprint_lines(blueprint: AnswerBlueprint | None) -> list[str]:
@@ -358,8 +342,6 @@ def _format_blueprint_lines(blueprint: AnswerBlueprint | None) -> list[str]:
         return []
 
     lines: list[str] = []
-    if blueprint.ordered_chunk_ids:
-        lines.append("ordered_chunk_ids: " + ", ".join(blueprint.ordered_chunk_ids))
     if blueprint.chunk_roles:
         role_text = "; ".join(
             f"{chunk_id}={role}" for chunk_id, role in blueprint.chunk_roles.items()
@@ -369,4 +351,6 @@ def _format_blueprint_lines(blueprint: AnswerBlueprint | None) -> list[str]:
         lines.append("answer_constraints: " + " | ".join(blueprint.answer_constraints))
     if blueprint.plan_steps:
         lines.append("plan_steps: " + " | ".join(blueprint.plan_steps))
+    if blueprint.ordered_chunk_ids:
+        lines.append("ordered_chunk_ids: " + ", ".join(blueprint.ordered_chunk_ids))
     return lines

@@ -46,6 +46,11 @@ from ragflow_lite.infrastructure import (
     LocalDocumentStore,
     RecursiveCharacterChunker,
 )
+from ragflow_lite.infrastructure.agent import (
+    AcpClient,
+    AcpRuntimeConfig,
+    AgentSessionStore,
+)
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
@@ -71,6 +76,8 @@ class AppServices:
     """集中保存应用启动后可复用的核心服务对象。"""
 
     settings: Settings
+    agent_session_store: AgentSessionStore
+    acp_client: AcpClient
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
@@ -81,6 +88,16 @@ class AppServices:
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
     stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
     structurer_config: DiscoRAGStructurerRuntimeConfig | None = None
+
+
+def _build_acp_client(settings: Settings) -> AcpClient:
+    agent_cwd = settings.agent_cwd or str(settings.project_root)
+    config = AcpRuntimeConfig(
+        command=settings.agent_command,
+        args=settings.agent_args.split(),
+        cwd=agent_cwd,
+    )
+    return AcpClient(config=config)
 
 
 def _build_vector_index(
@@ -126,6 +143,10 @@ def build_services(settings: Settings) -> AppServices:
     )
 
     document_store = LocalDocumentStore(settings.uploads_dir, settings.temp_dir)
+    agent_session_store = AgentSessionStore(
+        settings.local_index_dir / "agent_sessions.sqlite3"
+    )
+    acp_client = _build_acp_client(settings)
     parser = CompositeParser()
     chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
@@ -269,6 +290,8 @@ def build_services(settings: Settings) -> AppServices:
 
     return AppServices(
         settings=settings,
+        agent_session_store=agent_session_store,
+        acp_client=acp_client,
         ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=query_service,

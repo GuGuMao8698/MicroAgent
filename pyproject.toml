@@ -29,11 +29,17 @@ dev = [
     "ruff>=0.15,<0.16",
 ]
 
+[project.scripts]
+mcrag = "ragflow_lite.cli.mcrag:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ragflow_lite = ["static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

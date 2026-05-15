@@ -200,6 +200,16 @@ class Settings:
     chunk_fusion_normalize: str = "atan"
     chunk_position_prior_weight: float = 0.03
     chunk_position_prior_enabled: bool = True
+    # ── ACP agent runtime 配置 ──
+    agent_command: str = field(
+        default_factory=lambda: _read_string_env("MICRORAG_AGENT_COMMAND", "claude")
+    )
+    agent_args: str = field(
+        default_factory=lambda: _read_string_env("MICRORAG_AGENT_ARGS", "--acp")
+    )
+    agent_cwd: str | None = field(
+        default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CWD")
+    )
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")
