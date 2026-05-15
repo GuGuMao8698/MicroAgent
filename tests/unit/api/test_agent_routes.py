@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from ragflow_lite.api.routes.agent import router as agent_router
 
 # ---------------------------------------------------------------------------
@@ -288,3 +289,30 @@ class TestSendMessage:
         assert item["status"] == "recoverable_error"
 
         store.mark_error.assert_called_once_with("sess-1", "connection lost")
+
+    def test_send_message_returns_recoverable_error_when_resume_fails(self) -> None:
+        session = _make_session()
+        store = MagicMock()
+        store.get_session.return_value = session
+
+        acp = MagicMock()
+        acp.resume_session.side_effect = RuntimeError("MicroRAG agent runtime failed.")
+
+        app = _build_app(acp_client=acp, session_store=store)
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v0/agent/sessions/sess-1/messages",
+            json={"message": "Hello"},
+        )
+        assert response.status_code == 200
+
+        item = response.json()
+        assert item["status"] == "recoverable_error"
+
+        # send_message must NOT have been called since resume failed first
+        acp.send_message.assert_not_called()
+
+        store.mark_error.assert_called_once_with(
+            "sess-1", "MicroRAG agent runtime failed."
+        )

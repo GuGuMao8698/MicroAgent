@@ -101,9 +101,8 @@ def send_message(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    services.acp_client.resume_session(session.claude_session_id)
-
     try:
+        services.acp_client.resume_session(session.claude_session_id)
         result = services.acp_client.send_message(
             session.claude_session_id, body.message
         )
