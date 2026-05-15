@@ -437,3 +437,41 @@ def test_package_root_exports_app_proxy_without_importing_app_module() -> None:
         "app_type": "_LazyAppExport",
         "app_module_loaded": False,
     }
+
+
+def test_agent_setup_command_writes_runtime_workspace(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from ragflow_lite.cli.mcrag import main
+
+    exit_code = main(["agent", "setup", "--project-root", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload == {
+        "config_dir": str(tmp_path / "data" / "agent-runtime" / "config"),
+        "workspace_dir": str(tmp_path / "data" / "agent-runtime" / "workspace"),
+    }
+    assert (tmp_path / "data" / "agent-runtime" / "workspace" / "CLAUDE.md").exists()
+
+
+def test_agent_setup_does_not_build_runtime_services(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from ragflow_lite.cli.mcrag import main
+
+    def failing_factory() -> AppServices:
+        raise AssertionError("setup must not build AppServices")
+
+    exit_code = main(
+        ["agent", "setup", "--project-root", str(tmp_path)],
+        services_factory=failing_factory,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""

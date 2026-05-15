@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 if TYPE_CHECKING:
@@ -52,6 +53,19 @@ def _build_parser() -> ExitCodeParser:
             action="store_true",
             help="输出 machine-readable JSON。",
         )
+
+    agent_parser = subparsers.add_parser("agent")
+    agent_subparsers = agent_parser.add_subparsers(
+        dest="agent_command",
+        required=True,
+    )
+    setup_parser = agent_subparsers.add_parser("setup")
+    setup_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+        help="MicroRAG project root used to generate data/agent-runtime.",
+    )
 
     return parser
 
@@ -125,6 +139,22 @@ def _handle_answer(
     return 0
 
 
+def _handle_agent_setup(args: argparse.Namespace) -> int:
+    from ragflow_lite.agent_runtime.setup import (
+        default_agent_runtime_paths,
+        setup_agent_runtime,
+    )
+
+    paths = setup_agent_runtime(default_agent_runtime_paths(args.project_root))
+    _write_json(
+        {
+            "config_dir": str(paths.config_dir),
+            "workspace_dir": str(paths.workspace_dir),
+        }
+    )
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     services_factory: Callable[[], "AppServices"] | None = None,
@@ -132,6 +162,8 @@ def main(
     parser = _build_parser()
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
+        if args.command == "agent" and args.agent_command == "setup":
+            return _handle_agent_setup(args)
         _require_json_flag(args, parser)
     except CliArgumentError as exc:
         print(str(exc), file=sys.stderr)
