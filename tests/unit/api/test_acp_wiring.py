@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ragflow_lite.agent_runtime.setup import (
+    SETUP_INCOMPLETE_MESSAGE,
+    AgentRuntimePaths,
     default_agent_runtime_paths,
     setup_agent_runtime,
 )
@@ -42,7 +44,9 @@ class TestBuildAcpClient:
     def test_constructs_acp_client_with_config_from_settings(
         self, tmp_path: Path
     ) -> None:
-        paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+        from helpers.agent_runtime import setup_test_agent_runtime
+
+        paths = setup_test_agent_runtime(tmp_path)
         settings = self._make_settings(
             tmp_path,
             agent_cwd=str(paths.workspace_dir),
@@ -52,7 +56,9 @@ class TestBuildAcpClient:
         assert isinstance(client, AcpClient)
 
     def test_uses_custom_command_and_args(self, tmp_path: Path) -> None:
-        paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+        from helpers.agent_runtime import setup_test_agent_runtime
+
+        paths = setup_test_agent_runtime(tmp_path)
         settings = self._make_settings(
             tmp_path,
             agent_command="/usr/local/bin/agent",
@@ -79,7 +85,9 @@ class TestBuildAcpClient:
             raise AssertionError("_build_acp_client should require runtime setup")
 
     def test_uses_explicit_cwd_when_set(self, tmp_path: Path) -> None:
-        paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+        from helpers.agent_runtime import setup_test_agent_runtime
+
+        paths = setup_test_agent_runtime(tmp_path)
         settings = self._make_settings(
             tmp_path,
             agent_cwd=str(paths.workspace_dir),
@@ -89,7 +97,9 @@ class TestBuildAcpClient:
         assert client._config.cwd == str(paths.workspace_dir)
 
     def test_default_args_split_correctly(self, tmp_path: Path) -> None:
-        paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+        from helpers.agent_runtime import setup_test_agent_runtime
+
+        paths = setup_test_agent_runtime(tmp_path)
         settings = self._make_settings(
             tmp_path,
             agent_args="--acp",
@@ -101,7 +111,9 @@ class TestBuildAcpClient:
 
 
 def test_build_acp_client_sets_isolated_runtime_env(tmp_path: Path) -> None:
-    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    from helpers.agent_runtime import setup_test_agent_runtime
+
+    paths = setup_test_agent_runtime(tmp_path)
     settings = Settings(
         project_root=tmp_path,
         uploads_dir=tmp_path / "uploads",
@@ -168,10 +180,6 @@ def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
 
 
 def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> None:
-    from ragflow_lite.agent_runtime.setup import (
-        SETUP_INCOMPLETE_MESSAGE,
-        AgentRuntimePaths,
-    )
 
     default_paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
     rogue_workspace = tmp_path / "rogue-workspace"

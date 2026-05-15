@@ -20,12 +20,9 @@ from ragflow_lite.config import Settings
 
 
 def _ui_test_settings(tmp_path: Path) -> Settings:
-    from ragflow_lite.agent_runtime.setup import (
-        default_agent_runtime_paths,
-        setup_agent_runtime,
-    )
+    from helpers.agent_runtime import setup_test_agent_runtime
 
-    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    paths = setup_test_agent_runtime(tmp_path)
     settings = Settings(
         project_root=tmp_path,
         uploads_dir=tmp_path / "uploads",
