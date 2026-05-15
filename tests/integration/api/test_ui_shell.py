@@ -20,11 +20,19 @@ from ragflow_lite.config import Settings
 
 
 def _ui_test_settings(tmp_path: Path) -> Settings:
+    from ragflow_lite.agent_runtime.setup import (
+        default_agent_runtime_paths,
+        setup_agent_runtime,
+    )
+
+    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
     settings = Settings(
         project_root=tmp_path,
         uploads_dir=tmp_path / "uploads",
         local_index_dir=tmp_path / "local_index",
         temp_dir=tmp_path / "tmp",
+        agent_cwd=str(paths.workspace_dir),
+        agent_config_dir=str(paths.config_dir),
     )
     assign_isolated_infinity_tables(settings, tmp_path, salt=uuid4().hex[:8])
     register_infinity_table_cleanup(settings)
