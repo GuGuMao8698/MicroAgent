@@ -133,3 +133,15 @@ def test_build_agent_child_env_sets_config_path_and_python_access(
     assert child_env["PYTHONPATH"] == f"{paths.project_root / 'src'}:/existing/src"
     assert child_env["PATH"].startswith(str(paths.project_root / ".venv" / "bin"))
     assert child_env["PATH"].endswith(":/usr/bin")
+
+
+def test_repository_skill_matches_product_discorag_contract() -> None:
+    repo_skill = Path(".claude/skills/microrag-search/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## Workflow" in repo_skill
+    assert "mcrag retrieve" in repo_skill
+    assert "--mode discorag" in repo_skill
+    assert "--mode standard" not in repo_skill
+    assert "mcrag answer" not in repo_skill

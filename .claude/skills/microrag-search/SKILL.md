@@ -1,31 +1,46 @@
 ---
 name: microrag-search
-description: Use MicroRAG local retrieval evidence when answering questions about indexed local documents or when the user asks to search MicroRAG.
+description: Use MicroRAG DiscoRAG retrieval evidence when answering questions about indexed local documents or when the user asks to search MicroRAG.
 ---
 
 # MicroRAG Search
 
-Use the local `mcrag` command to retrieve evidence from MicroRAG.
+Retrieve local document evidence through MicroRAG's DiscoRAG mode.
 
-For normal retrieval:
+## Workflow
 
-```bash
-mcrag retrieve --query "<question>" --mode standard --top-n 6 --json
-```
+1. Decide whether the user needs evidence from indexed MicroRAG documents.
+2. Run DiscoRAG retrieval with the user's question.
+3. Use stdout JSON as evidence.
+4. Answer using the retrieved contexts and blueprint.
+5. If retrieval fails or evidence is insufficient, say so plainly and do not invent evidence.
 
-For DiscoRAG retrieval when the user asks for deeper evidence organization, multi-step reasoning over retrieved chunks, or comparison across evidence:
+## Retrieve Evidence
 
 ```bash
 mcrag retrieve --query "<question>" --mode discorag --top-n 6 --json
 ```
 
-The command prints model-facing JSON to stdout. Use `query`, `contexts`, and optional `blueprint` as evidence. Do not treat stderr diagnostics as evidence.
+## Reading the Result
 
-If `mcrag retrieve` fails with `setup error:`, tell the user MicroRAG is not ready and report the setup error in product terms. Do not invent evidence.
+The command prints model-facing JSON to stdout.
 
-Use `mcrag answer` only when the user explicitly asks for MicroRAG's direct grounded answer or when debugging the MicroRAG answer path:
+Use:
+- `query` as the search query context.
+- `contexts` as the retrieved evidence chunks.
+- `blueprint` as DiscoRAG's answer planning constraints and evidence organization.
 
-```bash
-mcrag answer --query "<question>" --mode standard --top-n 6 --json
-mcrag answer --query "<question>" --mode discorag --top-n 6 --json
-```
+Treat stdout JSON as evidence. stderr diagnostics are not evidence.
+
+## Error Handling
+
+If the command fails with `setup error:`, tell the user MicroRAG is not ready in product terms.
+
+If retrieval returns no usable evidence, say that MicroRAG did not find enough evidence and ask the user to clarify or provide more specific terms.
+
+Do not invent citations, document facts, or source claims.
+
+## Common Mistakes
+
+- Do not use stderr diagnostics as evidence.
+- Do not expose runtime internals, command paths, local filesystem paths, transcript files, or process protocol details.
