@@ -7,8 +7,8 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 if TYPE_CHECKING:
-    from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
     from ragflow_lite.api.deps.providers import AppServices
+    from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
 
 CliMode = Literal["standard", "discorag"]
 
