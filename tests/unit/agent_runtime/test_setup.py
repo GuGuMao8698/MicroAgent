@@ -5,7 +5,10 @@ from pathlib import Path
 
 from ragflow_lite.agent_runtime.setup import (
     AgentRuntimePaths,
+    build_agent_child_env,
+    default_agent_runtime_paths,
     setup_agent_runtime,
+    validate_agent_runtime_workspace,
 )
 
 
@@ -76,3 +79,49 @@ def test_product_skill_is_find_docs_style_discorag_only(tmp_path: Path) -> None:
     assert "--mode standard" not in skill
     assert "mcrag answer" not in skill
     assert "stderr diagnostics are not evidence" in skill
+
+
+def test_default_agent_runtime_paths_use_data_agent_runtime(tmp_path: Path) -> None:
+    paths = default_agent_runtime_paths(tmp_path)
+    assert paths.project_root == tmp_path
+    assert paths.config_dir == tmp_path / "data" / "agent-runtime" / "config"
+    assert paths.workspace_dir == tmp_path / "data" / "agent-runtime" / "workspace"
+
+
+def test_setup_is_idempotent_and_overwrites_product_assets(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    setup_agent_runtime(paths)
+    skill_path = (
+        paths.workspace_dir / ".claude" / "skills" / "microrag-search" / "SKILL.md"
+    )
+    skill_path.write_text("stale local copy", encoding="utf-8")
+    setup_agent_runtime(paths)
+    assert "stale local copy" not in skill_path.read_text(encoding="utf-8")
+    assert "--mode discorag" in skill_path.read_text(encoding="utf-8")
+
+
+def test_validate_agent_runtime_workspace_fails_with_product_message(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    try:
+        validate_agent_runtime_workspace(paths)
+    except RuntimeError as exc:
+        assert str(exc) == (
+            "MicroRAG agent setup is incomplete. Runtime workspace is missing."
+        )
+    else:
+        raise AssertionError("validate_agent_runtime_workspace should fail")
+
+
+def test_build_agent_child_env_sets_config_path_and_python_access(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    base_env = {"PATH": "/usr/bin", "PYTHONPATH": "/existing/src", "KEEP": "1"}
+    child_env = build_agent_child_env(paths, base_env=base_env)
+    assert child_env["KEEP"] == "1"
+    assert child_env["CLAUDE_CONFIG_DIR"] == str(paths.config_dir)
+    assert child_env["PYTHONPATH"] == f"{paths.project_root / 'src'}:/existing/src"
+    assert child_env["PATH"].startswith(str(paths.project_root / ".venv" / "bin"))
+    assert child_env["PATH"].endswith(":/usr/bin")
