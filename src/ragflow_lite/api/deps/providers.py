@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from fastapi import Depends, Request
 
@@ -91,11 +92,28 @@ class AppServices:
 
 
 def _build_acp_client(settings: Settings) -> AcpClient:
-    agent_cwd = settings.agent_cwd or str(settings.project_root)
+    from ragflow_lite.agent_runtime.setup import (
+        AgentRuntimePaths,
+        build_agent_child_env,
+        validate_agent_runtime_workspace,
+    )
+
+    if settings.agent_cwd is None or settings.agent_config_dir is None:
+        raise RuntimeError(
+            "MicroRAG agent setup is incomplete. Runtime workspace is missing."
+        )
+
+    paths = AgentRuntimePaths(
+        project_root=settings.project_root,
+        config_dir=Path(settings.agent_config_dir),
+        workspace_dir=Path(settings.agent_cwd),
+    )
+    validate_agent_runtime_workspace(paths)
     config = AcpRuntimeConfig(
         command=settings.agent_command,
         args=settings.agent_args.split(),
-        cwd=agent_cwd,
+        cwd=str(paths.workspace_dir),
+        env=build_agent_child_env(paths),
     )
     return AcpClient(config=config)
 
