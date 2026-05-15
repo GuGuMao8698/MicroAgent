@@ -112,5 +112,5 @@ def send_message(
     return SendMessageResponse(
         session_id=session_id,
         status="sent",
-        message=result.get("reply"),
+        message=result.get("message"),
     )

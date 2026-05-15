@@ -231,7 +231,7 @@ class TestSendMessage:
 
         acp = MagicMock()
         acp.resume_session.return_value = {"status": "loaded"}
-        acp.send_message.return_value = {"reply": "Hello from agent"}
+        acp.send_message.return_value = {"message": "Hello from agent"}
 
         app = _build_app(acp_client=acp, session_store=store)
         client = TestClient(app)
@@ -245,6 +245,7 @@ class TestSendMessage:
         item = response.json()
         assert item["session_id"] == "sess-1"
         assert item["status"] == "sent"
+        assert item["message"] == "Hello from agent"
 
         raw = json.dumps(item)
         assert "claude-session-id" not in raw
