@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from ragflow_lite.api.deps.providers import AppServices, build_services
 from ragflow_lite.api.observability import install_observability
+from ragflow_lite.api.routes.agent import router as agent_router
 from ragflow_lite.api.routes.v0 import router as v0_router
 from ragflow_lite.config.settings import Settings
 from ragflow_lite.shared.observability import (
@@ -104,6 +105,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             set_metrics_state(app.state.metrics_state)
         app.state.services = services
         app.include_router(v0_router, prefix=resolved_settings.api_prefix)
+        app.include_router(
+            agent_router,
+            prefix=f"{resolved_settings.api_prefix}/agent",
+        )
         return app
     except Exception:
         _log_startup_failure()
