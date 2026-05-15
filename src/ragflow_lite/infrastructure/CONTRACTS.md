@@ -86,7 +86,7 @@ Verification:
 
 ## ACP Runtime and Session Store Contract
 
-Reviewed at: 2026-05-15
+Reviewed at: 2026-05-15T16:00:00+08:00
 Status: Active
 Owner: `AcpClient`, `AgentSessionStore`
 
@@ -99,7 +99,9 @@ Invariant:
 - `_request()` returns raw ACP JSON-RPC result dicts (unfiltered). Backend-only keys (`transcript_path`, `cwd`, etc.) remain available to internal callers. Redaction happens at the HTTP route/response schema boundary, not inside `AcpClient`.
 - `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only). Available as a public utility but not called by `_request()`.
 - `redact_acp_error()` replaces messages containing sensitive markers with a fixed generic message.
-- `AcpClient` is wired into `AppServices` via `_build_acp_client(settings)` in `build_services()`. Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, falls back to `project_root`).
+- `AcpClient` is wired into `AppServices` via `_build_acp_client(settings)` in `build_services()`. Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project,local"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `data/agent-runtime/workspace`), and `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR` or `CLAUDE_CONFIG_DIR`, default `data/agent-runtime/config`).
+- Product agent runtime files are generated from `src/ragflow_lite/agent_runtime/` by `mcrag agent setup`. `data/agent-runtime/` is runtime state and is not the source of truth.
+- ACP child processes receive `CLAUDE_CONFIG_DIR`, `PATH`, and `PYTHONPATH` through `AcpRuntimeConfig.env`.
 - `AgentSessionStore` schema has no `messages`, `conversation`, or `transcript_json` columns.
 - Session ordering is `ORDER BY updated_at DESC, created_at DESC, id DESC` for deterministic tiebreaking.
 
@@ -107,11 +109,15 @@ Forbidden stale interpretations:
 - Do not re-chain exceptions from `start()` via `from exc`.
 - Do not pass raw JSON-RPC error messages through to UI without redaction.
 - Do not store conversation content in `AgentSessionStore`.
+- Do not fall back to repository root as product ACP cwd.
+- Do not treat repository-root `.claude/settings*` or real `~/.claude/settings.json` as product runtime configuration.
+- Do not expose `mcrag answer` through the product `microrag-search` skill.
 
 Verification:
 - [tests/unit/infrastructure/test_acp_client_redaction.py](../../../tests/unit/infrastructure/test_acp_client_redaction.py)
 - [tests/unit/infrastructure/test_agent_session_store.py](../../../tests/unit/infrastructure/test_agent_session_store.py)
 - [tests/unit/api/test_acp_wiring.py](../../../tests/unit/api/test_acp_wiring.py)
+- [tests/unit/agent_runtime/test_setup.py](../../../tests/unit/agent_runtime/test_setup.py)
 
 ## Known Submodule Contracts
 
