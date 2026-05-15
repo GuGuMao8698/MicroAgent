@@ -99,8 +99,10 @@ Invariant:
 - `_request()` returns raw ACP JSON-RPC result dicts (unfiltered). Backend-only keys (`transcript_path`, `cwd`, etc.) remain available to internal callers. Redaction happens at the HTTP route/response schema boundary, not inside `AcpClient`.
 - `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only). Available as a public utility but not called by `_request()`.
 - `redact_acp_error()` replaces messages containing sensitive markers with a fixed generic message.
-- `AcpClient` is wired into `AppServices` via `_build_acp_client(settings)` in `build_services()`. Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project,local"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `data/agent-runtime/workspace`), and `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR` or `CLAUDE_CONFIG_DIR`, default `data/agent-runtime/config`).
+- `AppServices` stores an ACP client factory and constructs `AcpClient` lazily when agent routes first access `services.acp_client`; non-agent service construction must not require `data/agent-runtime/`.
+- Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project,local"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `data/agent-runtime/workspace`), and `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR`, default `data/agent-runtime/config`).
 - Product agent runtime files are generated from `src/ragflow_lite/agent_runtime/` by `mcrag agent setup`. `data/agent-runtime/` is runtime state and is not the source of truth.
+- `_build_acp_client(settings)` rejects runtime paths that do not resolve to the project-owned defaults from `default_agent_runtime_paths(settings.project_root)`.
 - ACP child processes receive `CLAUDE_CONFIG_DIR`, `PATH`, and `PYTHONPATH` through `AcpRuntimeConfig.env`.
 - `AgentSessionStore` schema has no `messages`, `conversation`, or `transcript_json` columns.
 - Session ordering is `ORDER BY updated_at DESC, created_at DESC, id DESC` for deterministic tiebreaking.
@@ -112,6 +114,7 @@ Forbidden stale interpretations:
 - Do not fall back to repository root as product ACP cwd.
 - Do not treat repository-root `.claude/settings*` or real `~/.claude/settings.json` as product runtime configuration.
 - Do not expose `mcrag answer` through the product `microrag-search` skill.
+- Do not let ambient parent-shell `CLAUDE_CONFIG_DIR` select product runtime config.
 
 Verification:
 - [tests/unit/infrastructure/test_acp_client_redaction.py](../../../tests/unit/infrastructure/test_acp_client_redaction.py)
