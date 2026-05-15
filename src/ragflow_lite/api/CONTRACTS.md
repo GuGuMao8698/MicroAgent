@@ -49,6 +49,32 @@ Response schemas:
 - HTTP metrics must use low-cardinality labels; `route` label must use template
   paths, never `document_id`, query text, filenames, or other high-cardinality values
 
+## Agent Session Route Contract
+
+Reviewed at: 2026-05-15
+Status: Active
+Owner: [routes/agent.py](routes/agent.py) router
+
+Endpoints:
+- `GET /agent/sessions` -- list sessions with UI-safe fields only
+- `POST /agent/sessions` -- create session via ACP start + initialize
+- `POST /agent/sessions/{id}/resume` -- resume session, recoverable error on RuntimeError
+- `POST /agent/sessions/{id}/messages` -- send message via resume + send, recoverable error on RuntimeError
+
+Redaction boundary:
+- `/api/v0/queries` remains answer-producing.
+- `/api/v0/agent/**` exposes MicroRAG-owned session/message UI metadata only.
+- Raw ACP fields (`agentInfo`, `sessionId`, `transcript_path`, `cwd`, `runtime_cwd`), external runtime branding (`Claude Code`, `claude-code`), raw stderr, raw command lines must never appear in responses.
+- Recoverable errors from ACP runtime are returned as `status="recoverable_error"` with sanitized error messages.
+
+UI shell:
+- `GET /agent` serves inline HTML with MicroRAG branding only.
+- Static assets at `/static/agent-shell.css` and `/static/agent-shell.js`.
+
+### Forbidden stale interpretations
+- Do not expose `claude_session_id`, `transcript_path`, or `runtime_cwd` in any agent route response.
+- Do not insert runtime branding into UI HTML or static assets.
+
 ## Verification
 
 - Route wiring: [tests/unit/api](../../../tests/unit/api)

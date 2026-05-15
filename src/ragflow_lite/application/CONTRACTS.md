@@ -146,3 +146,30 @@ Owner: `MiniGraphFirstRetriever`
 ```
 .venv/bin/python -m pytest tests/unit/application/test_retrieval_rewrite.py tests/unit/application/test_mini_graph_first_retriever.py tests/unit/application/test_discorag_query_service.py -q
 ```
+
+## Agent Retrieval Service Contract
+
+Reviewed at: 2026-05-15
+Status: Active
+Owner: `AgentRetrievalService`
+
+### Source of truth
+`AgentRetrievalService`, `model_facing_retrieval.py` ordering helpers.
+
+### Invariant
+- `AgentRetrievalService` is retrieval-only: it builds answer-facing requests for `standard` and `discorag`, serializes model-facing evidence, and must not call `Answerer.answer()`.
+- Standard model-facing contexts use U-shaped score ordering (second-highest moved to tail).
+- DiscoRAG model-facing contexts use score-descending ordering with the final blueprint at the payload tail.
+- DiscoRAG retrieval requires a non-null blueprint; missing blueprint raises `ProcessingError`.
+- Model-facing payload omits `mode`, top-level operational `metadata`, degraded state, source selection, retrieval rewrite state, graph internals, and debug traces.
+- Retrieval rewrite low-quality state remains runtime/UI metadata and must not be inserted into answer prompts.
+
+### Forbidden stale interpretations
+- Do not call `Answerer.answer()` from the agent retrieval path.
+- Do not insert `mode` or operational metadata into model-facing payloads.
+- Do not treat `format_retrieval_rewrite_notice()` as producing prompt text; it returns `[]`.
+
+### Verification
+```
+.venv/bin/python -m pytest tests/unit/application/test_agent_retrieval_service.py tests/unit/application/test_model_facing_retrieval.py -q
+```
