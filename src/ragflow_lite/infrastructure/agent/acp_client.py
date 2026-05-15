@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from subprocess import PIPE
-from typing import Any, Mapping, Protocol, TextIO
-
+from typing import Any, Protocol, TextIO
 
 BACKEND_ONLY_KEYS = {
     "agentInfo",
@@ -47,11 +47,7 @@ class AcpRuntimeConfig:
 
 def redact_acp_event(event: Mapping[str, Any]) -> dict[str, Any]:
     """仅向上层暴露可安全返回给 UI 的浅层字段。"""
-    return {
-        key: value
-        for key, value in event.items()
-        if key not in BACKEND_ONLY_KEYS
-    }
+    return {key: value for key, value in event.items() if key not in BACKEND_ONLY_KEYS}
 
 
 def redact_acp_error(message: str, *, raw_runtime: bool = False) -> str:
@@ -64,7 +60,9 @@ def redact_acp_error(message: str, *, raw_runtime: bool = False) -> str:
     return message
 
 
-def _default_process_factory(command: str, args: list[str], cwd: str) -> subprocess.Popen[str]:
+def _default_process_factory(
+    command: str, args: list[str], cwd: str
+) -> subprocess.Popen[str]:
     return subprocess.Popen(
         [command, *args],
         cwd=cwd,
@@ -94,8 +92,8 @@ class AcpClient:
                 self._config.args,
                 self._config.cwd,
             )
-        except Exception as exc:
-            raise RuntimeError(redact_acp_error("", raw_runtime=True)) from exc
+        except Exception:
+            raise RuntimeError(redact_acp_error("", raw_runtime=True)) from None
 
     def initialize(self) -> dict[str, Any]:
         return self._request("initialize", {})
@@ -137,7 +135,9 @@ class AcpClient:
         error = response.get("error")
         if isinstance(error, Mapping):
             raise RuntimeError(
-                redact_acp_error(str(error.get("message", "ACP request failed.")), raw_runtime=True)
+                redact_acp_error(
+                    str(error.get("message", "ACP request failed.")), raw_runtime=True
+                )
             )
 
         result = response.get("result", {})
