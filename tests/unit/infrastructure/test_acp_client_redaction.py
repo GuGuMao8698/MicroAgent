@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import traceback
 
 import pytest
 
@@ -224,5 +225,10 @@ def test_start_hides_process_factory_command_and_cwd_details() -> None:
         client.start()
 
     message = str(exc_info.value)
+    formatted = "".join(traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb))
+
+    assert exc_info.value.__cause__ is None
     assert "missing-acp-agent" not in message
     assert "/definitely/missing/cwd" not in message
+    assert "missing-acp-agent" not in formatted
+    assert "/definitely/missing/cwd" not in formatted
