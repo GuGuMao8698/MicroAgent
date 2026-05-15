@@ -11,7 +11,7 @@ SETUP_INCOMPLETE_MESSAGE = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AgentRuntimePaths:
     project_root: Path
     config_dir: Path

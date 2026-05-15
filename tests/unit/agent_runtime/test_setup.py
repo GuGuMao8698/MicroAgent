@@ -114,6 +114,14 @@ def test_validate_agent_runtime_workspace_fails_with_product_message(
         raise AssertionError("validate_agent_runtime_workspace should fail")
 
 
+def test_validate_agent_runtime_workspace_succeeds_after_setup(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    setup_agent_runtime(paths)
+    validate_agent_runtime_workspace(paths)
+
+
 def test_build_agent_child_env_sets_config_path_and_python_access(
     tmp_path: Path,
 ) -> None:
