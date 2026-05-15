@@ -4,10 +4,12 @@ from ragflow_lite.agent_runtime.setup import (
     AgentRuntimePaths,
     default_agent_runtime_paths,
     setup_agent_runtime,
+    validate_agent_runtime_paths,
 )
 
 __all__ = [
     "AgentRuntimePaths",
     "default_agent_runtime_paths",
     "setup_agent_runtime",
+    "validate_agent_runtime_paths",
 ]

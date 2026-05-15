@@ -46,7 +46,20 @@ def setup_agent_runtime(paths: AgentRuntimePaths) -> AgentRuntimePaths:
     return paths
 
 
+def _same_path(left: Path, right: Path) -> bool:
+    return left.expanduser().resolve() == right.expanduser().resolve()
+
+
+def validate_agent_runtime_paths(paths: AgentRuntimePaths) -> None:
+    expected = default_agent_runtime_paths(paths.project_root)
+    if not _same_path(paths.config_dir, expected.config_dir):
+        raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
+    if not _same_path(paths.workspace_dir, expected.workspace_dir):
+        raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
+
+
 def validate_agent_runtime_workspace(paths: AgentRuntimePaths) -> None:
+    validate_agent_runtime_paths(paths)
     required = (
         paths.config_dir,
         paths.workspace_dir / "CLAUDE.md",

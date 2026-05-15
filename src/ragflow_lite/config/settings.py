@@ -214,10 +214,7 @@ class Settings:
         default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CWD")
     )
     agent_config_dir: str | None = field(
-        default_factory=lambda: (
-            _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
-            or _read_optional_env("CLAUDE_CONFIG_DIR")
-        )
+        default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
     )
 
     def __post_init__(self) -> None:
@@ -250,7 +247,6 @@ class Settings:
             ),
             agent_config_dir=(
                 _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
-                or _read_optional_env("CLAUDE_CONFIG_DIR")
                 or str(runtime_root / "config")
             ),
         )

@@ -145,3 +145,56 @@ def test_repository_skill_matches_product_discorag_contract() -> None:
     assert "--mode discorag" in repo_skill
     assert "--mode standard" not in repo_skill
     assert "mcrag answer" not in repo_skill
+
+
+def test_validate_agent_runtime_paths_accepts_default_paths(tmp_path: Path) -> None:
+    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    from ragflow_lite.agent_runtime.setup import validate_agent_runtime_paths
+
+    validate_agent_runtime_paths(paths)
+
+
+def test_validate_agent_runtime_paths_rejects_repo_root_workspace(
+    tmp_path: Path,
+) -> None:
+    from ragflow_lite.agent_runtime.setup import (
+        SETUP_INCOMPLETE_MESSAGE,
+        validate_agent_runtime_paths,
+    )
+
+    default_paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    repo_root_paths = AgentRuntimePaths(
+        project_root=tmp_path,
+        config_dir=default_paths.config_dir,
+        workspace_dir=tmp_path,
+    )
+
+    try:
+        validate_agent_runtime_paths(repo_root_paths)
+    except RuntimeError as exc:
+        assert str(exc) == SETUP_INCOMPLETE_MESSAGE
+    else:
+        raise AssertionError("repo root workspace must be rejected")
+
+
+def test_validate_agent_runtime_paths_rejects_home_config_dir(
+    tmp_path: Path,
+) -> None:
+    from ragflow_lite.agent_runtime.setup import (
+        SETUP_INCOMPLETE_MESSAGE,
+        validate_agent_runtime_paths,
+    )
+
+    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    home_config_paths = AgentRuntimePaths(
+        project_root=tmp_path,
+        config_dir=Path.home() / ".claude",
+        workspace_dir=paths.workspace_dir,
+    )
+
+    try:
+        validate_agent_runtime_paths(home_config_paths)
+    except RuntimeError as exc:
+        assert str(exc) == SETUP_INCOMPLETE_MESSAGE
+    else:
+        raise AssertionError("home config dir must be rejected")

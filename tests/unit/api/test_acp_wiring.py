@@ -165,3 +165,38 @@ def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
     assert calls == ["called"]
     assert services.acp_client is services.acp_client
     assert calls == ["called"]
+
+
+def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> None:
+    from ragflow_lite.agent_runtime.setup import (
+        SETUP_INCOMPLETE_MESSAGE,
+        AgentRuntimePaths,
+    )
+
+    default_paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    rogue_workspace = tmp_path / "rogue-workspace"
+    setup_agent_runtime(
+        AgentRuntimePaths(
+            project_root=tmp_path,
+            config_dir=default_paths.config_dir,
+            workspace_dir=rogue_workspace,
+        )
+    )
+    settings = Settings(
+        project_root=tmp_path,
+        uploads_dir=tmp_path / "uploads",
+        local_index_dir=tmp_path / "index",
+        temp_dir=tmp_path / "tmp",
+        deepseek_api_key="test-key",
+        ark_api_key="test-ark-key",
+        ark_embedding_model="test-model",
+        agent_cwd=str(rogue_workspace),
+        agent_config_dir=str(default_paths.config_dir),
+    )
+
+    try:
+        _build_acp_client(settings)
+    except RuntimeError as exc:
+        assert str(exc) == SETUP_INCOMPLETE_MESSAGE
+    else:
+        raise AssertionError("non-default runtime workspace must be rejected")

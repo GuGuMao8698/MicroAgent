@@ -101,15 +101,14 @@ class AppServices:
 
 def _build_acp_client(settings: Settings) -> AcpClient:
     from ragflow_lite.agent_runtime.setup import (
+        SETUP_INCOMPLETE_MESSAGE,
         AgentRuntimePaths,
         build_agent_child_env,
         validate_agent_runtime_workspace,
     )
 
     if settings.agent_cwd is None or settings.agent_config_dir is None:
-        raise RuntimeError(
-            "MicroRAG agent setup is incomplete. Runtime workspace is missing."
-        )
+        raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
 
     paths = AgentRuntimePaths(
         project_root=settings.project_root,
