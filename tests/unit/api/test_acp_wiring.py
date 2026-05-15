@@ -61,3 +61,15 @@ class TestBuildAcpClient:
         settings = self._make_settings(agent_args="--acp")
         client = _build_acp_client(settings)
         assert client._config.args == ["--acp"]
+
+
+def test_settings_default_agent_runtime_paths() -> None:
+    settings = Settings.default(Path("/tmp/test-project"))
+
+    assert settings.agent_cwd == str(
+        Path("/tmp/test-project") / "data" / "agent-runtime" / "workspace"
+    )
+    assert settings.agent_config_dir == str(
+        Path("/tmp/test-project") / "data" / "agent-runtime" / "config"
+    )
+    assert settings.agent_args == "--acp --setting-sources project,local"

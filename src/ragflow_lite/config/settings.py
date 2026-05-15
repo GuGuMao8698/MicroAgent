@@ -205,10 +205,19 @@ class Settings:
         default_factory=lambda: _read_string_env("MICRORAG_AGENT_COMMAND", "claude")
     )
     agent_args: str = field(
-        default_factory=lambda: _read_string_env("MICRORAG_AGENT_ARGS", "--acp")
+        default_factory=lambda: _read_string_env(
+            "MICRORAG_AGENT_ARGS",
+            "--acp --setting-sources project,local",
+        )
     )
     agent_cwd: str | None = field(
         default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CWD")
+    )
+    agent_config_dir: str | None = field(
+        default_factory=lambda: (
+            _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
+            or _read_optional_env("CLAUDE_CONFIG_DIR")
+        )
     )
 
     def __post_init__(self) -> None:
@@ -229,11 +238,21 @@ class Settings:
         运行期 provider 配置只从环境变量读取，不写死在仓库中。
         """
         root = project_root or Path(__file__).resolve().parents[3]
+        runtime_root = root / "data" / "agent-runtime"
         return cls(
             project_root=root,
             uploads_dir=root / "data" / "uploads",
             local_index_dir=root / "data" / "local_index",
             temp_dir=root / "data" / "tmp",
+            agent_cwd=(
+                _read_optional_env("MICRORAG_AGENT_CWD")
+                or str(runtime_root / "workspace")
+            ),
+            agent_config_dir=(
+                _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
+                or _read_optional_env("CLAUDE_CONFIG_DIR")
+                or str(runtime_root / "config")
+            ),
         )
 
     def require_runtime_provider_configs(
