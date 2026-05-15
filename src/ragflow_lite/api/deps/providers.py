@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -78,7 +79,7 @@ class AppServices:
 
     settings: Settings
     agent_session_store: AgentSessionStore
-    acp_client: AcpClient
+    acp_client_factory: Callable[[], AcpClient]
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
@@ -89,6 +90,13 @@ class AppServices:
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
     stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
     structurer_config: DiscoRAGStructurerRuntimeConfig | None = None
+    _acp_client: AcpClient | None = field(default=None, init=False, repr=False)
+
+    @property
+    def acp_client(self) -> AcpClient:
+        if self._acp_client is None:
+            self._acp_client = self.acp_client_factory()
+        return self._acp_client
 
 
 def _build_acp_client(settings: Settings) -> AcpClient:
@@ -164,7 +172,6 @@ def build_services(settings: Settings) -> AppServices:
     agent_session_store = AgentSessionStore(
         settings.local_index_dir / "agent_sessions.sqlite3"
     )
-    acp_client = _build_acp_client(settings)
     parser = CompositeParser()
     chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
@@ -309,7 +316,7 @@ def build_services(settings: Settings) -> AppServices:
     return AppServices(
         settings=settings,
         agent_session_store=agent_session_store,
-        acp_client=acp_client,
+        acp_client_factory=lambda: _build_acp_client(settings),
         ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=query_service,

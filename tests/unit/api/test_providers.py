@@ -857,3 +857,24 @@ def test_build_services_wires_cot_grounding_rewriter_non_live(
 
     assert services.retriever.cot_grounding_rewriter is not None
     assert services.retriever.cot_grounding_rewriter.model == settings.deepseek_model
+
+
+def test_build_services_does_not_require_agent_runtime_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "test-model")
+    settings = Settings(
+        project_root=tmp_path,
+        uploads_dir=tmp_path / "uploads",
+        local_index_dir=tmp_path / "local_index",
+        temp_dir=tmp_path / "tmp",
+    )
+    settings.ensure_directories()
+
+    services = build_services(settings)
+
+    assert services.settings is settings

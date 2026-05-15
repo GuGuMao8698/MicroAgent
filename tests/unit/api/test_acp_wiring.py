@@ -8,7 +8,7 @@ from ragflow_lite.agent_runtime.setup import (
     default_agent_runtime_paths,
     setup_agent_runtime,
 )
-from ragflow_lite.api.deps.providers import _build_acp_client
+from ragflow_lite.api.deps.providers import AppServices, _build_acp_client
 from ragflow_lite.config.settings import Settings
 from ragflow_lite.infrastructure.agent.acp_client import AcpClient, AcpRuntimeConfig
 
@@ -132,3 +132,36 @@ def test_settings_default_agent_runtime_paths() -> None:
         Path("/tmp/test-project") / "data" / "agent-runtime" / "config"
     )
     assert settings.agent_args == "--acp --setting-sources project,local"
+
+
+def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def factory() -> AcpClient:
+        calls.append("called")
+        return AcpClient(
+            config=AcpRuntimeConfig(
+                command="agent",
+                args=["--acp"],
+                cwd=str(tmp_path / "runtime"),
+            )
+        )
+
+    services = AppServices(
+        settings=Settings.default(tmp_path),
+        agent_session_store=object(),
+        acp_client_factory=factory,
+        ingestion_pipeline=object(),
+        retriever=object(),
+        query_service=object(),
+        discorag_query_service=object(),
+        query_router=object(),
+        document_service=object(),
+        dataset_service=object(),
+    )
+
+    assert calls == []
+    assert isinstance(services.acp_client, AcpClient)
+    assert calls == ["called"]
+    assert services.acp_client is services.acp_client
+    assert calls == ["called"]
