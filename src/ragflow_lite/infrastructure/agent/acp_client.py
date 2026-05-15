@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from subprocess import PIPE
 from typing import Any, Protocol, TextIO
 
@@ -43,6 +44,7 @@ class AcpRuntimeConfig:
     command: str
     args: list[str]
     cwd: str
+    env: dict[str, str] = field(default_factory=dict)
 
 
 def redact_acp_event(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -61,11 +63,15 @@ def redact_acp_error(message: str, *, raw_runtime: bool = False) -> str:
 
 
 def _default_process_factory(
-    command: str, args: list[str], cwd: str
+    command: str, args: list[str], cwd: str, env: Mapping[str, str] | None = None
 ) -> subprocess.Popen[str]:
+    child_env = os.environ.copy()
+    if env is not None:
+        child_env.update(env)
     return subprocess.Popen(
         [command, *args],
         cwd=cwd,
+        env=child_env,
         stdin=PIPE,
         stdout=PIPE,
         stderr=PIPE,
@@ -91,6 +97,7 @@ class AcpClient:
                 self._config.command,
                 self._config.args,
                 self._config.cwd,
+                self._config.env,
             )
         except Exception:
             raise RuntimeError(redact_acp_error("", raw_runtime=True)) from None

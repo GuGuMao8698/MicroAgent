@@ -31,7 +31,7 @@ def _build_client(
         cwd="/runtime/cwd",
     )
     client = AcpClient(
-        config=config, process_factory=lambda command, args, cwd: process
+        config=config, process_factory=lambda command, args, cwd, env: process
     )
     client.start()
     return client, process
@@ -234,7 +234,7 @@ def test_start_hides_process_factory_command_and_cwd_details() -> None:
     )
     client = AcpClient(
         config=config,
-        process_factory=lambda command, args, cwd: (_ for _ in ()).throw(
+        process_factory=lambda command, args, cwd, env: (_ for _ in ()).throw(
             FileNotFoundError(f"{command} failed in {cwd}")
         ),
     )
@@ -254,3 +254,38 @@ def test_start_hides_process_factory_command_and_cwd_details() -> None:
     assert "/definitely/missing/cwd" not in message
     assert "missing-acp-agent" not in formatted
     assert "/definitely/missing/cwd" not in formatted
+
+
+def test_start_passes_configured_child_env() -> None:
+    calls: list[tuple[str, list[str], str, dict[str, str]]] = []
+
+    def process_factory(
+        command: str,
+        args: list[str],
+        cwd: str,
+        env: dict[str, str],
+    ):
+        calls.append((command, args, cwd, env))
+        raise FileNotFoundError("missing executable")
+
+    client = AcpClient(
+        config=AcpRuntimeConfig(
+            command="agent",
+            args=["--acp"],
+            cwd="/runtime/workspace",
+            env={"CLAUDE_CONFIG_DIR": "/runtime/config"},
+        ),
+        process_factory=process_factory,
+    )
+
+    with pytest.raises(RuntimeError):
+        client.start()
+
+    assert calls == [
+        (
+            "agent",
+            ["--acp"],
+            "/runtime/workspace",
+            {"CLAUDE_CONFIG_DIR": "/runtime/config"},
+        )
+    ]
