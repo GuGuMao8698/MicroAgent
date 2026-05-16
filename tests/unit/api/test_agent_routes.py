@@ -130,9 +130,11 @@ class TestCreateSession:
 
         acp = MagicMock()
         acp.initialize.return_value = {
+            "protocolVersion": 1,
+            "agentInfo": {"name": "claude-code"},
+        }
+        acp.new_session.return_value = {
             "sessionId": _SENTINEL_CLAUDE_ID,
-            "transcript_path": "/runtime/session.jsonl",
-            "cwd": "/runtime/cwd",
         }
 
         app = _build_app(acp_client=acp, session_store=store)
@@ -155,13 +157,12 @@ class TestCreateSession:
         # acp_client.start() and initialize() must have been called
         acp.start.assert_called_once()
         acp.initialize.assert_called_once()
+        acp.new_session.assert_called_once()
 
         # Session store must have been called with the claude session id
         store.create_session.assert_called_once()
         call_kwargs = store.create_session.call_args
         assert call_kwargs.kwargs["claude_session_id"] == _SENTINEL_CLAUDE_ID
-        assert call_kwargs.kwargs["transcript_path"] == "/runtime/session.jsonl"
-        assert call_kwargs.kwargs["runtime_cwd"] == "/runtime/cwd"
 
 
 class TestResumeSession:
@@ -225,10 +226,40 @@ class TestResumeSession:
         assert response.status_code == 404
 
 
+class TestDeleteSession:
+    """DELETE /sessions/{session_id} removes UI session metadata only."""
+
+    def test_delete_session_removes_metadata_without_touching_acp(self) -> None:
+        store = MagicMock()
+        store.delete_session.return_value = True
+        acp = MagicMock()
+
+        app = _build_app(acp_client=acp, session_store=store)
+        client = TestClient(app)
+
+        response = client.delete("/api/v0/agent/sessions/sess-1")
+
+        assert response.status_code == 204
+        store.delete_session.assert_called_once_with("sess-1")
+        acp.resume_session.assert_not_called()
+        acp.send_message.assert_not_called()
+
+    def test_delete_session_returns_404_for_unknown_session(self) -> None:
+        store = MagicMock()
+        store.delete_session.return_value = False
+
+        app = _build_app(acp_client=MagicMock(), session_store=store)
+        client = TestClient(app)
+
+        response = client.delete("/api/v0/agent/sessions/unknown")
+
+        assert response.status_code == 404
+
+
 class TestSendMessage:
     """POST /sessions/{session_id}/messages sends a message to the session."""
 
-    def test_send_message_uses_resumed_session_and_returns_redacted_content(
+    def test_send_message_uses_active_session_and_returns_redacted_content(
         self,
     ) -> None:
         session = _make_session()
@@ -236,7 +267,6 @@ class TestSendMessage:
         store.get_session.return_value = session
 
         acp = MagicMock()
-        acp.resume_session.return_value = {"status": "loaded"}
         acp.send_message.return_value = {
             "message": "Hello from agent",
             "transcript_path": "/runtime/session.jsonl",
@@ -263,7 +293,6 @@ class TestSendMessage:
         assert "transcript_path" not in item
         assert "cwd" not in item
 
-        # resume_session called before send_message
         acp.resume_session.assert_called_once_with(_SENTINEL_CLAUDE_ID)
         acp.send_message.assert_called_once_with(_SENTINEL_CLAUDE_ID, "Hello")
 
@@ -303,13 +332,13 @@ class TestSendMessage:
 
         store.mark_error.assert_called_once_with("sess-1", "connection lost")
 
-    def test_send_message_returns_recoverable_error_when_resume_fails(self) -> None:
+    def test_send_message_returns_recoverable_error_on_resume_failure(self) -> None:
         session = _make_session()
         store = MagicMock()
         store.get_session.return_value = session
 
         acp = MagicMock()
-        acp.resume_session.side_effect = RuntimeError("MicroRAG agent runtime failed.")
+        acp.resume_session.side_effect = RuntimeError("session not found")
 
         app = _build_app(acp_client=acp, session_store=store)
         client = TestClient(app)
@@ -323,9 +352,5 @@ class TestSendMessage:
         item = response.json()
         assert item["status"] == "recoverable_error"
 
-        # send_message must NOT have been called since resume failed first
+        store.mark_error.assert_called_once_with("sess-1", "session not found")
         acp.send_message.assert_not_called()
-
-        store.mark_error.assert_called_once_with(
-            "sess-1", "MicroRAG agent runtime failed."
-        )

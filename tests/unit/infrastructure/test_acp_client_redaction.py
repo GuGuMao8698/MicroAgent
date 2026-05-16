@@ -111,7 +111,11 @@ def test_initialize_writes_json_rpc_and_redacts_result() -> None:
     assert request["jsonrpc"] == "2.0"
     assert request["id"] == 1
     assert request["method"] == "initialize"
-    assert request["params"] == {}
+    assert request["params"]["protocolVersion"] == 1
+    assert request["params"]["clientInfo"] == {
+        "name": "microrag",
+        "version": "0.1.0",
+    }
     assert result == {
         "session_id": "session-1",
         "agentInfo": {"name": "Claude Code"},
@@ -141,11 +145,43 @@ def test_resume_session_writes_session_load_and_redacts_result() -> None:
     request = _read_request(process.stdin)
 
     assert request["method"] == "session/load"
-    assert request["params"] == {"sessionId": "claude-session-1"}
+    assert request["params"] == {
+        "sessionId": "claude-session-1",
+        "cwd": "/runtime/cwd",
+    }
     assert result == {
         "session_id": "session-1",
         "title": "loaded",
         "cwd": "/runtime/cwd",
+    }
+
+
+def test_new_session_writes_session_new_with_runtime_cwd() -> None:
+    client, process = _build_client(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "sessionId": "session-1",
+                    },
+                }
+            )
+            + "\n"
+        ]
+    )
+
+    result = client.new_session()
+    request = _read_request(process.stdin)
+
+    assert request["method"] == "session/new"
+    assert request["params"] == {
+        "cwd": "/runtime/cwd",
+        "mcpServers": [],
+    }
+    assert result == {
+        "sessionId": "session-1",
     }
 
 
@@ -173,13 +209,150 @@ def test_send_message_writes_session_prompt_and_redacts_result() -> None:
     assert request["method"] == "session/prompt"
     assert request["params"] == {
         "sessionId": "claude-session-1",
-        "prompt": "hello",
+        "prompt": [{"type": "text", "text": "hello"}],
     }
     assert result == {
         "message": "done",
         "_meta": {"usage": 12},
         "stderr": "trace",
     }
+
+
+def test_send_message_collects_agent_message_chunks_before_prompt_response() -> None:
+    client, process = _build_client(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "claude-session-1",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "Hello"},
+                        },
+                    },
+                }
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "claude-session-1",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": " there"},
+                        },
+                    },
+                }
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "stopReason": "end_turn",
+                    },
+                }
+            )
+            + "\n",
+        ]
+    )
+
+    result = client.send_message("claude-session-1", "hello")
+    request = _read_request(process.stdin)
+
+    assert request["method"] == "session/prompt"
+    assert result == {
+        "stopReason": "end_turn",
+        "message": "Hello there",
+    }
+
+
+def test_send_message_ignores_agent_chunks_from_other_sessions() -> None:
+    client, _process = _build_client(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "other-session",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "wrong"},
+                        },
+                    },
+                }
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "claude-session-1",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "right"},
+                        },
+                    },
+                }
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "stopReason": "end_turn",
+                    },
+                }
+            )
+            + "\n",
+        ]
+    )
+
+    result = client.send_message("claude-session-1", "hello")
+
+    assert result["message"] == "right"
+
+
+def test_start_is_idempotent_after_process_exists() -> None:
+    processes = [
+        _FakeProcess(stdout_lines=[]),
+        _FakeProcess(stdout_lines=[]),
+    ]
+    calls = 0
+
+    def process_factory(
+        command: str,
+        args: list[str],
+        cwd: str,
+        env: dict[str, str],
+    ) -> _FakeProcess:
+        nonlocal calls
+        process = processes[calls]
+        calls += 1
+        return process
+
+    client = AcpClient(
+        config=AcpRuntimeConfig(
+            command="agent",
+            args=["--acp"],
+            cwd="/runtime/workspace",
+        ),
+        process_factory=process_factory,
+    )
+
+    client.start()
+    client.start()
+
+    assert calls == 1
+    assert client._process is processes[0]
 
 
 def test_request_raises_redacted_runtime_error() -> None:

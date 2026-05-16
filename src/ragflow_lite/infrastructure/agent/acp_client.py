@@ -92,6 +92,8 @@ class AcpClient:
         self._next_id = 1
 
     def start(self) -> None:
+        if self._process is not None:
+            return
         try:
             self._process = self._process_factory(
                 self._config.command,
@@ -103,21 +105,52 @@ class AcpClient:
             raise RuntimeError(redact_acp_error("", raw_runtime=True)) from None
 
     def initialize(self) -> dict[str, Any]:
-        return self._request("initialize", {})
+        return self._request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientInfo": {
+                    "name": "microrag",
+                    "version": "0.1.0",
+                },
+            },
+        )
+
+    def new_session(self) -> dict[str, Any]:
+        return self._request(
+            "session/new",
+            {
+                "cwd": self._config.cwd,
+                "mcpServers": [],
+            },
+        )
 
     def resume_session(self, claude_session_id: str) -> dict[str, Any]:
-        return self._request("session/load", {"sessionId": claude_session_id})
+        return self._request(
+            "session/load",
+            {
+                "sessionId": claude_session_id,
+                "cwd": self._config.cwd,
+            },
+        )
 
     def send_message(self, claude_session_id: str, message: str) -> dict[str, Any]:
         return self._request(
             "session/prompt",
             {
                 "sessionId": claude_session_id,
-                "prompt": message,
+                "prompt": [{"type": "text", "text": message}],
             },
+            collect_session_id=claude_session_id,
         )
 
-    def _request(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        params: Mapping[str, Any],
+        *,
+        collect_session_id: str | None = None,
+    ) -> dict[str, Any]:
         process = self._require_process()
         stdin = process.stdin
         stdout = process.stdout
@@ -135,10 +168,21 @@ class AcpClient:
         stdin.write(json.dumps(payload) + "\n")
         stdin.flush()
 
-        line = stdout.readline()
-        if line == "":
-            raise RuntimeError("ACP client process returned no response.")
-        response = json.loads(line)
+        message_chunks: list[str] = []
+        while True:
+            line = stdout.readline()
+            if line == "":
+                raise RuntimeError("ACP client process returned no response.")
+            response = json.loads(line)
+            self._collect_agent_message_chunk(
+                response,
+                message_chunks,
+                collect_session_id=collect_session_id,
+            )
+
+            if response.get("id") == request_id:
+                break
+
         error = response.get("error")
         if isinstance(error, Mapping):
             raise RuntimeError(
@@ -150,7 +194,40 @@ class AcpClient:
         result = response.get("result", {})
         if not isinstance(result, Mapping):
             raise RuntimeError("ACP response result must be an object.")
-        return dict(result)
+        redacted_result = dict(result)
+        if message_chunks and "message" not in redacted_result:
+            redacted_result["message"] = "".join(message_chunks)
+        return redacted_result
+
+    def _collect_agent_message_chunk(
+        self,
+        response: Mapping[str, Any],
+        message_chunks: list[str],
+        *,
+        collect_session_id: str | None,
+    ) -> None:
+        if collect_session_id is None:
+            return
+        if response.get("method") != "session/update":
+            return
+        params = response.get("params")
+        if not isinstance(params, Mapping):
+            return
+        if params.get("sessionId") != collect_session_id:
+            return
+        update = params.get("update")
+        if not isinstance(update, Mapping):
+            return
+        if update.get("sessionUpdate") != "agent_message_chunk":
+            return
+        content = update.get("content")
+        if not isinstance(content, Mapping):
+            return
+        if content.get("type") != "text":
+            return
+        text = content.get("text")
+        if isinstance(text, str):
+            message_chunks.append(text)
 
     def _require_process(self) -> _AcpProcess:
         if self._process is None:

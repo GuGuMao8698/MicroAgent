@@ -48,14 +48,15 @@ def create_session(body: CreateSessionRequest, request: Request) -> SessionRespo
     acp_client = services.acp_client
 
     acp_client.start()
-    init_result = acp_client.initialize()
-    claude_session_id: str = init_result["sessionId"]
+    acp_client.initialize()
+    session_result = acp_client.new_session()
+    claude_session_id: str = session_result["sessionId"]
 
     session = services.agent_session_store.create_session(
         title=body.title,
         claude_session_id=claude_session_id,
-        transcript_path=init_result.get("transcript_path", ""),
-        runtime_cwd=init_result.get("cwd", ""),
+        transcript_path=session_result.get("transcript_path", ""),
+        runtime_cwd=session_result.get("cwd", ""),
     )
     return _session_to_response(session)
 
@@ -83,6 +84,14 @@ def resume_session(session_id: str, request: Request) -> ResumeSessionResponse:
     return ResumeSessionResponse(session_id=session_id, status="resumed")
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(session_id: str, request: Request) -> None:
+    services = request.app.state.services
+    deleted = services.agent_session_store.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
 @router.post(
     "/sessions/{session_id}/messages",
     response_model=SendMessageResponse,
@@ -99,6 +108,14 @@ def send_message(
 
     try:
         services.acp_client.resume_session(session.claude_session_id)
+    except RuntimeError as exc:
+        services.agent_session_store.mark_error(session_id, str(exc))
+        return SendMessageResponse(
+            session_id=session_id,
+            status="recoverable_error",
+        )
+
+    try:
         result = services.acp_client.send_message(
             session.claude_session_id, body.message
         )

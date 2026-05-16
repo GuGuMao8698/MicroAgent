@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ragflow_lite.agent_runtime.setup import (
@@ -26,7 +25,6 @@ def test_setup_writes_runtime_workspace_files(tmp_path: Path) -> None:
     setup_agent_runtime(paths)
     assert paths.config_dir.is_dir()
     assert (paths.workspace_dir / "CLAUDE.md").is_file()
-    assert (paths.workspace_dir / ".claude" / "settings.json").is_file()
     assert (
         paths.workspace_dir / ".claude" / "skills" / "microrag-search" / "SKILL.md"
     ).is_file()
@@ -50,18 +48,21 @@ def test_product_claude_md_excludes_developer_workflow_terms(tmp_path: Path) -> 
     assert "microrag-search" in text
 
 
-def test_product_settings_json_is_valid_and_retrieval_only(tmp_path: Path) -> None:
+def test_setup_does_not_create_or_overwrite_local_settings(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
+    settings_path = paths.workspace_dir / ".claude" / "settings.json"
+
     setup_agent_runtime(paths)
-    settings_text = (paths.workspace_dir / ".claude" / "settings.json").read_text(
-        encoding="utf-8"
+
+    assert not settings_path.exists()
+
+    settings_path.write_text('{"permissions":{"defaultMode":"bypassPermissions"}}\n')
+    setup_agent_runtime(paths)
+
+    assert (
+        settings_path.read_text(encoding="utf-8")
+        == '{"permissions":{"defaultMode":"bypassPermissions"}}\n'
     )
-    settings = json.loads(settings_text)
-    assert isinstance(settings, dict)
-    assert "api_key" not in settings_text.lower()
-    assert "secret" not in settings_text.lower()
-    assert "mcrag retrieve" in settings_text
-    assert "mcrag answer" not in settings_text
 
 
 def test_product_skill_is_find_docs_style_discorag_only(tmp_path: Path) -> None:
@@ -114,11 +115,29 @@ def test_validate_agent_runtime_workspace_fails_with_product_message(
         raise AssertionError("validate_agent_runtime_workspace should fail")
 
 
+def test_validate_agent_runtime_workspace_requires_local_settings_after_setup(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    setup_agent_runtime(paths)
+
+    try:
+        validate_agent_runtime_workspace(paths)
+    except RuntimeError as exc:
+        assert "data/agent-runtime/workspace/.claude/settings.json" in str(exc)
+    else:
+        raise AssertionError("local runtime settings must be required")
+
+
 def test_validate_agent_runtime_workspace_succeeds_after_setup(
     tmp_path: Path,
 ) -> None:
     paths = _paths(tmp_path)
     setup_agent_runtime(paths)
+    (paths.workspace_dir / ".claude" / "settings.json").write_text(
+        '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
+        encoding="utf-8",
+    )
     validate_agent_runtime_workspace(paths)
 
 
@@ -198,6 +217,29 @@ def test_validate_agent_runtime_paths_rejects_home_config_dir(
         assert str(exc) == SETUP_INCOMPLETE_MESSAGE
     else:
         raise AssertionError("home config dir must be rejected")
+
+
+def test_source_claude_template_is_behavior_only() -> None:
+    template = Path("src/ragflow_lite/agent_runtime/CLAUDE.md")
+    text = template.read_text(encoding="utf-8")
+
+    assert "You are MicroRAG's product conversation agent" not in text
+    assert "Use MicroRAG retrieval" in text
+    assert "Answer from retrieved evidence" in text
+    assert "Do not expose runtime internals" in text
+    assert "Do not invent evidence" in text
+
+
+def test_setup_copies_behavior_only_claude_md(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    setup_agent_runtime(paths)
+
+    text = (paths.workspace_dir / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "You are MicroRAG's product conversation agent" not in text
+    assert "Use MicroRAG retrieval" in text
+    assert "Answer from retrieved evidence" in text
+    assert "Do not expose runtime internals" in text
+    assert "Do not invent evidence" in text
 
 
 def test_product_skill_uses_case_insensitive_setup_error_guidance(

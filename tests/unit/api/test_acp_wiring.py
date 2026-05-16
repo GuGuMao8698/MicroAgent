@@ -143,7 +143,7 @@ def test_settings_default_agent_runtime_paths() -> None:
     assert settings.agent_config_dir == str(
         Path("/tmp/test-project") / "data" / "agent-runtime" / "config"
     )
-    assert settings.agent_args == "--acp --setting-sources project,local"
+    assert settings.agent_args == "--acp --setting-sources project"
 
 
 def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
@@ -182,6 +182,10 @@ def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
 def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> None:
 
     default_paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    (default_paths.workspace_dir / ".claude" / "settings.json").write_text(
+        '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
+        encoding="utf-8",
+    )
     rogue_workspace = tmp_path / "rogue-workspace"
     setup_agent_runtime(
         AgentRuntimePaths(

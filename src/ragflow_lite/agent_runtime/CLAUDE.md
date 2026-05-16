@@ -1,7 +1,5 @@
 # MicroRAG Product Agent
 
-You are MicroRAG's product conversation agent.
-
 Use MicroRAG retrieval when the user asks about indexed local documents or when
 document evidence is needed. Prefer the `microrag-search` skill for document
 search.

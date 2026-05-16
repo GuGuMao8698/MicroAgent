@@ -1,6 +1,6 @@
 /* MicroRAG Agent Shell — minimal demo behavior */
 
-(function () {
+(async function () {
   "use strict";
 
   const API_PREFIX = "/api/v0/agent";
@@ -22,6 +22,12 @@
       headers: { "Content-Type": "application/json" },
       ...options,
     });
+    if (!resp.ok) {
+      throw new Error("Request failed with status " + resp.status);
+    }
+    if (resp.status === 204) {
+      return {};
+    }
     return resp.json();
   }
 
@@ -70,18 +76,69 @@
   // ── Session list ──
 
   async function loadSessions() {
-    const sessions = await api("/sessions");
-    sessionList.innerHTML = "";
-    sessions.forEach(function (s) {
-      const li = document.createElement("li");
-      li.className = "session-item" + (s.id === activeSessionId ? " active" : "");
-      li.textContent = s.title || s.id;
-      li.dataset.id = s.id;
-      li.addEventListener("click", function () {
-        selectSession(s.id);
+    try {
+      const sessions = await api("/sessions");
+      sessionList.innerHTML = "";
+      sessions.forEach(function (s) {
+        const li = document.createElement("li");
+        li.className = "session-item" + (s.id === activeSessionId ? " active" : "");
+        li.dataset.id = s.id;
+
+        const title = document.createElement("span");
+        title.className = "session-title";
+        title.textContent = s.title || s.id;
+        li.appendChild(title);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "session-delete";
+        deleteButton.textContent = "×";
+        deleteButton.title = "Delete chat";
+        deleteButton.setAttribute("aria-label", "Delete chat");
+        deleteButton.addEventListener("click", function (event) {
+          event.stopPropagation();
+          deleteSession(s.id);
+        });
+        li.appendChild(deleteButton);
+
+        li.addEventListener("click", function () {
+          selectSession(s.id);
+        });
+        sessionList.appendChild(li);
       });
-      sessionList.appendChild(li);
-    });
+      return sessions;
+    } catch (err) {
+      showStatus("Unable to load sessions: " + err.message);
+      return [];
+    }
+  }
+
+  async function deleteSession(id) {
+    try {
+      await api("/sessions/" + id, {
+        method: "DELETE",
+      });
+      if (activeSessionId === id) {
+        activeSessionId = null;
+        clearChat();
+        await loadSessions();
+        await startInitialSession();
+      } else {
+        await loadSessions();
+      }
+    } catch (err) {
+      showStatus("Unable to delete session: " + err.message);
+    }
+  }
+
+  async function startInitialSession() {
+    const sessions = await loadSessions();
+    if (sessions.length > 0) {
+      selectSession(sessions[sessions.length - 1].id);
+      return;
+    }
+    showStatus("Starting session…");
+    await createSession();
   }
 
   async function createSession() {
@@ -108,14 +165,20 @@
 
   async function sendMessage() {
     const text = composerInput.value.trim();
-    if (!text || !activeSessionId) return;
+    if (!text) return;
 
-    composerInput.value = "";
-    appendMessage(text, "user");
     btnSend.disabled = true;
-    showStatus("Thinking…");
 
     try {
+      if (!activeSessionId) {
+        showStatus("Starting session…");
+        await createSession();
+      }
+
+      composerInput.value = "";
+      appendMessage(text, "user");
+      showStatus("Thinking…");
+
       const result = await api("/sessions/" + activeSessionId + "/messages", {
         method: "POST",
         body: JSON.stringify({ message: text }),
@@ -149,5 +212,9 @@
   // ── Init ──
 
   renderEmpty();
-  loadSessions();
+  try {
+    await startInitialSession();
+  } catch (err) {
+    showStatus("Unable to start session: " + err.message);
+  }
 })();

@@ -92,3 +92,18 @@ class TestAgentShellUI:
     def test_static_js_accessible(self, ui_client: TestClient) -> None:
         response = ui_client.get("/static/agent-shell.js")
         assert response.status_code == 200
+
+    def test_static_js_contains_session_management_hooks(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        assert "startInitialSession" in response.text
+        assert "await createSession();" in response.text
+        assert "await startInitialSession();" in response.text
+        assert "deleteSession" in response.text
+        assert 'method: "DELETE"' in response.text
+        assert "session-delete" in response.text
+        assert "resp.status === 204" in response.text
+        assert "return {};" in response.text

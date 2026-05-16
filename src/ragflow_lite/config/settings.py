@@ -207,7 +207,7 @@ class Settings:
     agent_args: str = field(
         default_factory=lambda: _read_string_env(
             "MICRORAG_AGENT_ARGS",
-            "--acp --setting-sources project,local",
+            "--acp --setting-sources project",
         )
     )
     agent_cwd: str | None = field(

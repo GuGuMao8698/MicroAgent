@@ -90,11 +90,40 @@ body {
   font-size: 13px;
   color: var(--color-text-muted);
   transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .session-item:hover,
 .session-item.active {
   background: rgba(108, 140, 255, 0.08);
+  color: var(--color-text);
+}
+
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-delete {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.session-delete:hover {
+  background: rgba(255, 255, 255, 0.08);
   color: var(--color-text);
 }
 

@@ -9,6 +9,10 @@ from typing import Mapping
 SETUP_INCOMPLETE_MESSAGE = (
     "MicroRAG agent setup is incomplete. Runtime workspace is missing."
 )
+LOCAL_SETTINGS_REQUIRED_MESSAGE = (
+    "MicroRAG agent local settings are missing. Create "
+    "data/agent-runtime/workspace/.claude/settings.json before starting the agent."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +42,6 @@ def setup_agent_runtime(paths: AgentRuntimePaths) -> AgentRuntimePaths:
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copyfile(source_root / "CLAUDE.md", workspace / "CLAUDE.md")
-    shutil.copyfile(source_root / "settings.json", claude_dir / "settings.json")
     shutil.copyfile(
         source_root / "skills" / "microrag-search" / "SKILL.md",
         skill_dir / "SKILL.md",
@@ -63,11 +66,13 @@ def validate_agent_runtime_workspace(paths: AgentRuntimePaths) -> None:
     required = (
         paths.config_dir,
         paths.workspace_dir / "CLAUDE.md",
-        paths.workspace_dir / ".claude" / "settings.json",
         paths.workspace_dir / ".claude" / "skills" / "microrag-search" / "SKILL.md",
     )
     if not all(path.exists() for path in required):
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
+    settings_path = paths.workspace_dir / ".claude" / "settings.json"
+    if not settings_path.exists():
+        raise RuntimeError(LOCAL_SETTINGS_REQUIRED_MESSAGE)
 
 
 def build_agent_child_env(

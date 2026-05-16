@@ -60,6 +60,28 @@ def test_session_store_gets_and_marks_error(tmp_path: Path) -> None:
     assert updated.updated_at >= updated.created_at
 
 
+def test_session_store_deletes_metadata_only(tmp_path: Path) -> None:
+    store = AgentSessionStore(tmp_path / "agent_sessions.sqlite3")
+    first = store.create_session(
+        title="First",
+        claude_session_id="claude-1",
+        transcript_path="/internal/first.jsonl",
+        runtime_cwd="/internal/cwd",
+    )
+    second = store.create_session(
+        title="Second",
+        claude_session_id="claude-2",
+        transcript_path="/internal/second.jsonl",
+        runtime_cwd="/internal/cwd",
+    )
+
+    assert store.delete_session(first.id) is True
+
+    assert store.get_session(first.id) is None
+    assert [session.id for session in store.list_sessions()] == [second.id]
+    assert store.delete_session(first.id) is False
+
+
 def test_session_store_lists_same_timestamp_sessions_deterministically(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -70,7 +92,13 @@ def test_session_store_lists_same_timestamp_sessions_deterministically(
         "_now_iso",
         lambda: "2026-05-15T12:00:00+00:00",
     )
-    ids = iter(["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000003", "00000000-0000-0000-0000-000000000002"])
+    ids = iter(
+        [
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000003",
+            "00000000-0000-0000-0000-000000000002",
+        ]
+    )
     monkeypatch.setattr(session_store_module.uuid, "uuid4", lambda: next(ids))
 
     store.create_session(

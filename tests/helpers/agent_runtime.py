@@ -9,4 +9,9 @@ def setup_test_agent_runtime(tmp_path: Path):
         setup_agent_runtime,
     )
 
-    return setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    paths = setup_agent_runtime(default_agent_runtime_paths(tmp_path))
+    (paths.workspace_dir / ".claude" / "settings.json").write_text(
+        '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
+        encoding="utf-8",
+    )
+    return paths

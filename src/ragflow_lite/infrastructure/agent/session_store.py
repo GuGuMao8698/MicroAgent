@@ -131,6 +131,17 @@ class AgentSessionStore:
                 (error, _now_iso(), session_id),
             )
 
+    def delete_session(self, session_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM agent_sessions
+                WHERE id = ?
+                """,
+                (session_id,),
+            )
+        return cursor.rowcount > 0
+
     def debug_columns(self, table: str) -> list[str]:
         if table != "agent_sessions":
             msg = f"unsupported debug table: {table}"
