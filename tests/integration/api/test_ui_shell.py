@@ -107,3 +107,42 @@ class TestAgentShellUI:
         assert "session-delete" in response.text
         assert "resp.status === 204" in response.text
         assert "return {};" in response.text
+
+    def test_agent_shell_contains_command_picker_and_activity_hosts(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/agent")
+        assert response.status_code == 200
+        assert 'id="slash-picker"' in response.text
+        assert 'id="activity-stream"' in response.text
+        assert 'id="composer-toolbar"' in response.text
+
+    def test_agent_shell_script_contains_slash_prefill_not_command_execution(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+        assert "loadCommandSummaries" in response.text
+        assert "renderSlashPicker" in response.text
+        assert "selectSlashCommand" in response.text
+        assert "renderActivityStream" in response.text
+        assert "/api/v0/agent/commands/" not in response.text
+
+    def test_agent_shell_does_not_surface_mcp_or_runtime_paths(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/agent")
+        assert response.status_code == 200
+        forbidden = [
+            "MCP server",
+            "mcp server",
+            "mcpServers",
+            "CLAUDE_CONFIG_DIR",
+            "MICRORAG_AGENT_CWD",
+            "transcript_path",
+            "runtime_cwd",
+            "stderr",
+            "traceback",
+        ]
+        for token in forbidden:
+            assert token not in response.text, f"Forbidden token found: {token}"

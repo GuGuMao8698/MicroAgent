@@ -127,3 +127,25 @@ def test_session_store_lists_same_timestamp_sessions_deterministically(
         "00000000-0000-0000-0000-000000000002",
         "00000000-0000-0000-0000-000000000001",
     ]
+
+
+def test_session_store_does_not_persist_activity_transcript_or_memory(
+    tmp_path: Path,
+) -> None:
+
+    store = AgentSessionStore(tmp_path / "agent_sessions.sqlite3")
+    store.create_session(
+        title="Session",
+        claude_session_id="claude-session-1",
+        transcript_path="/runtime/transcript.jsonl",
+        runtime_cwd="/runtime/workspace",
+    )
+
+    columns = store.debug_columns("agent_sessions")
+
+    assert "messages" not in columns
+    assert "conversation" not in columns
+    assert "transcript_json" not in columns
+    assert "memory" not in columns
+    assert "activities" not in columns
+    assert "command_summaries" not in columns

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone  # noqa: F401 – runtime use in test bodies
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -354,3 +355,145 @@ class TestSendMessage:
 
         store.mark_error.assert_called_once_with("sess-1", "session not found")
         acp.send_message.assert_not_called()
+
+
+class TestListAgentCommands:
+    """GET /commands returns UI-safe command summaries from runtime."""
+
+    def test_get_agent_commands_returns_runtime_summaries(self) -> None:
+        from ragflow_lite.infrastructure.agent.activity_projection import (
+            AgentCommandSummary,
+        )
+
+        acp = MagicMock()
+        acp.command_summaries.return_value = [
+            AgentCommandSummary(
+                name="microrag-search",
+                description="Search MicroRAG",
+                input_hint="question",
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        ]
+
+        app = _build_app(acp_client=acp, session_store=MagicMock())
+        client = TestClient(app)
+
+        response = client.get("/api/v0/agent/commands")
+        assert response.status_code == 200
+
+        body = response.json()
+        assert body["commands"][0]["name"] == "microrag-search"
+        assert body["commands"][0]["description"] == "Search MicroRAG"
+        assert body["commands"][0]["input_hint"] == "question"
+        assert body["commands"][0]["source"] == "runtime"
+
+        raw = json.dumps(body)
+        assert "SKILL.md" not in raw
+        assert "transcript_path" not in raw
+
+
+class TestListAgentActivity:
+    """GET /sessions/{session_id}/activity returns per-session activity."""
+
+    def test_get_agent_activity_returns_sanitized_rows(self) -> None:
+        from ragflow_lite.infrastructure.agent.activity_projection import (
+            AgentActivity,
+        )
+
+        session = _make_session()
+        store = MagicMock()
+        store.get_session.return_value = session
+
+        acp = MagicMock()
+        acp.activities_for_session.return_value = [
+            AgentActivity(
+                activity_id="activity-abc123",
+                session_id=_SENTINEL_CLAUDE_ID,
+                kind="subagent",
+                label="Subagent",
+                status="running",
+                summary="Subagent is running.",
+                source_tool_call_id="tool-1",
+                created_at=datetime.now(tz=timezone.utc),
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        ]
+
+        app = _build_app(acp_client=acp, session_store=store)
+        client = TestClient(app)
+
+        response = client.get("/api/v0/agent/sessions/sess-1/activity")
+        assert response.status_code == 200
+
+        body = response.json()
+        assert body["activities"][0]["kind"] == "subagent"
+        assert body["activities"][0]["status"] == "running"
+        assert body["activities"][0]["label"] == "Subagent"
+
+        raw = json.dumps(body)
+        assert "/home/xia" not in raw
+        assert "stderr" not in raw
+        assert "traceback" not in raw
+
+    def test_get_agent_activity_returns_404_for_unknown_session(self) -> None:
+        store = MagicMock()
+        store.get_session.return_value = None
+
+        app = _build_app(acp_client=MagicMock(), session_store=store)
+        client = TestClient(app)
+
+        response = client.get("/api/v0/agent/sessions/unknown/activity")
+        assert response.status_code == 404
+
+
+class TestNoCommandExecutionEndpoint:
+    """No POST /commands/{name} endpoint should exist."""
+
+    def test_no_slash_command_execution_endpoint_exists(self) -> None:
+        app = _build_app(acp_client=MagicMock(), session_store=MagicMock())
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v0/agent/commands/microrag-search",
+            json={"input": "question"},
+        )
+        assert response.status_code == 404
+
+
+class TestActivityAndCommandsDoNotExposeInternals:
+    """Command and activity responses must not leak MCP or runtime internals."""
+
+    def test_no_mcp_or_runtime_internals_in_responses(self) -> None:
+        from ragflow_lite.infrastructure.agent.activity_projection import (
+            AgentCommandSummary,
+        )
+
+        acp = MagicMock()
+        acp.command_summaries.return_value = [
+            AgentCommandSummary(
+                name="microrag-search",
+                description="Search MicroRAG",
+                input_hint="query",
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        ]
+
+        app = _build_app(acp_client=acp, session_store=MagicMock())
+        client = TestClient(app)
+
+        command_response = client.get("/api/v0/agent/commands")
+        assert command_response.status_code == 200
+
+        combined = command_response.text
+        for token in [
+            "MCP server",
+            "mcpServers",
+            "CLAUDE_CONFIG_DIR",
+            "MICRORAG_AGENT_CWD",
+            "transcript_path",
+            "runtime_cwd",
+            "stderr",
+            "traceback",
+            "SKILL.md",
+        ]:
+            assert token not in combined, f"Leaked internal token: {token}"
