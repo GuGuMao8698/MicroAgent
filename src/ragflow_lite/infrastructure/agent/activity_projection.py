@@ -35,6 +35,8 @@ _MAX_TEXT_LEN = 240
 
 _SUBAGENT_TOOL_NAMES = frozenset({"agent", "task"})
 
+_SKILL_TOOL_NAMES = frozenset({"skilltool"})
+
 
 class AgentCommandSummary(BaseModel):
     name: str
@@ -60,7 +62,9 @@ class AgentActivity(BaseModel):
 def _sanitize(text: str) -> str:
     for marker in _SENSITIVE_MARKERS:
         text = text.replace(marker, "[redacted]")
-    return text[:_MAX_TEXT_LEN]
+    if len(text) > _MAX_TEXT_LEN:
+        text = text[:_MAX_TEXT_LEN]
+    return text
 
 
 def _activity_id(session_id: str, source: str) -> str:
@@ -73,8 +77,7 @@ def _now() -> datetime:
 
 
 class AgentRuntimeProjection:
-    def __init__(self, *, session_id: str) -> None:
-        self._session_id = session_id
+    def __init__(self) -> None:
         self._commands: dict[str, AgentCommandSummary] = {}
         self._activities: dict[str, AgentActivity] = {}
         self._tool_call_index: dict[str, str] = {}
@@ -97,6 +100,12 @@ class AgentRuntimeProjection:
     def activities(self) -> list[AgentActivity]:
         return sorted(self._activities.values(), key=lambda a: a.created_at)
 
+    def activities_for_session(self, session_id: str) -> list[AgentActivity]:
+        return sorted(
+            [a for a in self._activities.values() if a.session_id == session_id],
+            key=lambda a: a.created_at,
+        )
+
     def _on_available_commands_update(self, event: dict[str, Any]) -> None:
         commands = event.get("commands")
         if not isinstance(commands, list):
@@ -118,20 +127,25 @@ class AgentRuntimeProjection:
             )
 
     def _on_tool_call(self, event: dict[str, Any]) -> None:
+        session_id = event.get("sessionId")
+        if not isinstance(session_id, str):
+            return
         tool_call_id = event.get("toolCallId")
         if not isinstance(tool_call_id, str):
             return
         tool_name = event.get("toolName", "")
-        kind = (
-            "subagent"
-            if isinstance(tool_name, str) and tool_name.lower() in _SUBAGENT_TOOL_NAMES
-            else "tool"
-        )
+        lowered = tool_name.lower() if isinstance(tool_name, str) else ""
+        if lowered in _SUBAGENT_TOOL_NAMES:
+            kind = "subagent"
+        elif lowered in _SKILL_TOOL_NAMES:
+            kind = "skill"
+        else:
+            kind = "tool"
         now = _now()
-        aid = _activity_id(self._session_id, tool_call_id)
+        aid = _activity_id(session_id, tool_call_id)
         activity = AgentActivity(
             activity_id=aid,
-            session_id=self._session_id,
+            session_id=session_id,
             kind=kind,
             label=_sanitize(f"{tool_name} call"),
             status="running",
@@ -159,15 +173,25 @@ class AgentRuntimeProjection:
         )
 
     def _on_permission_request(self, event: dict[str, Any]) -> None:
+        session_id = event.get("sessionId")
+        if not isinstance(session_id, str):
+            return
         tool_call_id = event.get("toolCallId")
         if not isinstance(tool_call_id, str):
             return
+        aid = self._tool_call_index.get(tool_call_id)
+        if aid is not None:
+            existing = self._activities[aid]
+            self._activities[aid] = existing.model_copy(
+                update={"status": "waiting_for_permission", "updated_at": _now()}
+            )
+            return
         tool_name = event.get("toolName", "")
         now = _now()
-        aid = _activity_id(self._session_id, tool_call_id)
-        activity = AgentActivity(
+        aid = _activity_id(session_id, tool_call_id)
+        self._activities[aid] = AgentActivity(
             activity_id=aid,
-            session_id=self._session_id,
+            session_id=session_id,
             kind="permission",
             label=_sanitize(f"Permission: {tool_name}"),
             status="waiting_for_permission",
@@ -175,10 +199,12 @@ class AgentRuntimeProjection:
             updated_at=now,
             source_tool_call_id=tool_call_id,
         )
-        self._activities[aid] = activity
         self._tool_call_index[tool_call_id] = aid
 
     def _on_message_chunk(self, event: dict[str, Any]) -> None:
+        session_id = event.get("sessionId")
+        if not isinstance(session_id, str):
+            return
         content = event.get("content")
         if isinstance(content, dict):
             text = content.get("text", "")
@@ -199,8 +225,9 @@ class AgentRuntimeProjection:
         else:
             return
 
+        # 单例设计：每种 kind 只保留最新进度行，避免在只有扁平文本时产生重复行
         source_key = f"chunk:{kind}"
-        aid = _activity_id(self._session_id, source_key)
+        aid = _activity_id(session_id, source_key)
         now = _now()
         sanitized_summary = _sanitize(text)
         existing = self._activities.get(aid)
@@ -215,7 +242,7 @@ class AgentRuntimeProjection:
         else:
             self._activities[aid] = AgentActivity(
                 activity_id=aid,
-                session_id=self._session_id,
+                session_id=session_id,
                 kind=kind,
                 label=label,
                 status="running",

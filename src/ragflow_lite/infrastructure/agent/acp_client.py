@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from subprocess import PIPE
 from typing import Any, Protocol, TextIO
 
+from ragflow_lite.infrastructure.agent.activity_projection import (
+    AgentActivity,
+    AgentCommandSummary,
+    AgentRuntimeProjection,
+)
+
 BACKEND_ONLY_KEYS = {
     "agentInfo",
     "cwd",
@@ -91,6 +97,7 @@ class AcpClient:
         self._process: _AcpProcess | None = None
         self._initialized = False
         self._next_id = 1
+        self._projection = AgentRuntimeProjection()
 
     def start(self) -> None:
         if self._process is not None:
@@ -183,6 +190,8 @@ class AcpClient:
             if line == "":
                 raise RuntimeError("ACP client process returned no response.")
             response = json.loads(line)
+            if isinstance(response, dict):
+                self._record_projection_event(response)
             self._collect_agent_message_chunk(
                 response,
                 message_chunks,
@@ -237,6 +246,26 @@ class AcpClient:
         text = content.get("text")
         if isinstance(text, str):
             message_chunks.append(text)
+
+    def _record_projection_event(self, response: dict[str, Any]) -> None:
+        if response.get("method") != "session/update":
+            return
+        params = response.get("params")
+        if not isinstance(params, dict):
+            return
+        update = params.get("update")
+        if not isinstance(update, dict):
+            return
+        session_id = params.get("sessionId")
+        if isinstance(session_id, str):
+            update["sessionId"] = session_id
+        self._projection.record_event(update)
+
+    def command_summaries(self) -> list[AgentCommandSummary]:
+        return self._projection.command_summaries()
+
+    def activities_for_session(self, session_id: str) -> list[AgentActivity]:
+        return self._projection.activities_for_session(session_id)
 
     def _require_process(self) -> _AcpProcess:
         if self._process is None:

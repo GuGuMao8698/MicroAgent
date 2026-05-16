@@ -503,3 +503,99 @@ def test_start_passes_configured_child_env() -> None:
             {"CLAUDE_CONFIG_DIR": "/runtime/config"},
         )
     ]
+
+
+def test_acp_client_records_available_commands_update() -> None:
+    import json as _json
+
+    notification = _json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "available_commands_update",
+                    "commands": [
+                        {
+                            "name": "microrag-search",
+                            "description": "Search MicroRAG",
+                            "input_hint": "question",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    init_response = _json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1}}
+    )
+
+    client, proc = _build_client(
+        stdout_lines=[notification + "\n", init_response + "\n"]
+    )
+    client.initialize()
+
+    commands = client.command_summaries()
+    assert [c.name for c in commands] == ["microrag-search"]
+    assert commands[0].description == "Search MicroRAG"
+
+
+def test_acp_client_records_agent_tool_activity() -> None:
+    import json as _json
+
+    tool_call_notification = _json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "claude-s-1",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-1",
+                    "toolName": "Agent",
+                },
+            },
+        }
+    )
+    tool_call_update_notification = _json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "claude-s-1",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tc-1",
+                    "status": "completed",
+                },
+            },
+        }
+    )
+    message_response = _json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {"content": [{"type": "text", "text": "done"}]},
+        }
+    )
+
+    init_resp = _json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1}}
+    )
+
+    client, proc = _build_client(
+        stdout_lines=[
+            init_resp + "\n",
+            tool_call_notification + "\n",
+            tool_call_update_notification + "\n",
+            message_response + "\n",
+        ]
+    )
+    client.initialize()
+
+    client.send_message(claude_session_id="claude-s-1", message="run task")
+
+    activities = client.activities_for_session("claude-s-1")
+    assert len(activities) == 1
+    assert activities[0].kind == "subagent"
+    assert activities[0].status == "completed"
