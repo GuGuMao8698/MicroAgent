@@ -47,8 +47,7 @@ def create_session(body: CreateSessionRequest, request: Request) -> SessionRespo
     services = request.app.state.services
     acp_client = services.acp_client
 
-    acp_client.start()
-    acp_client.initialize()
+    acp_client.ensure_ready()
     session_result = acp_client.new_session()
     claude_session_id: str = session_result["sessionId"]
 
@@ -72,6 +71,7 @@ def resume_session(session_id: str, request: Request) -> ResumeSessionResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     try:
+        services.acp_client.ensure_ready()
         services.acp_client.resume_session(session.claude_session_id)
     except RuntimeError as exc:
         services.agent_session_store.mark_error(session_id, str(exc))
@@ -107,6 +107,7 @@ def send_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     try:
+        services.acp_client.ensure_ready()
         services.acp_client.resume_session(session.claude_session_id)
     except RuntimeError as exc:
         services.agent_session_store.mark_error(session_id, str(exc))

@@ -23,32 +23,6 @@ if [[ ! -d "$REFERENCE_CLAUDE_CODE_DIR/node_modules" ]]; then
   exit 2
 fi
 
-run_reference_claude_code() {
-  cd "$REFERENCE_CLAUDE_CODE_DIR"
-  export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
-  export MICRORAG_AGENT_CWD="${MICRORAG_AGENT_CWD:-$ROOT/data/agent-runtime/workspace}"
-  export MICRORAG_AGENT_CONFIG_DIR="${MICRORAG_AGENT_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
-  require_local_settings
-  exec bun --silent run dev -- "$@"
-}
-
-require_local_settings() {
-  local settings_path="$ROOT/data/agent-runtime/workspace/.claude/settings.json"
-  if [[ ! -f "$settings_path" ]]; then
-    echo "setup error: missing $settings_path" >&2
-    echo "Create this local-only file with your Claude Code permissions before starting MicroRAG agent runtime." >&2
-    exit 2
-  fi
-}
-
-if (($# > 0)); then
-  run_reference_claude_code "$@"
-fi
-
-if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
-  die "missing $ROOT/.venv/bin/python"
-fi
-
 LOCAL_ENV="$ROOT/data/agent-runtime/local.env"
 if [[ -f "$LOCAL_ENV" ]]; then
   set -a
@@ -83,6 +57,32 @@ require_env \
   ANTHROPIC_DEFAULT_HAIKU_MODEL \
   ANTHROPIC_DEFAULT_SONNET_MODEL \
   ANTHROPIC_DEFAULT_OPUS_MODEL
+
+run_reference_claude_code() {
+  cd "$REFERENCE_CLAUDE_CODE_DIR"
+  export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
+  export MICRORAG_AGENT_CWD="${MICRORAG_AGENT_CWD:-$ROOT/data/agent-runtime/workspace}"
+  export MICRORAG_AGENT_CONFIG_DIR="${MICRORAG_AGENT_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
+  require_local_settings
+  exec bun --silent run dev -- "$@"
+}
+
+require_local_settings() {
+  local settings_path="$ROOT/data/agent-runtime/workspace/.claude/settings.json"
+  if [[ ! -f "$settings_path" ]]; then
+    echo "setup error: missing $settings_path" >&2
+    echo "Create this local-only file with your Claude Code permissions before starting MicroRAG agent runtime." >&2
+    exit 2
+  fi
+}
+
+if (($# > 0)); then
+  run_reference_claude_code "$@"
+fi
+
+if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+  die "missing $ROOT/.venv/bin/python"
+fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 

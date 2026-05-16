@@ -89,6 +89,7 @@ class AcpClient:
         self._config = config
         self._process_factory = process_factory
         self._process: _AcpProcess | None = None
+        self._initialized = False
         self._next_id = 1
 
     def start(self) -> None:
@@ -105,7 +106,7 @@ class AcpClient:
             raise RuntimeError(redact_acp_error("", raw_runtime=True)) from None
 
     def initialize(self) -> dict[str, Any]:
-        return self._request(
+        result = self._request(
             "initialize",
             {
                 "protocolVersion": 1,
@@ -115,6 +116,13 @@ class AcpClient:
                 },
             },
         )
+        self._initialized = True
+        return result
+
+    def ensure_ready(self) -> None:
+        self.start()
+        if not self._initialized:
+            self.initialize()
 
     def new_session(self) -> dict[str, Any]:
         return self._request(
@@ -131,6 +139,7 @@ class AcpClient:
             {
                 "sessionId": claude_session_id,
                 "cwd": self._config.cwd,
+                "mcpServers": [],
             },
         )
 

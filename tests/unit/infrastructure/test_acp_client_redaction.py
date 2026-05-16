@@ -123,6 +123,46 @@ def test_initialize_writes_json_rpc_and_redacts_result() -> None:
     }
 
 
+def test_ensure_ready_starts_and_initializes_once() -> None:
+    process = _FakeProcess(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": 1,
+                    },
+                }
+            )
+            + "\n"
+        ]
+    )
+    starts = 0
+
+    def process_factory(command, args, cwd, env):
+        nonlocal starts
+        starts += 1
+        return process
+
+    client = AcpClient(
+        config=AcpRuntimeConfig(
+            command="acp-agent",
+            args=["--stdio"],
+            cwd="/runtime/cwd",
+        ),
+        process_factory=process_factory,
+    )
+
+    client.ensure_ready()
+    client.ensure_ready()
+    request = _read_request(process.stdin)
+
+    assert starts == 1
+    assert request["method"] == "initialize"
+    assert process.stdin.readline() == ""
+
+
 def test_resume_session_writes_session_load_and_redacts_result() -> None:
     client, process = _build_client(
         stdout_lines=[
@@ -148,6 +188,7 @@ def test_resume_session_writes_session_load_and_redacts_result() -> None:
     assert request["params"] == {
         "sessionId": "claude-session-1",
         "cwd": "/runtime/cwd",
+        "mcpServers": [],
     }
     assert result == {
         "session_id": "session-1",

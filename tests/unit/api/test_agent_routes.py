@@ -154,9 +154,8 @@ class TestCreateSession:
         assert "claude_session_id" not in item
         assert "transcript_path" not in item
 
-        # acp_client.start() and initialize() must have been called
-        acp.start.assert_called_once()
-        acp.initialize.assert_called_once()
+        # acp_client runtime must be ready before creating a session
+        acp.ensure_ready.assert_called_once()
         acp.new_session.assert_called_once()
 
         # Session store must have been called with the claude session id
@@ -293,6 +292,7 @@ class TestSendMessage:
         assert "transcript_path" not in item
         assert "cwd" not in item
 
+        acp.ensure_ready.assert_called_once()
         acp.resume_session.assert_called_once_with(_SENTINEL_CLAUDE_ID)
         acp.send_message.assert_called_once_with(_SENTINEL_CLAUDE_ID, "Hello")
 
