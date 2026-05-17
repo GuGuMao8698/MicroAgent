@@ -10,6 +10,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ragflow_lite.api.schemas.agent import (
+    AgentActivitiesResponse,
+    AgentActivityResponse,
+    AgentCommandsResponse,
+    AgentCommandSummaryResponse,
     CreateSessionRequest,
     ResumeSessionResponse,
     SendMessageRequest,
@@ -131,4 +135,51 @@ def send_message(
         session_id=session_id,
         status="sent",
         message=result.get("message"),
+    )
+
+
+@router.get("/commands", response_model=AgentCommandsResponse)
+def list_agent_commands(request: Request) -> AgentCommandsResponse:
+    services = request.app.state.services
+    try:
+        services.acp_client.ensure_ready()
+    except RuntimeError:
+        return AgentCommandsResponse(commands=[])
+
+    commands = services.acp_client.command_summaries()
+    return AgentCommandsResponse(
+        commands=[
+            AgentCommandSummaryResponse(
+                name=command.name,
+                description=command.description,
+                input_hint=command.input_hint,
+                source=command.source,
+            )
+            for command in commands
+        ]
+    )
+
+
+@router.get("/sessions/{session_id}/activity", response_model=AgentActivitiesResponse)
+def list_agent_activity(session_id: str, request: Request) -> AgentActivitiesResponse:
+    services = request.app.state.services
+    session = services.agent_session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    activities = services.acp_client.activities_for_session(session.claude_session_id)
+    return AgentActivitiesResponse(
+        activities=[
+            AgentActivityResponse(
+                activity_id=activity.activity_id,
+                kind=activity.kind,
+                label=activity.label,
+                status=activity.status,
+                summary=activity.summary,
+                source_message_id=activity.source_message_id,
+                source_tool_call_id=activity.source_tool_call_id,
+                created_at=activity.created_at,
+                updated_at=activity.updated_at,
+            )
+            for activity in activities
+        ]
     )

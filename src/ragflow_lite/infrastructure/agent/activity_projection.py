@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,17 +19,28 @@ ACTIVITY_STATUSES = frozenset(
     }
 )
 
-_SENSITIVE_MARKERS = (
-    "/home/",
-    "\\home\\",
-    "SKILL.md",
-    "stderr",
-    "traceback",
-    "JSON-RPC",
-    "transcript_path",
-    "runtime_cwd",
-    "CLAUDE_CONFIG_DIR",
-    "MICRORAG_AGENT_CWD",
+_SENSITIVE_PATTERNS = (
+    re.compile(r"(?i)\b(?:stderr|traceback|json-rpc|mcpservers|mcp server)\b"),
+    re.compile(r'(?i)File\s+"(?:src|tests|参考项目)/[^"]+",\s+line\s+\d+[^\n]*'),
+    re.compile(
+        r"(?i)\b(?:claude_config_dir|microrag_agent_cwd|transcript_path|runtime_cwd|cwd)\s*=\s*[^\s,;]+"
+    ),
+    re.compile(
+        r'(?i)"?(?:claude_config_dir|microrag_agent_cwd|transcript_path|runtime_cwd|cwd)"?\s*:\s*"[^"]+"'
+    ),
+    re.compile(
+        r"(?i)\b(?:claude_config_dir|microrag_agent_cwd|transcript_path|runtime_cwd|cwd)\s*:\s*[^\s,;]+"
+    ),
+    re.compile(r"(?i)(?:\.claude/)?skills/[^\s,;]+/skill\.md\b"),
+    re.compile(r"(?i)\b(?:src|tests|参考项目)/[^\s,;]+"),
+    re.compile(
+        r"(?i)\b(?:claude_config_dir|microrag_agent_cwd|transcript_path|runtime_cwd|cwd)\b"
+    ),
+    re.compile(r"(?i)\bskill\.md\b"),
+    re.compile(r"(?i)\b[a-z]:\\(?:[^\\\s]+\\)*[^\\\s]+"),
+    re.compile(
+        r"(?<![A-Za-z0-9._-])/(?:tmp|workspace|var|home|Users|etc|opt|srv|root|mnt|private|proc|dev|run)(?:/[^\s,;]+)*"
+    ),
 )
 
 _MAX_TEXT_LEN = 240
@@ -60,8 +72,8 @@ class AgentActivity(BaseModel):
 
 
 def _sanitize(text: str) -> str:
-    for marker in _SENSITIVE_MARKERS:
-        text = text.replace(marker, "[redacted]")
+    for pattern in _SENSITIVE_PATTERNS:
+        text = pattern.sub("[redacted]", text)
     if len(text) > _MAX_TEXT_LEN:
         text = text[:_MAX_TEXT_LEN]
     return text
@@ -80,7 +92,30 @@ class AgentRuntimeProjection:
     def __init__(self) -> None:
         self._commands: dict[str, AgentCommandSummary] = {}
         self._activities: dict[str, AgentActivity] = {}
-        self._tool_call_index: dict[str, str] = {}
+        self._tool_call_index: dict[tuple[str, str], str] = {}
+
+    def _index_tool_call(
+        self, session_id: str, tool_call_id: str, activity_id: str
+    ) -> None:
+        self._tool_call_index[(session_id, tool_call_id)] = activity_id
+
+    def _tool_call_activity_id(
+        self, session_id: str | None, tool_call_id: str
+    ) -> str | None:
+        if session_id is not None:
+            return self._tool_call_index.get((session_id, tool_call_id))
+
+        matches = [
+            activity_id
+            for (
+                indexed_session_id,
+                indexed_tool_call_id,
+            ), activity_id in self._tool_call_index.items()
+            if indexed_tool_call_id == tool_call_id
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def record_event(self, event: dict[str, Any]) -> None:
         handler = {
@@ -120,11 +155,20 @@ class AgentRuntimeProjection:
             self._commands[name] = AgentCommandSummary(
                 name=name,
                 description=_sanitize(cmd.get("description", "")),
-                input_hint=_sanitize(cmd["input_hint"])
-                if isinstance(cmd.get("input_hint"), str)
-                else None,
+                input_hint=self._command_input_hint(cmd),
                 updated_at=now,
             )
+
+    def _command_input_hint(self, command: dict[str, Any]) -> str | None:
+        input_hint = command.get("input_hint")
+        if isinstance(input_hint, str):
+            return _sanitize(input_hint)
+        input_payload = command.get("input")
+        if isinstance(input_payload, dict) and isinstance(
+            input_payload.get("hint"), str
+        ):
+            return _sanitize(input_payload["hint"])
+        return None
 
     def _on_tool_call(self, event: dict[str, Any]) -> None:
         session_id = event.get("sessionId")
@@ -143,24 +187,39 @@ class AgentRuntimeProjection:
             kind = "tool"
         now = _now()
         aid = _activity_id(session_id, tool_call_id)
-        activity = AgentActivity(
-            activity_id=aid,
-            session_id=session_id,
-            kind=kind,
-            label=_sanitize(f"{tool_name} call"),
-            status="running",
-            created_at=now,
-            updated_at=now,
-            source_tool_call_id=tool_call_id,
-        )
-        self._activities[aid] = activity
-        self._tool_call_index[tool_call_id] = aid
+        existing = self._activities.get(aid)
+        if existing is not None:
+            self._activities[aid] = existing.model_copy(
+                update={
+                    "kind": kind,
+                    "label": _sanitize(f"{tool_name} call"),
+                    "status": existing.status,
+                    "updated_at": now,
+                    "source_tool_call_id": tool_call_id,
+                }
+            )
+        else:
+            activity = AgentActivity(
+                activity_id=aid,
+                session_id=session_id,
+                kind=kind,
+                label=_sanitize(f"{tool_name} call"),
+                status="running",
+                created_at=now,
+                updated_at=now,
+                source_tool_call_id=tool_call_id,
+            )
+            self._activities[aid] = activity
+        self._index_tool_call(session_id, tool_call_id, aid)
 
     def _on_tool_call_update(self, event: dict[str, Any]) -> None:
+        session_id = event.get("sessionId")
+        if session_id is not None and not isinstance(session_id, str):
+            return
         tool_call_id = event.get("toolCallId")
         if not isinstance(tool_call_id, str):
             return
-        aid = self._tool_call_index.get(tool_call_id)
+        aid = self._tool_call_activity_id(session_id, tool_call_id)
         if aid is None:
             return
         raw_status = event.get("status", "")
@@ -179,7 +238,7 @@ class AgentRuntimeProjection:
         tool_call_id = event.get("toolCallId")
         if not isinstance(tool_call_id, str):
             return
-        aid = self._tool_call_index.get(tool_call_id)
+        aid = self._tool_call_activity_id(session_id, tool_call_id)
         if aid is not None:
             existing = self._activities[aid]
             self._activities[aid] = existing.model_copy(
@@ -199,7 +258,7 @@ class AgentRuntimeProjection:
             updated_at=now,
             source_tool_call_id=tool_call_id,
         )
-        self._tool_call_index[tool_call_id] = aid
+        self._index_tool_call(session_id, tool_call_id, aid)
 
     def _on_message_chunk(self, event: dict[str, Any]) -> None:
         session_id = event.get("sessionId")

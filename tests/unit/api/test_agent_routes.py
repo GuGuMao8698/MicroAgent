@@ -360,7 +360,9 @@ class TestSendMessage:
 class TestListAgentCommands:
     """GET /commands returns UI-safe command summaries from runtime."""
 
-    def test_get_agent_commands_returns_runtime_summaries(self) -> None:
+    def test_get_agent_commands_ensures_runtime_ready_before_reading_summaries(
+        self,
+    ) -> None:
         from ragflow_lite.infrastructure.agent.activity_projection import (
             AgentCommandSummary,
         )
@@ -390,6 +392,31 @@ class TestListAgentCommands:
         raw = json.dumps(body)
         assert "SKILL.md" not in raw
         assert "transcript_path" not in raw
+
+        acp.ensure_ready.assert_called_once_with()
+        acp.command_summaries.assert_called_once_with()
+        assert acp.mock_calls.index(("ensure_ready", (), {})) < acp.mock_calls.index(
+            ("command_summaries", (), {})
+        )
+
+    def test_get_agent_commands_returns_empty_list_on_runtime_error(self) -> None:
+        acp = MagicMock()
+        acp.ensure_ready.side_effect = RuntimeError(
+            "Claude Code crashed; stderr=/tmp/x transcript_path=/tmp/y"
+        )
+
+        app = _build_app(acp_client=acp, session_store=MagicMock())
+        client = TestClient(app)
+
+        response = client.get("/api/v0/agent/commands")
+        assert response.status_code == 200
+        assert response.json() == {"commands": []}
+
+        raw = response.text
+        assert "Claude Code" not in raw
+        assert "transcript_path" not in raw
+        assert "stderr" not in raw
+        acp.command_summaries.assert_not_called()
 
 
 class TestListAgentActivity:

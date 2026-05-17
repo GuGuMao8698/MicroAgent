@@ -128,6 +128,133 @@ class TestAgentShellUI:
         assert "renderActivityStream" in response.text
         assert "/api/v0/agent/commands/" not in response.text
 
+    def test_select_slash_command_only_prefills_text(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        select_slash_command = response.text.split(
+            "function selectSlashCommand(command) {", 1
+        )[1].split("function addLocalActivity(activity) {", 1)[0]
+        assert 'input.value = "/" + command.name + " ";' in select_slash_command
+        assert "renderSlashPicker();" in select_slash_command
+        assert "addLocalActivity(" not in select_slash_command
+
+    def test_static_js_uses_per_session_local_activity_storage(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        assert "localActivitiesBySession" in response.text
+        assert "localActivities = []" not in response.text
+        assert "localActivitiesBySession[activeSessionId]" in response.text
+        assert "getLocalActivities(activeSessionId)" in response.text
+        assert (
+            "renderCurrentSessionActivities(requestedSessionId, runtimeActivities);"
+            in (response.text)
+        )
+        assert "delete localActivitiesBySession[id];" in response.text
+
+    def test_static_js_guards_activity_rendering_by_expected_session(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        assert "async function loadActivityStream(sessionId)" in response.text
+        assert (
+            "const requestedSessionId = sessionId || activeSessionId;" in response.text
+        )
+        assert "if (requestedSessionId !== activeSessionId) return;" in response.text
+        assert (
+            "renderCurrentSessionActivities(requestedSessionId, runtimeActivities);"
+            in (response.text)
+        )
+
+    def test_static_js_polls_activity_stream_while_message_is_in_flight(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        assert "startActivityPolling" in response.text
+        assert "stopActivityPolling" in response.text
+        assert "clearInterval(activityPollTimer);" in response.text
+        assert "activityPollTimer = window.setInterval" in response.text
+        assert "loadActivityStream(pollSessionId).catch" in response.text
+        assert "refreshActivityStreamBestEffort();" in response.text
+
+    def test_static_js_keeps_activity_refresh_out_of_message_success_path(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        send_message = response.text.split("async function sendMessage() {", 1)[
+            1
+        ].split("// ── Event binding ──", 1)[0]
+        assert (
+            'const result = await api("/sessions/" + sendSessionId + "/messages",'
+            in (send_message)
+        )
+        assert "await refreshActivityStreamBestEffort();" in send_message
+        assert "await loadActivityStream();" not in send_message
+
+    def test_send_message_snapshots_session_and_guards_success_ui_updates(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        send_message = response.text.split("async function sendMessage() {", 1)[
+            1
+        ].split("// ── Event binding ──", 1)[0]
+        assert "let sendSessionId = null;" in send_message
+        assert "sendSessionId = activeSessionId;" in send_message
+        assert "startActivityPolling(sendSessionId);" in send_message
+        assert "if (sendSessionId !== activeSessionId) return;" in send_message
+        assert (
+            'const result = await api("/sessions/" + sendSessionId + "/messages",'
+            in (send_message)
+        )
+
+    def test_send_message_guards_stale_error_and_ui_cleanup_paths(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        send_message = response.text.split("async function sendMessage() {", 1)[
+            1
+        ].split("// ── Event binding ──", 1)[0]
+        assert "let sendSessionId = null;" in send_message
+        assert "if (sendSessionId === activeSessionId) {" in send_message
+        assert 'appendMessage("Network error: " + err.message, "assistant");' in (
+            send_message
+        )
+        assert "if (!sendSessionId || sendSessionId === activeSessionId) {" in (
+            send_message
+        )
+        assert "clearStatus();" in send_message
+        assert "composerInput.focus();" in send_message
+
+    def test_create_session_resets_visible_activity_stream(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        create_session = response.text.split("async function createSession() {", 1)[
+            1
+        ].split("async function selectSession(id) {", 1)[0]
+        assert "activeSessionId = session.id;" in create_session
+        assert (
+            "renderActivityStream([]);" in create_session
+            or "await loadActivityStream(session.id);" in create_session
+        )
+
     def test_agent_shell_does_not_surface_mcp_or_runtime_paths(
         self, ui_client: TestClient
     ) -> None:

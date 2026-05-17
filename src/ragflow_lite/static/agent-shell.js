@@ -14,6 +14,9 @@
   const btnNew = document.getElementById("btn-new");
 
   let activeSessionId = null;
+  let commandSummaries = [];
+  let localActivitiesBySession = Object.create(null);
+  let activityPollTimer = null;
 
   // ── Helpers ──
 
@@ -73,6 +76,35 @@
     if (el) el.textContent = "";
   }
 
+  function getLocalActivities(sessionId) {
+    if (!sessionId) return [];
+    return localActivitiesBySession[sessionId] || [];
+  }
+
+  function renderCurrentSessionActivities(sessionId, runtimeActivities) {
+    if (!sessionId || sessionId !== activeSessionId) return;
+    const localActivities = getLocalActivities(sessionId);
+    renderActivityStream([...localActivities, ...runtimeActivities]);
+  }
+
+  function stopActivityPolling() {
+    if (activityPollTimer !== null) {
+      clearInterval(activityPollTimer);
+      activityPollTimer = null;
+    }
+  }
+
+  function startActivityPolling(sessionId) {
+    stopActivityPolling();
+    const pollSessionId = sessionId || activeSessionId;
+    if (!pollSessionId) return;
+    activityPollTimer = window.setInterval(function () {
+      loadActivityStream(pollSessionId).catch(function () {
+        showStatus("Thinking…");
+      });
+    }, 650);
+  }
+
   // ── Session list ──
 
   async function loadSessions() {
@@ -115,9 +147,11 @@
 
   async function deleteSession(id) {
     try {
+      stopActivityPolling();
       await api("/sessions/" + id, {
         method: "DELETE",
       });
+      delete localActivitiesBySession[id];
       if (activeSessionId === id) {
         activeSessionId = null;
         clearChat();
@@ -147,18 +181,113 @@
       body: JSON.stringify({ title: "New chat" }),
     });
     activeSessionId = session.id;
+    renderActivityStream([]);
     clearChat();
     clearStatus();
     await loadSessions();
+    await loadCommandSummaries();
     composerInput.focus();
   }
 
   async function selectSession(id) {
+    stopActivityPolling();
     activeSessionId = id;
     clearChat();
     clearStatus();
     await loadSessions();
+    await loadActivityStream(id);
     composerInput.focus();
+  }
+
+  // ── Slash picker & activity stream ──
+
+  async function loadCommandSummaries() {
+    const data = await api("/commands");
+    commandSummaries = Array.isArray(data.commands) ? data.commands : [];
+    renderSlashPicker();
+  }
+
+  async function loadActivityStream(sessionId) {
+    const requestedSessionId = sessionId || activeSessionId;
+    if (!requestedSessionId) {
+      renderActivityStream([]);
+      return;
+    }
+    const data = await api("/sessions/" + requestedSessionId + "/activity");
+    const runtimeActivities = Array.isArray(data.activities) ? data.activities : [];
+    if (requestedSessionId !== activeSessionId) return;
+    renderCurrentSessionActivities(requestedSessionId, runtimeActivities);
+  }
+
+  async function refreshActivityStreamBestEffort() {
+    await loadActivityStream().catch(function () {
+      showStatus("Thinking…");
+    });
+  }
+
+  function renderSlashPicker() {
+    const picker = document.getElementById("slash-picker");
+    const input = document.getElementById("composer-input");
+    if (!picker || !input) return;
+    const value = input.value.trimStart();
+    if (!value.startsWith("/")) {
+      picker.hidden = true;
+      picker.replaceChildren();
+      return;
+    }
+    const query = value.slice(1).toLowerCase();
+    const matches = commandSummaries
+      .filter(function (c) { return c.name.toLowerCase().startsWith(query); })
+      .slice(0, 8);
+    if (matches.length === 0) {
+      picker.hidden = true;
+      picker.replaceChildren();
+      return;
+    }
+    picker.hidden = false;
+    picker.replaceChildren(...matches.map(function (c) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "slash-picker-item";
+      btn.innerHTML = "<strong>/" + esc(c.name) + "</strong><span>" + esc(c.description || "") + "</span>";
+      btn.addEventListener("click", function () { selectSlashCommand(c); });
+      return btn;
+    }));
+  }
+
+  function selectSlashCommand(command) {
+    const input = document.getElementById("composer-input");
+    if (!input) return;
+    input.value = "/" + command.name + " ";
+    input.focus();
+    renderSlashPicker();
+  }
+
+  function addLocalActivity(activity) {
+    if (!activeSessionId) return;
+    const now = new Date().toISOString();
+    const localActivities = [
+      { activity_id: "local-" + now + "-" + activity.kind, created_at: now, updated_at: now, ...activity },
+      ...getLocalActivities(activeSessionId),
+    ].slice(0, 10);
+    localActivitiesBySession[activeSessionId] = localActivities;
+    renderCurrentSessionActivities(activeSessionId, []);
+  }
+
+  function renderActivityStream(activities) {
+    const stream = document.getElementById("activity-stream");
+    if (!stream) return;
+    const visible = activities.slice(-8);
+    stream.replaceChildren(...visible.map(function (a) {
+      const row = document.createElement("div");
+      row.className = "activity-row activity-" + a.kind + " activity-" + a.status;
+      row.innerHTML = '<span class="activity-dot" aria-hidden="true"></span><span class="activity-main"><strong>' + esc(a.label || "Activity") + '</strong><small>' + esc(a.summary || a.status || "") + '</small></span><span class="activity-status">' + esc(a.status || "") + '</span>';
+      return row;
+    }));
+  }
+
+  function esc(value) {
+    return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   // ── Send message ──
@@ -168,6 +297,8 @@
     if (!text) return;
 
     btnSend.disabled = true;
+    stopActivityPolling();
+    let sendSessionId = null;
 
     try {
       if (!activeSessionId) {
@@ -175,14 +306,28 @@
         await createSession();
       }
 
+      sendSessionId = activeSessionId;
       composerInput.value = "";
       appendMessage(text, "user");
       showStatus("Thinking…");
 
-      const result = await api("/sessions/" + activeSessionId + "/messages", {
+      if (text.trimStart().startsWith("/")) {
+        addLocalActivity({
+          kind: "command",
+          label: text.trimStart().split(/\s+/, 1)[0],
+          status: "started",
+          summary: "Command submitted to runtime.",
+        });
+      }
+
+      startActivityPolling(sendSessionId);
+      const result = await api("/sessions/" + sendSessionId + "/messages", {
         method: "POST",
         body: JSON.stringify({ message: text }),
       });
+
+      if (sendSessionId !== activeSessionId) return;
+      await refreshActivityStreamBestEffort();
 
       if (result.status === "recoverable_error") {
         appendMessage("Error: session encountered an issue. Try resuming.", "assistant");
@@ -190,11 +335,16 @@
         appendMessage(result.message || "(empty reply)", "assistant");
       }
     } catch (err) {
-      appendMessage("Network error: " + err.message, "assistant");
+      if (sendSessionId === activeSessionId) {
+        appendMessage("Network error: " + err.message, "assistant");
+      }
     } finally {
+      stopActivityPolling();
       btnSend.disabled = false;
-      clearStatus();
-      composerInput.focus();
+      if (!sendSessionId || sendSessionId === activeSessionId) {
+        clearStatus();
+        composerInput.focus();
+      }
     }
   }
 
@@ -202,6 +352,7 @@
 
   btnNew.addEventListener("click", createSession);
   btnSend.addEventListener("click", sendMessage);
+  composerInput?.addEventListener("input", renderSlashPicker);
   composerInput.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -214,6 +365,7 @@
   renderEmpty();
   try {
     await startInitialSession();
+    await loadCommandSummaries();
   } catch (err) {
     showStatus("Unable to start session: " + err.message);
   }

@@ -530,7 +530,7 @@ def test_acp_client_records_available_commands_update() -> None:
         {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1}}
     )
 
-    client, proc = _build_client(
+    client, _proc = _build_client(
         stdout_lines=[notification + "\n", init_response + "\n"]
     )
     client.initialize()
@@ -583,7 +583,7 @@ def test_acp_client_records_agent_tool_activity() -> None:
         {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1}}
     )
 
-    client, proc = _build_client(
+    client, _proc = _build_client(
         stdout_lines=[
             init_resp + "\n",
             tool_call_notification + "\n",

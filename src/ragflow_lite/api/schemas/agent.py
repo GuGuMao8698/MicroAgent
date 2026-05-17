@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -37,3 +39,30 @@ class SendMessageResponse(BaseModel):
     session_id: str
     status: str
     message: str | None = None
+
+
+class AgentCommandSummaryResponse(BaseModel):
+    name: str
+    description: str
+    input_hint: str | None = None
+    source: str = "runtime"
+
+
+class AgentCommandsResponse(BaseModel):
+    commands: list[AgentCommandSummaryResponse]
+
+
+class AgentActivityResponse(BaseModel):
+    activity_id: str
+    kind: str
+    label: str
+    status: str
+    summary: str | None = None
+    source_message_id: str | None = None
+    source_tool_call_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentActivitiesResponse(BaseModel):
+    activities: list[AgentActivityResponse]

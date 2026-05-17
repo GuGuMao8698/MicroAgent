@@ -32,11 +32,15 @@ _SHELL_HTML = """\
   </aside>
   <div class="main">
     <div id="chat-area" class="chat-area"></div>
-    <form class="composer" onsubmit="return false">
-      <input id="composer-input" type="text"
-             placeholder="Type a message…" autocomplete="off">
-      <button id="btn-send" class="btn-send">Send</button>
-    </form>
+    <div id="activity-stream" class="activity-stream" aria-live="polite"></div>
+    <div id="composer-toolbar" class="composer-toolbar">
+      <div id="slash-picker" class="slash-picker" hidden></div>
+      <form class="composer" onsubmit="return false">
+        <input id="composer-input" type="text"
+               placeholder="Type a message…" autocomplete="off">
+        <button id="btn-send" class="btn-send">Send</button>
+      </form>
+    </div>
   </div>
 </div>
 <script src="/static/agent-shell.js"></script>
