@@ -24,6 +24,8 @@ if [[ ! -d "$REFERENCE_CLAUDE_CODE_DIR/node_modules" ]]; then
 fi
 
 LOCAL_ENV="$ROOT/data/agent-runtime/local.env"
+RUNTIME_BIN="$ROOT/data/agent-runtime/bin"
+USER_BIN="${HOME:-}/.local/bin"
 if [[ -f "$LOCAL_ENV" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -60,15 +62,16 @@ require_env \
 
 run_reference_claude_code() {
   cd "$REFERENCE_CLAUDE_CODE_DIR"
+  export PATH="$USER_BIN:$RUNTIME_BIN:$ROOT/.venv/bin:$PATH"
   export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
-  export MICRORAG_AGENT_CWD="${MICRORAG_AGENT_CWD:-$ROOT/data/agent-runtime/workspace}"
+  export MICRORAG_AGENT_CWD="${MICRORAG_AGENT_CWD:-$REFERENCE_CLAUDE_CODE_DIR}"
   export MICRORAG_AGENT_CONFIG_DIR="${MICRORAG_AGENT_CONFIG_DIR:-$ROOT/data/agent-runtime/config}"
   require_local_settings
   exec bun --silent run dev -- "$@"
 }
 
 require_local_settings() {
-  local settings_path="$ROOT/data/agent-runtime/workspace/.claude/settings.json"
+  local settings_path="$REFERENCE_CLAUDE_CODE_DIR/.claude/settings.json"
   if [[ ! -f "$settings_path" ]]; then
     echo "setup error: missing $settings_path" >&2
     echo "Create this local-only file with your Claude Code permissions before starting MicroRAG agent runtime." >&2
@@ -76,24 +79,37 @@ require_local_settings() {
   fi
 }
 
-if (($# > 0)); then
-  run_reference_claude_code "$@"
-fi
+install_user_mcrag_shim() {
+  if [[ -z "${HOME:-}" ]]; then
+    return
+  fi
+  mkdir -p "$USER_BIN"
+  ln -sfn "$RUNTIME_BIN/mcrag" "$USER_BIN/mcrag"
+}
 
 if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
   die "missing $ROOT/.venv/bin/python"
 fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+"$ROOT/.venv/bin/python" -m ragflow_lite.cli.mcrag agent setup --project-root "$ROOT" >/dev/null
+install_user_mcrag_shim
+
+if (($# > 0)); then
+  run_reference_claude_code "$@"
+fi
 
 HOST="${MICRORAG_HOST:-127.0.0.1}"
 PORT="${MICRORAG_PORT:-8001}"
 
 export CLAUDE_CONFIG_DIR="$ROOT/data/agent-runtime/config"
-export MICRORAG_AGENT_CWD="$ROOT/data/agent-runtime/workspace"
+export MICRORAG_AGENT_CWD="$REFERENCE_CLAUDE_CODE_DIR"
 export MICRORAG_AGENT_CONFIG_DIR="$ROOT/data/agent-runtime/config"
 export MICRORAG_AGENT_COMMAND="${MICRORAG_AGENT_COMMAND:-$ROOT/scripts/run_reference_claude_code.sh}"
 export MICRORAG_AGENT_ARGS="${MICRORAG_AGENT_ARGS:---acp --setting-sources project}"
+export PATH="$USER_BIN:$RUNTIME_BIN:$ROOT/.venv/bin:$PATH"
+
+require_local_settings
 
 if [[ "${MICRORAG_DEMO_DRY_RUN:-}" == "1" ]]; then
   echo "agent setup: $ROOT/.venv/bin/python -m ragflow_lite.cli.mcrag agent setup --project-root $ROOT"
@@ -106,9 +122,6 @@ if [[ "${MICRORAG_DEMO_DRY_RUN:-}" == "1" ]]; then
   echo "agent config: $CLAUDE_CONFIG_DIR"
   exit 0
 fi
-
-"$ROOT/.venv/bin/python" -m ragflow_lite.cli.mcrag agent setup --project-root "$ROOT" >/dev/null
-require_local_settings
 
 "$ROOT/.venv/bin/python" -m uvicorn ragflow_lite.app:app \
   --host "$HOST" \

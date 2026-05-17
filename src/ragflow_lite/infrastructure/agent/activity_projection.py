@@ -142,7 +142,7 @@ class AgentRuntimeProjection:
         )
 
     def _on_available_commands_update(self, event: dict[str, Any]) -> None:
-        commands = event.get("commands")
+        commands = event.get("availableCommands", event.get("commands"))
         if not isinstance(commands, list):
             return
         now = _now()

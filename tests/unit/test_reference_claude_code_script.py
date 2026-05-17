@@ -42,6 +42,16 @@ def _make_script_repo(tmp_path: Path, *, with_settings: bool = True) -> Path:
 
     script_dir.mkdir(parents=True)
     node_modules.mkdir(parents=True)
+    (reference_dir / ".claude" / "skills" / "teach-me").mkdir(parents=True)
+    (reference_dir / ".claude" / "agents").mkdir(parents=True)
+    (reference_dir / ".claude" / "skills" / "teach-me" / "SKILL.md").write_text(
+        "---\nname: teach-me\n---\n# Teach Me\n",
+        encoding="utf-8",
+    )
+    (reference_dir / ".claude" / "agents" / "hello-agent.md").write_text(
+        "---\nname: hello-agent\n---\nhello\n",
+        encoding="utf-8",
+    )
     local_env = repo_root / "data" / "agent-runtime" / "local.env"
     local_env.parent.mkdir(parents=True)
     local_env.write_text("", encoding="utf-8")
@@ -57,8 +67,8 @@ def _make_script_repo(tmp_path: Path, *, with_settings: bool = True) -> Path:
     (python_bin / "python").chmod(0o755)
 
     if with_settings:
-        settings_dir = repo_root / "data" / "agent-runtime" / "workspace" / ".claude"
-        settings_dir.mkdir(parents=True)
+        settings_dir = reference_dir / ".claude"
+        settings_dir.mkdir(parents=True, exist_ok=True)
         (settings_dir / "settings.json").write_text(
             '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
             encoding="utf-8",
@@ -118,6 +128,37 @@ def _write_required_local_env(repo_root: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _make_python_stub_that_migrates_legacy_runtime(repo_root: Path) -> None:
+    python = repo_root / ".venv" / "bin" / "python"
+    python.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f'ROOT="{repo_root}"',
+                'if [[ "$*" == *"ragflow_lite.cli.mcrag agent setup"* ]]; then',
+                '  mkdir -p "$ROOT/data/agent-runtime/config"',
+                '  mkdir -p "$ROOT/参考项目/claude-code/.claude"',
+                '  if [[ -f "$ROOT/data/agent-runtime/workspace/.claude/settings.json" && ! -f "$ROOT/参考项目/claude-code/.claude/settings.json" ]]; then',
+                '    cp "$ROOT/data/agent-runtime/workspace/.claude/settings.json" "$ROOT/参考项目/claude-code/.claude/settings.json"',
+                "  fi",
+                '  if [[ -f "$ROOT/data/agent-runtime/workspace/CLAUDE.md" && ! -f "$ROOT/参考项目/claude-code/CLAUDE.md" ]]; then',
+                '    cp "$ROOT/data/agent-runtime/workspace/CLAUDE.md" "$ROOT/参考项目/claude-code/CLAUDE.md"',
+                "  fi",
+                '  if [[ -d "$ROOT/data/agent-runtime/workspace/.claude/skills" ]]; then',
+                '    mkdir -p "$ROOT/参考项目/claude-code/.claude/skills"',
+                '    cp -rn "$ROOT/data/agent-runtime/workspace/.claude/skills/." "$ROOT/参考项目/claude-code/.claude/skills/"',
+                "  fi",
+                "fi",
+                "exit 0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
 
 
 def test_reference_script_acp_args_only_launch_reference_runtime(
@@ -214,6 +255,7 @@ def test_reference_script_dry_run_shows_full_demo_bootstrap(
     assert "backend:" in result.stdout
     assert "ui: http://127.0.0.1:8001/agent" in result.stdout
     assert "agent command:" in result.stdout
+    assert f"agent cwd: {repo_root / '参考项目' / 'claude-code'}" in result.stdout
     assert "agent args: --acp --setting-sources project" in result.stdout
 
 
@@ -240,4 +282,56 @@ def test_reference_script_requires_local_workspace_settings(
 
     assert result.returncode == 2
     assert "missing" in result.stderr
-    assert "data/agent-runtime/workspace/.claude/settings.json" in result.stderr
+    assert "参考项目/claude-code/.claude/settings.json" in result.stderr
+
+
+def test_reference_script_uses_migrated_legacy_workspace_settings(
+    tmp_path: Path,
+) -> None:
+    repo_root = _make_script_repo(tmp_path, with_settings=False)
+    _make_python_stub_that_migrates_legacy_runtime(repo_root)
+    _write_required_local_env(repo_root)
+    legacy_workspace = repo_root / "data" / "agent-runtime" / "workspace"
+    (legacy_workspace / ".claude" / "skills" / "microrag-search").mkdir(parents=True)
+    (legacy_workspace / ".claude" / "settings.json").write_text(
+        '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
+        encoding="utf-8",
+    )
+    (legacy_workspace / "CLAUDE.md").write_text(
+        "# MicroRAG Product Agent\n",
+        encoding="utf-8",
+    )
+    (
+        legacy_workspace / ".claude" / "skills" / "microrag-search" / "SKILL.md"
+    ).write_text(
+        "---\nname: microrag-search\n---\n# MicroRAG Search\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "calls.log"
+    env = {
+        **_base_env(tmp_path, log_path),
+        "MICRORAG_DEMO_DRY_RUN": "1",
+    }
+
+    result = subprocess.run(
+        ["bash", str(repo_root / "scripts" / "run_reference_claude_code.sh")],
+        cwd=repo_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert (
+        repo_root / "参考项目" / "claude-code" / ".claude" / "settings.json"
+    ).exists()
+    assert (
+        repo_root
+        / "参考项目"
+        / "claude-code"
+        / ".claude"
+        / "skills"
+        / "microrag-search"
+        / "SKILL.md"
+    ).exists()

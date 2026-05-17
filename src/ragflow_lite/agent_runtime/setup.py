@@ -11,7 +11,7 @@ SETUP_INCOMPLETE_MESSAGE = (
 )
 LOCAL_SETTINGS_REQUIRED_MESSAGE = (
     "MicroRAG agent local settings are missing. Create "
-    "data/agent-runtime/workspace/.claude/settings.json before starting the agent."
+    "{settings_path} before starting the agent."
 )
 
 
@@ -25,28 +25,83 @@ class AgentRuntimePaths:
 def default_agent_runtime_paths(project_root: Path) -> AgentRuntimePaths:
     root = project_root.resolve()
     runtime_root = root / "data" / "agent-runtime"
+    reference_runtime = os.getenv("MICRORAG_REFERENCE_CLAUDE_CODE_DIR")
     return AgentRuntimePaths(
         project_root=root,
         config_dir=runtime_root / "config",
-        workspace_dir=runtime_root / "workspace",
+        workspace_dir=(
+            Path(reference_runtime).expanduser()
+            if reference_runtime is not None and reference_runtime.strip()
+            else root / "参考项目" / "claude-code"
+        ),
     )
 
 
 def setup_agent_runtime(paths: AgentRuntimePaths) -> AgentRuntimePaths:
-    source_root = Path(__file__).resolve().parent
-    workspace = paths.workspace_dir
-    claude_dir = workspace / ".claude"
-    skill_dir = claude_dir / "skills" / "microrag-search"
-
     paths.config_dir.mkdir(parents=True, exist_ok=True)
-    skill_dir.mkdir(parents=True, exist_ok=True)
-
-    shutil.copyfile(source_root / "CLAUDE.md", workspace / "CLAUDE.md")
-    shutil.copyfile(
-        source_root / "skills" / "microrag-search" / "SKILL.md",
-        skill_dir / "SKILL.md",
-    )
+    _write_mcrag_shim(paths)
+    _migrate_legacy_workspace_assets(paths)
     return paths
+
+
+def _runtime_bin_dir(paths: AgentRuntimePaths) -> Path:
+    return paths.project_root / "data" / "agent-runtime" / "bin"
+
+
+def _write_mcrag_shim(paths: AgentRuntimePaths) -> None:
+    bin_dir = _runtime_bin_dir(paths)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shim = bin_dir / "mcrag"
+    shim.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f'ROOT="{paths.project_root}"',
+                'export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"',
+                'exec "$ROOT/.venv/bin/python" -m ragflow_lite.cli.mcrag "$@"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+
+
+def _copy_if_missing(source: Path, target: Path) -> None:
+    if not source.exists() or target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def _copy_tree_files_if_missing(source_dir: Path, target_dir: Path) -> None:
+    if not source_dir.is_dir():
+        return
+    for source in source_dir.rglob("*"):
+        if not source.is_file():
+            continue
+        relative_path = source.relative_to(source_dir)
+        _copy_if_missing(source, target_dir / relative_path)
+
+
+def _migrate_legacy_workspace_assets(paths: AgentRuntimePaths) -> None:
+    legacy_workspace = paths.project_root / "data" / "agent-runtime" / "workspace"
+    if _same_path(legacy_workspace, paths.workspace_dir):
+        return
+
+    _copy_if_missing(
+        legacy_workspace / ".claude" / "settings.json",
+        paths.workspace_dir / ".claude" / "settings.json",
+    )
+    _copy_if_missing(
+        legacy_workspace / "CLAUDE.md",
+        paths.workspace_dir / "CLAUDE.md",
+    )
+    _copy_tree_files_if_missing(
+        legacy_workspace / ".claude" / "skills",
+        paths.workspace_dir / ".claude" / "skills",
+    )
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -63,16 +118,20 @@ def validate_agent_runtime_paths(paths: AgentRuntimePaths) -> None:
 
 def validate_agent_runtime_workspace(paths: AgentRuntimePaths) -> None:
     validate_agent_runtime_paths(paths)
+    claude_dir = paths.workspace_dir / ".claude"
     required = (
         paths.config_dir,
-        paths.workspace_dir / "CLAUDE.md",
-        paths.workspace_dir / ".claude" / "skills" / "microrag-search" / "SKILL.md",
+        paths.workspace_dir,
+        claude_dir / "skills",
+        claude_dir / "agents",
     )
     if not all(path.exists() for path in required):
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
-    settings_path = paths.workspace_dir / ".claude" / "settings.json"
+    settings_path = claude_dir / "settings.json"
     if not settings_path.exists():
-        raise RuntimeError(LOCAL_SETTINGS_REQUIRED_MESSAGE)
+        raise RuntimeError(
+            LOCAL_SETTINGS_REQUIRED_MESSAGE.format(settings_path=settings_path)
+        )
 
 
 def build_agent_child_env(

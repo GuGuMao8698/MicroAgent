@@ -186,6 +186,22 @@ class TestAgentShellUI:
         assert "loadActivityStream(pollSessionId).catch" in response.text
         assert "refreshActivityStreamBestEffort();" in response.text
 
+    def test_static_js_retries_command_loading_for_late_runtime_inventory(
+        self, ui_client: TestClient
+    ) -> None:
+        response = ui_client.get("/static/agent-shell.js")
+        assert response.status_code == 200
+
+        assert "scheduleCommandRefresh" in response.text
+        assert "stopCommandRefresh" in response.text
+        assert "commandRefreshAttempts >= 8" in response.text
+        assert 'value.startsWith("/") && commandSummaries.length === 0' in (
+            response.text
+        )
+        assert 'composerInput?.addEventListener("input", onComposerInput);' in (
+            response.text
+        )
+
     def test_static_js_keeps_activity_refresh_out_of_message_success_path(
         self, ui_client: TestClient
     ) -> None:

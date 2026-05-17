@@ -43,6 +43,28 @@ def test_available_commands_update_becomes_ui_safe_summaries() -> None:
     assert "SKILL.md" not in serialized
 
 
+def test_available_commands_update_accepts_reference_runtime_shape() -> None:
+    proj = _projection()
+    proj.record_event(
+        {
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+                {
+                    "name": "status",
+                    "description": "Show session status",
+                    "input": {"hint": "optional detail"},
+                },
+            ],
+        }
+    )
+
+    summaries = proj.command_summaries()
+
+    assert [s.name for s in summaries] == ["status"]
+    assert summaries[0].description == "Show session status"
+    assert summaries[0].input_hint == "optional detail"
+
+
 def test_agent_tool_call_creates_and_completes_subagent_activity() -> None:
     proj = _projection()
 

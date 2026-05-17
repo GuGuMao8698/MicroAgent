@@ -4,6 +4,8 @@
   "use strict";
 
   const API_PREFIX = "/api/v0/agent";
+  const LOCAL_ACTIVITY_TTL_MS = 4000;
+  const MAX_VISIBLE_ACTIVITIES = 5;
 
   // ── DOM refs ──
 
@@ -17,6 +19,8 @@
   let commandSummaries = [];
   let localActivitiesBySession = Object.create(null);
   let activityPollTimer = null;
+  let commandRefreshTimer = null;
+  let commandRefreshAttempts = 0;
 
   // ── Helpers ──
 
@@ -83,7 +87,7 @@
 
   function renderCurrentSessionActivities(sessionId, runtimeActivities) {
     if (!sessionId || sessionId !== activeSessionId) return;
-    const localActivities = getLocalActivities(sessionId);
+    const localActivities = pruneLocalActivities(sessionId, runtimeActivities);
     renderActivityStream([...localActivities, ...runtimeActivities]);
   }
 
@@ -92,6 +96,26 @@
       clearInterval(activityPollTimer);
       activityPollTimer = null;
     }
+  }
+
+  function stopCommandRefresh() {
+    if (commandRefreshTimer !== null) {
+      clearTimeout(commandRefreshTimer);
+      commandRefreshTimer = null;
+    }
+    commandRefreshAttempts = 0;
+  }
+
+  function scheduleCommandRefresh() {
+    if (commandSummaries.length > 0 || commandRefreshTimer !== null) return;
+    if (commandRefreshAttempts >= 8) return;
+    commandRefreshAttempts += 1;
+    commandRefreshTimer = window.setTimeout(function () {
+      commandRefreshTimer = null;
+      loadCommandSummaries().catch(function () {
+        scheduleCommandRefresh();
+      });
+    }, 250);
   }
 
   function startActivityPolling(sessionId) {
@@ -205,6 +229,11 @@
     const data = await api("/commands");
     commandSummaries = Array.isArray(data.commands) ? data.commands : [];
     renderSlashPicker();
+    if (commandSummaries.length === 0) {
+      scheduleCommandRefresh();
+    } else {
+      stopCommandRefresh();
+    }
   }
 
   async function loadActivityStream(sessionId) {
@@ -255,6 +284,16 @@
     }));
   }
 
+  function onComposerInput() {
+    const value = composerInput.value.trimStart();
+    if (value.startsWith("/") && commandSummaries.length === 0) {
+      loadCommandSummaries().catch(function () {
+        scheduleCommandRefresh();
+      });
+    }
+    renderSlashPicker();
+  }
+
   function selectSlashCommand(command) {
     const input = document.getElementById("composer-input");
     if (!input) return;
@@ -267,23 +306,54 @@
     if (!activeSessionId) return;
     const now = new Date().toISOString();
     const localActivities = [
-      { activity_id: "local-" + now + "-" + activity.kind, created_at: now, updated_at: now, ...activity },
+      {
+        activity_id: "local-" + now + "-" + activity.kind,
+        created_at: now,
+        updated_at: now,
+        expires_at: Date.now() + LOCAL_ACTIVITY_TTL_MS,
+        ...activity,
+      },
       ...getLocalActivities(activeSessionId),
     ].slice(0, 10);
     localActivitiesBySession[activeSessionId] = localActivities;
     renderCurrentSessionActivities(activeSessionId, []);
   }
 
+  function pruneLocalActivities(sessionId, runtimeActivities) {
+    const localActivities = getLocalActivities(sessionId);
+    const now = Date.now();
+    const hasRuntimeActivity = Array.isArray(runtimeActivities) && runtimeActivities.length > 0;
+    const next = localActivities.filter(function (activity) {
+      if (activity.kind === "command" && hasRuntimeActivity) return false;
+      if (activity.expires_at && activity.expires_at <= now) return false;
+      return true;
+    });
+    localActivitiesBySession[sessionId] = next;
+    return next;
+  }
+
   function renderActivityStream(activities) {
     const stream = document.getElementById("activity-stream");
     if (!stream) return;
-    const visible = activities.slice(-8);
+    const visible = collapseActivityStream(activities).slice(-MAX_VISIBLE_ACTIVITIES);
     stream.replaceChildren(...visible.map(function (a) {
       const row = document.createElement("div");
       row.className = "activity-row activity-" + a.kind + " activity-" + a.status;
-      row.innerHTML = '<span class="activity-dot" aria-hidden="true"></span><span class="activity-main"><strong>' + esc(a.label || "Activity") + '</strong><small>' + esc(a.summary || a.status || "") + '</small></span><span class="activity-status">' + esc(a.status || "") + '</span>';
+      const summary = a.summary && a.summary !== a.status ? a.summary : "";
+      row.innerHTML = '<span class="activity-dot" aria-hidden="true"></span><span class="activity-main"><strong>' + esc(a.label || "Activity") + '</strong><small>' + esc(summary) + '</small></span><span class="activity-status">' + esc(a.status || "") + '</span>';
       return row;
     }));
+  }
+
+  function collapseActivityStream(activities) {
+    const byKey = new Map();
+    activities.forEach(function (activity) {
+      const key = activity.source_tool_call_id || activity.activity_id || activity.kind + ":" + activity.label;
+      byKey.set(key, activity);
+    });
+    return Array.from(byKey.values()).sort(function (a, b) {
+      return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+    });
   }
 
   function esc(value) {
@@ -352,7 +422,7 @@
 
   btnNew.addEventListener("click", createSession);
   btnSend.addEventListener("click", sendMessage);
-  composerInput?.addEventListener("input", renderSlashPicker);
+  composerInput?.addEventListener("input", onComposerInput);
   composerInput.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

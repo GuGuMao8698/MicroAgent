@@ -64,7 +64,7 @@ def _build_parser() -> ExitCodeParser:
         "--project-root",
         type=Path,
         default=Path.cwd(),
-        help="MicroRAG project root used to generate data/agent-runtime.",
+        help="MicroRAG project root used to prepare agent runtime config.",
     )
 
     return parser

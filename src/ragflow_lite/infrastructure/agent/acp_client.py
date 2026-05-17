@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from subprocess import PIPE
@@ -98,6 +99,11 @@ class AcpClient:
         self._initialized = False
         self._next_id = 1
         self._projection = AgentRuntimeProjection()
+        self._reader_thread: threading.Thread | None = None
+        self._responses: dict[int, dict[str, Any]] = {}
+        self._message_chunks: dict[str, list[str]] = {}
+        self._reader_error: RuntimeError | None = None
+        self._condition = threading.Condition()
 
     def start(self) -> None:
         if self._process is not None:
@@ -109,6 +115,7 @@ class AcpClient:
                 self._config.cwd,
                 self._config.env,
             )
+            self._start_reader_thread()
         except Exception:
             raise RuntimeError(redact_acp_error("", raw_runtime=True)) from None
 
@@ -169,8 +176,7 @@ class AcpClient:
     ) -> dict[str, Any]:
         process = self._require_process()
         stdin = process.stdin
-        stdout = process.stdout
-        if stdin is None or stdout is None:
+        if stdin is None:
             raise RuntimeError("ACP client process is missing stdio pipes.")
 
         request_id = self._next_id
@@ -184,22 +190,8 @@ class AcpClient:
         stdin.write(json.dumps(payload) + "\n")
         stdin.flush()
 
-        message_chunks: list[str] = []
-        while True:
-            line = stdout.readline()
-            if line == "":
-                raise RuntimeError("ACP client process returned no response.")
-            response = json.loads(line)
-            if isinstance(response, dict):
-                self._record_projection_event(response)
-            self._collect_agent_message_chunk(
-                response,
-                message_chunks,
-                collect_session_id=collect_session_id,
-            )
-
-            if response.get("id") == request_id:
-                break
+        response = self._wait_for_response(request_id)
+        message_chunks = self._pop_message_chunks(collect_session_id)
 
         error = response.get("error")
         if isinstance(error, Mapping):
@@ -217,21 +209,68 @@ class AcpClient:
             redacted_result["message"] = "".join(message_chunks)
         return redacted_result
 
-    def _collect_agent_message_chunk(
-        self,
-        response: Mapping[str, Any],
-        message_chunks: list[str],
-        *,
-        collect_session_id: str | None,
-    ) -> None:
-        if collect_session_id is None:
-            return
+    def _start_reader_thread(self) -> None:
+        process = self._require_process()
+        stdout = process.stdout
+        if stdout is None:
+            raise RuntimeError("ACP client process is missing stdio pipes.")
+        self._reader_thread = threading.Thread(
+            target=self._read_stdout_loop,
+            args=(stdout,),
+            daemon=True,
+        )
+        self._reader_thread.start()
+
+    def _read_stdout_loop(self, stdout: TextIO) -> None:
+        try:
+            while True:
+                line = stdout.readline()
+                if line == "":
+                    raise RuntimeError("ACP client process returned no response.")
+                response = json.loads(line)
+                if not isinstance(response, dict):
+                    continue
+                self._record_projection_event(response)
+                self._record_message_chunk(response)
+                response_id = response.get("id")
+                if not isinstance(response_id, int):
+                    continue
+                with self._condition:
+                    self._responses[response_id] = response
+                    self._condition.notify_all()
+        except RuntimeError as exc:
+            with self._condition:
+                self._reader_error = exc
+                self._condition.notify_all()
+        except Exception:
+            with self._condition:
+                self._reader_error = RuntimeError(
+                    "ACP client process returned no response."
+                )
+                self._condition.notify_all()
+
+    def _wait_for_response(self, request_id: int) -> dict[str, Any]:
+        with self._condition:
+            while request_id not in self._responses:
+                if self._reader_error is not None:
+                    raise self._reader_error
+                self._condition.wait()
+            return self._responses.pop(request_id)
+
+    def _pop_message_chunks(self, session_id: str | None) -> list[str]:
+        if session_id is None:
+            return []
+        with self._condition:
+            return self._message_chunks.pop(session_id, [])
+
+    def _record_message_chunk(self, response: Mapping[str, Any]) -> None:
         if response.get("method") != "session/update":
             return
         params = response.get("params")
         if not isinstance(params, Mapping):
             return
-        if params.get("sessionId") != collect_session_id:
+        session_id = params.get("sessionId")
+        if not isinstance(session_id, str):
             return
         update = params.get("update")
         if not isinstance(update, Mapping):
@@ -245,7 +284,8 @@ class AcpClient:
             return
         text = content.get("text")
         if isinstance(text, str):
-            message_chunks.append(text)
+            with self._condition:
+                self._message_chunks.setdefault(session_id, []).append(text)
 
     def _record_projection_event(self, response: dict[str, Any]) -> None:
         if response.get("method") != "session/update":

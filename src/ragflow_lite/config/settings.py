@@ -236,14 +236,19 @@ class Settings:
         """
         root = project_root or Path(__file__).resolve().parents[3]
         runtime_root = root / "data" / "agent-runtime"
+        reference_runtime = _read_optional_env("MICRORAG_REFERENCE_CLAUDE_CODE_DIR")
+        default_agent_cwd = (
+            Path(reference_runtime).expanduser()
+            if reference_runtime is not None and reference_runtime.strip()
+            else root / "参考项目" / "claude-code"
+        )
         return cls(
             project_root=root,
             uploads_dir=root / "data" / "uploads",
             local_index_dir=root / "data" / "local_index",
             temp_dir=root / "data" / "tmp",
             agent_cwd=(
-                _read_optional_env("MICRORAG_AGENT_CWD")
-                or str(runtime_root / "workspace")
+                _read_optional_env("MICRORAG_AGENT_CWD") or str(default_agent_cwd)
             ),
             agent_config_dir=(
                 _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")

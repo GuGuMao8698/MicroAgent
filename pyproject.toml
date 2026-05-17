@@ -42,9 +42,6 @@ where = ["src"]
 ragflow_lite = [
     "static/*.css",
     "static/*.js",
-    "agent_runtime/CLAUDE.md",
-    "agent_runtime/settings.json",
-    "agent_runtime/skills/microrag-search/SKILL.md",
 ]
 
 [tool.pytest.ini_options]

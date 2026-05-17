@@ -226,6 +226,49 @@ def test_new_session_writes_session_new_with_runtime_cwd() -> None:
     }
 
 
+def test_new_session_records_available_commands_update_after_response() -> None:
+    client, _process = _build_client(
+        stdout_lines=[
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "sessionId": "session-1",
+                    },
+                }
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "session-1",
+                        "update": {
+                            "sessionUpdate": "available_commands_update",
+                            "availableCommands": [
+                                {
+                                    "name": "status",
+                                    "description": "Show session status",
+                                    "input": {"hint": "optional detail"},
+                                }
+                            ],
+                        },
+                    },
+                }
+            )
+            + "\n",
+        ]
+    )
+
+    client.new_session()
+
+    commands = client.command_summaries()
+    assert [c.name for c in commands] == ["status"]
+    assert commands[0].input_hint == "optional detail"
+
+
 def test_send_message_writes_session_prompt_and_redacts_result() -> None:
     client, process = _build_client(
         stdout_lines=[
@@ -438,6 +481,15 @@ def test_request_hides_plain_runtime_error_message() -> None:
         client.initialize()
 
     assert "plain failure" not in str(exc_info.value)
+
+
+def test_request_raises_when_acp_process_returns_no_response() -> None:
+    client, _process = _build_client(stdout_lines=[])
+
+    with pytest.raises(
+        RuntimeError, match="ACP client process returned no response\\."
+    ):
+        client.initialize()
 
 
 def test_start_hides_process_factory_command_and_cwd_details() -> None:
