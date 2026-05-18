@@ -149,6 +149,7 @@ def app_settings(tmp_path: Path):
         temp_dir=tmp_path / "tmp",
         agent_cwd=str(paths.workspace_dir),
         agent_config_dir=str(paths.config_dir),
+        microagent_dir=str(paths.microagent_dir),
     )
     assign_isolated_infinity_tables(settings, tmp_path)
     register_infinity_table_cleanup(settings)

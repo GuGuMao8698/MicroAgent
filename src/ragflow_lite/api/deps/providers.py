@@ -107,13 +107,18 @@ def _build_acp_client(settings: Settings) -> AcpClient:
         validate_agent_runtime_workspace,
     )
 
-    if settings.agent_cwd is None or settings.agent_config_dir is None:
+    if (
+        settings.agent_cwd is None
+        or settings.agent_config_dir is None
+        or settings.microagent_dir is None
+    ):
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
 
     paths = AgentRuntimePaths(
         project_root=settings.project_root,
         config_dir=Path(settings.agent_config_dir),
         workspace_dir=Path(settings.agent_cwd),
+        microagent_dir=Path(settings.microagent_dir),
     )
     validate_agent_runtime_workspace(paths)
     config = AcpRuntimeConfig(

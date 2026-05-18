@@ -34,6 +34,26 @@ prompt优化.md
 MinerU_markdown_2410.05779v3_2047349607252684800.md
 参考项目/
 prompt生成与优化指南.md
+
+# MicroAgent bundled runtime local/generated state
+src/ragflow_lite/microagent/.claude/settings.json
+src/ragflow_lite/microagent/.claude/settings.local.json
+src/ragflow_lite/microagent/.claude/.credentials*
+src/ragflow_lite/microagent/.claude/.cache/
+src/ragflow_lite/microagent/.claude/cache/
+src/ragflow_lite/microagent/.claude/history/
+src/ragflow_lite/microagent/.claude/transcripts/
+src/ragflow_lite/microagent/.claude/projects/
+src/ragflow_lite/microagent/.claude/todos/
+src/ragflow_lite/microagent/.claude/workflow-runs/
+src/ragflow_lite/microagent/.claude/worktrees/
+src/ragflow_lite/microagent/.claude/agent-memory-local/
+src/ragflow_lite/microagent/.claude/agent-memory-snapshots/
+src/ragflow_lite/microagent/.claude/scheduled_tasks.json
+src/ragflow_lite/microagent/node_modules/
+src/ragflow_lite/microagent/dist/
+src/ragflow_lite/microagent/.deepeval/
+
 # Keep directory placeholders
 !data/uploads/.gitkeep
 !data/tmp/.gitkeep

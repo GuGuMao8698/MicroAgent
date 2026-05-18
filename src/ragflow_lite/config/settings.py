@@ -216,6 +216,9 @@ class Settings:
     agent_config_dir: str | None = field(
         default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
     )
+    microagent_dir: str | None = field(
+        default_factory=lambda: _read_optional_env("MICRORAG_MICROAGENT_DIR")
+    )
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")
@@ -236,23 +239,28 @@ class Settings:
         """
         root = project_root or Path(__file__).resolve().parents[3]
         runtime_root = root / "data" / "agent-runtime"
-        reference_runtime = _read_optional_env("MICRORAG_REFERENCE_CLAUDE_CODE_DIR")
-        default_agent_cwd = (
-            Path(reference_runtime).expanduser()
-            if reference_runtime is not None and reference_runtime.strip()
-            else root / "参考项目" / "claude-code"
-        )
+        default_agent_cwd = runtime_root / "workspace"
+        default_agent_command = root / "scripts" / "run_microagent.sh"
+        default_microagent_dir = root / "src" / "ragflow_lite" / "microagent"
         return cls(
             project_root=root,
             uploads_dir=root / "data" / "uploads",
             local_index_dir=root / "data" / "local_index",
             temp_dir=root / "data" / "tmp",
+            agent_command=(
+                _read_optional_env("MICRORAG_AGENT_COMMAND")
+                or str(default_agent_command)
+            ),
             agent_cwd=(
                 _read_optional_env("MICRORAG_AGENT_CWD") or str(default_agent_cwd)
             ),
             agent_config_dir=(
                 _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
                 or str(runtime_root / "config")
+            ),
+            microagent_dir=(
+                _read_optional_env("MICRORAG_MICROAGENT_DIR")
+                or str(default_microagent_dir)
             ),
         )
 

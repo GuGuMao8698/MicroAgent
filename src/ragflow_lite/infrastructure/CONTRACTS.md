@@ -86,7 +86,7 @@ Verification:
 
 ## ACP Runtime and Session Store Contract
 
-Reviewed at: 2026-05-15T16:00:00+08:00
+Reviewed at: 2026-05-18T00:00:00+08:00
 Status: Active
 Owner: `AcpClient`, `AgentSessionStore`
 
@@ -100,11 +100,12 @@ Invariant:
 - `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only). Available as a public utility but not called by `_request()`.
 - `redact_acp_error()` replaces messages containing sensitive markers with a fixed generic message.
 - `AppServices` stores an ACP client factory and constructs `AcpClient` lazily when agent routes first access `services.acp_client`; non-agent service construction must not require a prepared agent runtime.
-- Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `"claude"`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `参考项目/claude-code`), and `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR`, default `data/agent-runtime/config`).
-- Claude Code skills and subagents are owned by the reference runtime project at `参考项目/claude-code/.claude/skills` and `参考项目/claude-code/.claude/agents`. Do not sync or generate copies from `src/ragflow_lite/agent_runtime/skills`.
-- The runtime permissions file is `参考项目/claude-code/.claude/settings.json`; it is local-only, manually edited, required before agent startup, and never generated or overwritten by setup.
+- Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `scripts/run_microagent.sh`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `data/agent-runtime/workspace`), `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR`, default `data/agent-runtime/config`), and `microagent_dir` (env `MICRORAG_MICROAGENT_DIR`, default `src/ragflow_lite/microagent`).
+- MicroAgent skills and subagents are bundled runtime assets under `src/ragflow_lite/microagent/.claude/skills` and `src/ragflow_lite/microagent/.claude/agents`.
+- The MicroAgent project settings file is `src/ragflow_lite/microagent/.claude/settings.json`; it is copied from the local source runtime, local-only, gitignored, required before agent startup, and not content-inspected during migration.
+- Product conversation workspace state remains under `data/agent-runtime/workspace`; `setup_agent_runtime()` prepares workspace/config/shim state and must not create or populate `src/ragflow_lite/microagent`.
 - `_build_acp_client(settings)` rejects runtime paths that do not resolve to the project-owned defaults from `default_agent_runtime_paths(settings.project_root)`.
-- ACP child processes receive `CLAUDE_CONFIG_DIR`, `PATH`, and `PYTHONPATH` through `AcpRuntimeConfig.env`.
+- ACP child processes receive `CLAUDE_CONFIG_DIR`, `MICRORAG_AGENT_CWD`, `MICRORAG_AGENT_CONFIG_DIR`, `MICRORAG_MICROAGENT_DIR`, `PATH`, and `PYTHONPATH` through `AcpRuntimeConfig.env`.
 - `AgentSessionStore` schema has no `messages`, `conversation`, or `transcript_json` columns.
 - Session ordering is `ORDER BY updated_at DESC, created_at DESC, id DESC` for deterministic tiebreaking.
 

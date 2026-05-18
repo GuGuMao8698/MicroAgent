@@ -439,28 +439,11 @@ def test_package_root_exports_app_proxy_without_importing_app_module() -> None:
     }
 
 
-def test_agent_setup_command_migrates_legacy_runtime_assets(
+def test_agent_setup_command_prepares_runtime_paths(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from ragflow_lite.cli.mcrag import main
-
-    legacy_workspace = tmp_path / "data" / "agent-runtime" / "workspace"
-    (legacy_workspace / ".claude" / "skills" / "microrag-search").mkdir(parents=True)
-    (legacy_workspace / ".claude" / "settings.json").write_text(
-        '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
-        encoding="utf-8",
-    )
-    (legacy_workspace / "CLAUDE.md").write_text(
-        "# MicroRAG Product Agent\n",
-        encoding="utf-8",
-    )
-    (
-        legacy_workspace / ".claude" / "skills" / "microrag-search" / "SKILL.md"
-    ).write_text(
-        "---\nname: microrag-search\n---\n# MicroRAG Search\n",
-        encoding="utf-8",
-    )
 
     exit_code = main(["agent", "setup", "--project-root", str(tmp_path)])
 
@@ -470,22 +453,13 @@ def test_agent_setup_command_migrates_legacy_runtime_assets(
     payload = json.loads(captured.out)
     assert payload == {
         "config_dir": str(tmp_path / "data" / "agent-runtime" / "config"),
-        "workspace_dir": str(tmp_path / "参考项目" / "claude-code"),
+        "workspace_dir": str(tmp_path / "data" / "agent-runtime" / "workspace"),
+        "microagent_dir": str(tmp_path / "src" / "ragflow_lite" / "microagent"),
     }
     assert (tmp_path / "data" / "agent-runtime" / "config").is_dir()
-    assert (tmp_path / "参考项目" / "claude-code" / "CLAUDE.md").exists()
-    assert (
-        tmp_path
-        / "参考项目"
-        / "claude-code"
-        / ".claude"
-        / "skills"
-        / "microrag-search"
-        / "SKILL.md"
-    ).exists()
-    assert (
-        tmp_path / "参考项目" / "claude-code" / ".claude" / "settings.json"
-    ).exists()
+    assert (tmp_path / "data" / "agent-runtime" / "workspace").is_dir()
+    assert (tmp_path / "data" / "agent-runtime" / "bin" / "mcrag").exists()
+    assert not (tmp_path / "src" / "ragflow_lite" / "microagent").exists()
 
 
 def test_agent_setup_does_not_build_runtime_services(
