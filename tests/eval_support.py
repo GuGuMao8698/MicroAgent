@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Protocol
 
 from evals.eval_models import DeepSeekChatDeepEvalModel
 
@@ -20,6 +20,10 @@ _PLACEHOLDER_ENV_VALUES = {
 _DEFAULT_DEEPEVAL_MODEL = "deepseek-v4-flash"
 _DEFAULT_DEEPEVAL_BASE_URL = "https://api.deepseek.com"
 _DEFAULT_DEEPEVAL_REASONING_EFFORT = "high"
+EvalQueryMode = Literal["standard", "discorag"]
+EVAL_QUERY_MODES: tuple[EvalQueryMode, ...] = ("standard", "discorag")
+EVAL_QUERY_MODE_ENV_VAR = "RAGFLOW_LITE_EVAL_QUERY_MODE"
+_DEFAULT_EVAL_QUERY_MODE: EvalQueryMode = "standard"
 _LEADING_JSON_PREFIX_RE = re.compile(r"^\s*json\s*:\s*", re.IGNORECASE)
 _CITE_TOKEN_RE = re.compile(r"<cite:\d+>")
 _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
@@ -137,6 +141,41 @@ def _coerce_optional_string(value: Any) -> str | None:
 
 
 RAG_EVAL_CASES = _load_rag_eval_cases()
+
+
+class _EvalQueryCase(Protocol):
+    @property
+    def question(self) -> str: ...
+
+    @property
+    def top_k(self) -> int: ...
+
+
+def resolve_eval_query_mode(
+    cli_value: str | None,
+    env: Mapping[str, str | None],
+) -> EvalQueryMode:
+    raw_mode = cli_value if cli_value is not None else env.get(EVAL_QUERY_MODE_ENV_VAR)
+    if raw_mode is None:
+        return _DEFAULT_EVAL_QUERY_MODE
+    if raw_mode in EVAL_QUERY_MODES:
+        return raw_mode
+    allowed = ", ".join(EVAL_QUERY_MODES)
+    raise ValueError(
+        f"Unsupported eval query mode: {raw_mode!r}. Expected one of: {allowed}."
+    )
+
+
+def build_eval_query_payload(
+    case: _EvalQueryCase,
+    *,
+    query_mode: EvalQueryMode,
+) -> dict[str, Any]:
+    return {
+        "query": case.question,
+        "top_k": case.top_k,
+        "mode": query_mode,
+    }
 
 
 def is_live_infinity_enabled(

@@ -10,8 +10,8 @@ Tests, fixtures, and optional evaluation. Root AGENTS covers cross-tree navigati
 ```bash
 ./.venv/bin/python -m pytest tests/unit/application tests/unit/infrastructure
 ./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval
-DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval
-./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all
+DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw/standard ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
+./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw/standard --query-mode standard --export-all
 ```
 
 ## Architecture

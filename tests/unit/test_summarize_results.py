@@ -4,11 +4,14 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from evals.summarize_results import (
+    apply_query_mode_to_run_id,
     build_comparison_report,
     build_failed_results_report,
     build_metric_averages_report,
     build_results_summary,
+    default_output_path,
     find_previous_summary_path,
     main,
     resolve_results_path,
@@ -27,6 +30,39 @@ def test_resolve_results_path_selects_latest_timestamped_export(tmp_path: Path) 
     resolved = resolve_results_path(tmp_path)
 
     assert resolved == newer
+
+
+def test_apply_query_mode_to_run_id_appends_mode_once() -> None:
+    assert apply_query_mode_to_run_id("20260518_170000", "standard") == (
+        "20260518_170000.standard"
+    )
+    assert apply_query_mode_to_run_id("20260518_170000.standard", "standard") == (
+        "20260518_170000.standard"
+    )
+
+
+def test_apply_query_mode_to_run_id_rejects_conflicting_mode() -> None:
+    with pytest.raises(RuntimeError):
+        apply_query_mode_to_run_id("20260518_170000.discorag", "standard")
+
+
+def test_default_output_path_uses_mode_aware_latest_files() -> None:
+    assert default_output_path(
+        "summary", run_id="latest", query_mode="standard"
+    ).name == ("latest.standard.summary.json")
+    assert default_output_path(
+        "failed", run_id="latest", query_mode="discorag"
+    ).name == ("latest.discorag.failed.json")
+
+
+def test_default_output_path_uses_run_id_without_double_mode_suffix() -> None:
+    path = default_output_path(
+        "summary",
+        run_id="20260518_170000.discorag",
+        query_mode="discorag",
+    )
+
+    assert path.name == "20260518_170000.discorag.summary.json"
 
 
 def test_build_results_summary_preserves_case_metrics_and_reasons() -> None:
@@ -183,6 +219,7 @@ def test_build_failed_results_report_keeps_only_failed_cases() -> None:
 
     assert report == {
         "run_id": "20260421_234301",
+        "query_mode": None,
         "test_file": "tests/evals/test_rag_deepeval.py",
         "total_cases": 2,
         "failed_cases": 1,
@@ -249,6 +286,7 @@ def test_build_metric_averages_report_aggregates_scores_and_pass_rates() -> None
 
     assert report == {
         "run_id": "20260421_234301",
+        "query_mode": None,
         "test_file": "tests/evals/test_rag_deepeval.py",
         "total_cases": 2,
         "passed_cases": 1,
@@ -329,7 +367,9 @@ def test_build_comparison_report_handles_zero_or_missing_baseline_percent_delta(
     report = build_comparison_report(summary, baseline)
 
     assert report["run_id"] == "current-run"
+    assert report["query_mode"] == "unknown"
     assert report["baseline_run_id"] == "baseline-run"
+    assert report["baseline_query_mode"] == "unknown"
     assert report["pass_rate"] == {
         "current": 1.0,
         "baseline": 0.0,
@@ -359,19 +399,94 @@ def test_build_comparison_report_handles_zero_or_missing_baseline_percent_delta(
     }
 
 
-def test_find_previous_summary_path_ignores_latest_and_current_run(
+def test_build_comparison_report_preserves_explicit_cross_mode_baseline() -> None:
+    summary = {
+        "run_id": "20260518_170000.discorag",
+        "query_mode": "discorag",
+        "cases": [{"name": "case-a", "success": True, "metrics": []}],
+    }
+    baseline = {
+        "run_id": "20260518_160000.standard",
+        "query_mode": "standard",
+        "cases": [{"name": "case-a", "success": False, "metrics": []}],
+    }
+
+    report = build_comparison_report(summary, baseline)
+
+    assert report["query_mode"] == "discorag"
+    assert report["baseline_query_mode"] == "standard"
+
+
+def test_build_comparison_report_reports_unknown_legacy_baseline_mode() -> None:
+    summary = {
+        "run_id": "20260518_170000.discorag",
+        "query_mode": "discorag",
+        "cases": [{"name": "case-a", "success": True, "metrics": []}],
+    }
+    baseline = {
+        "run_id": "20260518_160000",
+        "cases": [{"name": "case-a", "success": False, "metrics": []}],
+    }
+
+    report = build_comparison_report(summary, baseline)
+
+    assert report["query_mode"] == "discorag"
+    assert report["baseline_query_mode"] == "unknown"
+
+
+def test_find_previous_summary_path_uses_same_mode_history_only(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "latest.summary.json").write_text("{}", encoding="utf-8")
-    older = tmp_path / "20260421_224937.summary.json"
-    newer = tmp_path / "20260421_234301.summary.json"
-    current = tmp_path / "20260422_010203.summary.json"
+    older_standard = tmp_path / "20260421_224937.standard.summary.json"
+    newer_discorag = tmp_path / "20260421_234301.discorag.summary.json"
+    current = tmp_path / "20260422_010203.standard.summary.json"
+    older_standard.write_text("{}", encoding="utf-8")
+    newer_discorag.write_text("{}", encoding="utf-8")
+    current.write_text("{}", encoding="utf-8")
+
+    resolved = find_previous_summary_path(
+        run_id="20260422_010203.standard",
+        query_mode="standard",
+        summary_dir=tmp_path,
+    )
+
+    assert resolved == older_standard
+
+
+def test_find_previous_summary_path_ignores_latest_and_current_run(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "latest.standard.summary.json").write_text("{}", encoding="utf-8")
+    older = tmp_path / "20260421_224937.standard.summary.json"
+    newer = tmp_path / "20260421_234301.standard.summary.json"
+    current = tmp_path / "20260422_010203.standard.summary.json"
     older.write_text("{}", encoding="utf-8")
     newer.write_text("{}", encoding="utf-8")
     current.write_text("{}", encoding="utf-8")
 
     resolved = find_previous_summary_path(
-        run_id="20260422_010203",
+        run_id="20260422_010203.standard",
+        query_mode="standard",
+        summary_dir=tmp_path,
+    )
+
+    assert resolved == newer
+
+
+def test_find_previous_summary_path_accepts_mode_suffixed_history(
+    tmp_path: Path,
+) -> None:
+    older = tmp_path / "20260421_224937.standard.summary.json"
+    newer = tmp_path / "20260421_234301.standard.summary.json"
+    current = tmp_path / "20260422_010203.standard.summary.json"
+    older.write_text("{}", encoding="utf-8")
+    newer.write_text("{}", encoding="utf-8")
+    current.write_text("{}", encoding="utf-8")
+
+    resolved = find_previous_summary_path(
+        run_id="20260422_010203.standard",
+        query_mode="standard",
         summary_dir=tmp_path,
     )
 
@@ -486,7 +601,9 @@ def test_main_writes_summary_failed_metrics_and_compare_outputs(
     metrics = json.loads(metrics_output.read_text(encoding="utf-8"))
     compare = json.loads(compare_output.read_text(encoding="utf-8"))
 
-    assert summary["run_id"] == "current"
+    assert summary["run_id"] == "current.standard"
+    assert summary["query_mode"] == "standard"
+    assert summary["source_results_path"] == str(results_path)
     assert summary["run_duration"] == 5.0
     assert failed["failed_cases"] == 1
     assert failed["cases"][0]["name"] == "case-fail"
@@ -498,7 +615,48 @@ def test_main_writes_summary_failed_metrics_and_compare_outputs(
     assert compare["metrics"]["answer_relevancy"]["absolute_delta"] == 0.0
 
 
-def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baseline(
+def test_main_adds_mode_metadata_and_source_results_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    raw_dir = tmp_path / "raw" / "standard"
+    raw_dir.mkdir(parents=True)
+    raw_path = raw_dir / "20260518_170000"
+    raw_path.write_text(
+        json.dumps(
+            {
+                "testFile": "tests/evals/test_rag_deepeval.py",
+                "runDuration": 1.0,
+                "evaluationCost": 0.0,
+                "testCases": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary_output = tmp_path / "summary.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "summarize_results.py",
+            "--results",
+            str(raw_dir),
+            "--query-mode",
+            "standard",
+            "--summary-output",
+            str(summary_output),
+        ],
+    )
+
+    main()
+
+    summary = json.loads(summary_output.read_text(encoding="utf-8"))
+    assert summary["run_id"] == "20260518_170000.standard"
+    assert summary["query_mode"] == "standard"
+    assert summary["source_results_path"] == str(raw_path)
+
+
+def test_main_export_all_writes_mode_aware_latest_and_timestamped_outputs_with_auto_baseline(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -512,7 +670,8 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
     summary_dir.mkdir(parents=True)
 
     previous_summary = {
-        "run_id": "20260421_224937",
+        "run_id": "20260421_224937.standard",
+        "query_mode": "standard",
         "test_file": "tests/evals/test_rag_deepeval.py",
         "cases": [
             {
@@ -528,7 +687,7 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
             }
         ],
     }
-    (summary_dir / "20260421_224937.summary.json").write_text(
+    (summary_dir / "20260421_224937.standard.summary.json").write_text(
         json.dumps(previous_summary),
         encoding="utf-8",
     )
@@ -600,29 +759,77 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
             "--results",
             str(raw_dir),
             "--export-all",
+            "--query-mode",
+            "standard",
         ],
     )
 
     main()
 
     latest_summary = json.loads(
-        (summary_dir / "latest.summary.json").read_text(encoding="utf-8")
+        (summary_dir / "latest.standard.summary.json").read_text(encoding="utf-8")
     )
     timestamped_summary = json.loads(
-        (summary_dir / "20260421_234301.summary.json").read_text(encoding="utf-8")
+        (summary_dir / "20260421_234301.standard.summary.json").read_text(
+            encoding="utf-8"
+        )
     )
     latest_failed = json.loads(
-        (failed_dir / "latest.failed.json").read_text(encoding="utf-8")
+        (failed_dir / "latest.standard.failed.json").read_text(encoding="utf-8")
+    )
+    timestamped_failed = json.loads(
+        (failed_dir / "20260421_234301.standard.failed.json").read_text(
+            encoding="utf-8"
+        )
     )
     latest_metrics = json.loads(
-        (metrics_dir / "latest.metrics.json").read_text(encoding="utf-8")
+        (metrics_dir / "latest.standard.metrics.json").read_text(encoding="utf-8")
+    )
+    timestamped_metrics = json.loads(
+        (metrics_dir / "20260421_234301.standard.metrics.json").read_text(
+            encoding="utf-8"
+        )
     )
     latest_compare = json.loads(
-        (compare_dir / "latest.compare.json").read_text(encoding="utf-8")
+        (compare_dir / "latest.standard.compare.json").read_text(encoding="utf-8")
+    )
+    timestamped_compare = json.loads(
+        (compare_dir / "20260421_234301.standard.compare.json").read_text(
+            encoding="utf-8"
+        )
     )
 
-    assert latest_summary["run_id"] == "20260421_234301"
-    assert timestamped_summary["run_id"] == "20260421_234301"
+    assert latest_summary["run_id"] == "20260421_234301.standard"
+    assert latest_summary["query_mode"] == "standard"
+    assert latest_summary["source_results_path"] == str(raw_path)
+    assert timestamped_summary["run_id"] == "20260421_234301.standard"
+    assert timestamped_summary["query_mode"] == "standard"
+    assert timestamped_summary["source_results_path"] == str(raw_path)
+    assert latest_failed["run_id"] == "20260421_234301.standard"
+    assert latest_failed["query_mode"] == "standard"
     assert latest_failed["failed_cases"] == 0
+    assert timestamped_failed["run_id"] == "20260421_234301.standard"
+    assert timestamped_failed["query_mode"] == "standard"
+    assert timestamped_failed["failed_cases"] == 0
+    assert latest_metrics["run_id"] == "20260421_234301.standard"
+    assert latest_metrics["query_mode"] == "standard"
     assert latest_metrics["metrics"]["answer_relevancy"]["average_score"] == 1.0
-    assert latest_compare["baseline_run_id"] == "20260421_224937"
+    assert timestamped_metrics["run_id"] == "20260421_234301.standard"
+    assert timestamped_metrics["query_mode"] == "standard"
+    assert timestamped_metrics["metrics"]["answer_relevancy"]["average_score"] == 1.0
+    assert latest_compare["run_id"] == "20260421_234301.standard"
+    assert latest_compare["query_mode"] == "standard"
+    assert latest_compare["baseline_run_id"] == "20260421_224937.standard"
+    assert latest_compare["baseline_query_mode"] == "standard"
+    assert latest_compare["metrics"]["answer_relevancy"]["current"] == 1.0
+    assert latest_compare["metrics"]["answer_relevancy"]["baseline"] == 0.5
+    assert timestamped_compare["run_id"] == "20260421_234301.standard"
+    assert timestamped_compare["query_mode"] == "standard"
+    assert timestamped_compare["baseline_run_id"] == "20260421_224937.standard"
+    assert timestamped_compare["baseline_query_mode"] == "standard"
+    assert timestamped_compare["metrics"]["answer_relevancy"]["current"] == 1.0
+    assert timestamped_compare["metrics"]["answer_relevancy"]["baseline"] == 0.5
+    assert not (summary_dir / "latest.summary.json").exists()
+    assert not (failed_dir / "latest.failed.json").exists()
+    assert not (metrics_dir / "latest.metrics.json").exists()
+    assert not (compare_dir / "latest.compare.json").exists()

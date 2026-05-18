@@ -10,10 +10,14 @@ Optional DeepEval workflow: goldens generation, prompt optimization, live RAG ev
 ```bash
 ./.venv-goldens/bin/python tests/evals/generate_goldens.py
 ./.venv/bin/python tests/evals/optimize_prompt.py
-./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval
-DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval
-./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw --export-all
+./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
+DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw/standard ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
+DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw/discorag ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval --query-mode discorag
+./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw/standard --query-mode standard --export-all
+./.venv/bin/python tests/evals/summarize_results.py --results data/deepeval/raw/discorag --query-mode discorag --export-all
 ```
+
+If the DeepEval CLI does not pass custom pytest options through in a local version, use `RAGFLOW_LITE_EVAL_QUERY_MODE=standard` or `RAGFLOW_LITE_EVAL_QUERY_MODE=discorag` with the same `DEEPEVAL_RESULTS_FOLDER` value and omit `--query-mode` from the `deepeval test run` command.
 
 ## File map
 

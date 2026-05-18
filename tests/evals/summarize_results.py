@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DEEPEVAL_PATH = PROJECT_ROOT / "data" / "deepeval"
@@ -19,6 +19,9 @@ DEFAULT_FAILED_OUTPUT = DEFAULT_DEEPEVAL_PATH / "failed" / "latest.failed.json"
 DEFAULT_METRICS_OUTPUT = DEFAULT_DEEPEVAL_PATH / "metrics" / "latest.metrics.json"
 DEFAULT_COMPARE_OUTPUT = DEFAULT_DEEPEVAL_PATH / "compare" / "latest.compare.json"
 _TIMESTAMPED_EXPORT_RE = re.compile(r"^\d{8}_\d{6}$")
+QUERY_MODES = ("standard", "discorag")
+QueryMode = str
+_RUN_ID_RE = re.compile(r"^\d{8}_\d{6}(?:\.(standard|discorag))?$")
 _REPORT_SUFFIXES = {
     "summary": ".summary.json",
     "failed": ".failed.json",
@@ -27,21 +30,29 @@ _REPORT_SUFFIXES = {
 }
 
 
-def default_output_path(report_kind: str, *, run_id: str = "latest") -> Path:
-    defaults = {
-        "summary": DEFAULT_SUMMARY_OUTPUT,
-        "failed": DEFAULT_FAILED_OUTPUT,
-        "metrics": DEFAULT_METRICS_OUTPUT,
-        "compare": DEFAULT_COMPARE_OUTPUT,
+def default_output_path(
+    report_kind: str,
+    *,
+    run_id: str = "latest",
+    query_mode: QueryMode | None = None,
+) -> Path:
+    dirs = {
+        "summary": DEFAULT_SUMMARY_DIR,
+        "failed": DEFAULT_FAILED_DIR,
+        "metrics": DEFAULT_METRICS_DIR,
+        "compare": DEFAULT_COMPARE_DIR,
     }
     try:
-        default_path = defaults[report_kind]
+        output_dir = dirs[report_kind]
+        suffix = _REPORT_SUFFIXES[report_kind]
     except KeyError as exc:
         raise ValueError(f"Unsupported report kind: {report_kind}") from exc
 
     if run_id == "latest":
-        return default_path
-    return default_path.with_name(f"{run_id}{_REPORT_SUFFIXES[report_kind]}")
+        if query_mode not in QUERY_MODES:
+            raise ValueError("query_mode is required for latest deepeval outputs.")
+        return output_dir / f"latest.{query_mode}{suffix}"
+    return output_dir / f"{run_id}{suffix}"
 
 
 def resolve_results_path(path: Path) -> Path:
@@ -74,7 +85,12 @@ def load_results_payload(path: Path) -> dict[str, Any]:
     return payload
 
 
-def load_summary_document(path: Path) -> dict[str, Any]:
+def load_summary_document(
+    path: Path,
+    *,
+    query_mode: QueryMode | None = None,
+    source_results_path: Path | None = None,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise RuntimeError("deepeval artifact must be a JSON object.")
@@ -92,6 +108,25 @@ def load_summary_document(path: Path) -> dict[str, Any]:
         )
 
     summary.setdefault("run_id", infer_run_id(path))
+    existing_mode = summary.get("query_mode")
+    if query_mode is not None:
+        if existing_mode is not None and existing_mode != query_mode:
+            raise RuntimeError(
+                f"Summary query_mode {existing_mode!r} does not match requested "
+                f"query_mode {query_mode!r}."
+            )
+        summary["query_mode"] = query_mode
+        summary["run_id"] = apply_query_mode_to_run_id(
+            str(summary["run_id"]),
+            query_mode,
+        )
+    elif existing_mode is None:
+        inferred_mode = query_mode_from_run_id(str(summary["run_id"]))
+        if inferred_mode is not None:
+            summary["query_mode"] = inferred_mode
+
+    if source_results_path is not None:
+        summary["source_results_path"] = str(source_results_path)
     return summary
 
 
@@ -179,6 +214,7 @@ def build_failed_results_report(summary: dict[str, Any]) -> dict[str, Any]:
     failed_cases = [case for case in cases if not case.get("success")]
     return {
         "run_id": summary.get("run_id"),
+        "query_mode": summary.get("query_mode"),
         "test_file": summary.get("test_file"),
         "total_cases": len(cases),
         "failed_cases": len(failed_cases),
@@ -245,6 +281,7 @@ def build_metric_averages_report(summary: dict[str, Any]) -> dict[str, Any]:
         pass_rate = passed_cases / total_cases
     return {
         "run_id": summary.get("run_id"),
+        "query_mode": summary.get("query_mode"),
         "test_file": summary.get("test_file"),
         "total_cases": total_cases,
         "passed_cases": passed_cases,
@@ -280,7 +317,9 @@ def build_comparison_report(
 
     return {
         "run_id": current_metrics.get("run_id"),
+        "query_mode": summary.get("query_mode", "unknown"),
         "baseline_run_id": baseline_metrics.get("run_id"),
+        "baseline_query_mode": baseline_summary.get("query_mode", "unknown"),
         "pass_rate": _build_delta_payload(
             current_metrics.get("pass_rate"),
             baseline_metrics.get("pass_rate"),
@@ -301,9 +340,32 @@ def infer_run_id(path: Path) -> str:
     return path.name if _TIMESTAMPED_EXPORT_RE.fullmatch(path.name) else path.stem
 
 
+def apply_query_mode_to_run_id(run_id: str, query_mode: QueryMode) -> str:
+    if query_mode not in QUERY_MODES:
+        raise ValueError(f"Unsupported query mode: {query_mode!r}")
+    mode_suffix = f".{query_mode}"
+    if run_id.endswith(mode_suffix):
+        return run_id
+    for mode in QUERY_MODES:
+        if run_id.endswith(f".{mode}"):
+            raise RuntimeError(
+                f"Run id {run_id!r} already carries query mode {mode!r}, "
+                f"not {query_mode!r}."
+            )
+    return f"{run_id}.{query_mode}"
+
+
+def query_mode_from_run_id(run_id: str) -> str | None:
+    for mode in QUERY_MODES:
+        if run_id.endswith(f".{mode}"):
+            return mode
+    return None
+
+
 def find_previous_summary_path(
     *,
     run_id: str,
+    query_mode: QueryMode,
     summary_dir: Path | None = None,
 ) -> Path | None:
     if summary_dir is None:
@@ -316,8 +378,9 @@ def find_previous_summary_path(
         for child in summary_dir.iterdir()
         if child.is_file()
         and child.name.endswith(_REPORT_SUFFIXES["summary"])
-        and _TIMESTAMPED_EXPORT_RE.fullmatch(infer_run_id(child))
+        and _RUN_ID_RE.fullmatch(infer_run_id(child))
         and infer_run_id(child) != run_id
+        and query_mode_from_run_id(infer_run_id(child)) == query_mode
     )
     if not candidates:
         return None
@@ -331,7 +394,7 @@ def _summary_cases(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return cases
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
@@ -447,11 +510,24 @@ def main() -> None:
             "timestamped summary exists, compare will be generated automatically."
         ),
     )
+    parser.add_argument(
+        "--query-mode",
+        choices=QUERY_MODES,
+        default="standard",
+        help="Query mode represented by this DeepEval run: standard or discorag.",
+    )
     args = parser.parse_args()
 
     summary_path = resolve_results_path(args.results)
-    summary = load_summary_document(summary_path)
-    run_id = str(summary.get("run_id") or infer_run_id(summary_path))
+    summary = load_summary_document(
+        summary_path,
+        query_mode=args.query_mode,
+        source_results_path=summary_path,
+    )
+    run_id = str(
+        summary.get("run_id")
+        or apply_query_mode_to_run_id(infer_run_id(summary_path), args.query_mode)
+    )
     failed_report = build_failed_results_report(summary)
     metrics_report = build_metric_averages_report(summary)
 
@@ -471,18 +547,42 @@ def main() -> None:
 
     if args.export_all:
         summary_targets.extend(
-            [DEFAULT_SUMMARY_OUTPUT, default_output_path("summary", run_id=run_id)]
+            [
+                default_output_path(
+                    "summary", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "summary", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
         failed_targets.extend(
-            [DEFAULT_FAILED_OUTPUT, default_output_path("failed", run_id=run_id)]
+            [
+                default_output_path(
+                    "failed", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "failed", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
         metrics_targets.extend(
-            [DEFAULT_METRICS_OUTPUT, default_output_path("metrics", run_id=run_id)]
+            [
+                default_output_path(
+                    "metrics", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "metrics", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
 
     baseline_ref = args.baseline
     if baseline_ref is None and args.export_all:
-        baseline_ref = find_previous_summary_path(run_id=run_id)
+        baseline_ref = find_previous_summary_path(
+            run_id=run_id,
+            query_mode=args.query_mode,
+        )
 
     if compare_targets and baseline_ref is None:
         raise RuntimeError(
@@ -497,7 +597,14 @@ def main() -> None:
         comparison_report = build_comparison_report(summary, baseline_summary)
         if args.export_all:
             compare_targets.extend(
-                [DEFAULT_COMPARE_OUTPUT, default_output_path("compare", run_id=run_id)]
+                [
+                    default_output_path(
+                        "compare", run_id="latest", query_mode=args.query_mode
+                    ),
+                    default_output_path(
+                        "compare", run_id=run_id, query_mode=args.query_mode
+                    ),
+                ]
             )
 
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)
