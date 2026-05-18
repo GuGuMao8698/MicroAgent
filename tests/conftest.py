@@ -18,7 +18,7 @@ if str(TESTS_PATH) not in sys.path:
 if str(EVALS_PATH) not in sys.path:
     sys.path.insert(0, str(EVALS_PATH))
 
-from eval_support import validate_deepeval_env
+from eval_support import EVAL_QUERY_MODES, validate_deepeval_env
 from infinity_test_support import (
     assign_isolated_infinity_tables,
     clear_registered_infinity_tables,
@@ -50,6 +50,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help="run optional deepeval-backed evaluation tests",
+    )
+    parser.addoption(
+        "--query-mode",
+        choices=EVAL_QUERY_MODES,
+        default=None,
+        help=(
+            "query mode for deepeval RAG evaluation runs "
+            "(standard or discorag); defaults to standard, or "
+            "RAGFLOW_LITE_EVAL_QUERY_MODE when the option is omitted"
+        ),
     )
 
 

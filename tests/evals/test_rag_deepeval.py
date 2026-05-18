@@ -15,8 +15,10 @@ from deepeval import assert_test  # noqa: E402
 from eval_support import (  # noqa: E402
     RAG_EVAL_CASES,
     build_deepeval_judge_model,
+    build_eval_query_payload,
     build_metrics_for_case,
     build_rag_test_case,
+    resolve_eval_query_mode,
 )
 
 _CONTENT_TYPES = {
@@ -79,6 +81,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
     client: Any,
     fixture_documents_dir: Path,
     case: Any,
+    request: pytest.FixtureRequest,
 ) -> None:
     vector_index = client.app.state.services.ingestion_pipeline.vector_index
     assert vector_index._client.__class__.__name__ != "FakeInfinityClient"
@@ -95,9 +98,13 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
     )
     assert final_payload["status"] == "indexed"
 
+    query_mode = resolve_eval_query_mode(
+        request.config.getoption("--query-mode"),
+        os.environ,
+    )
     query_response = client.post(
         "/api/v0/queries",
-        json={"query": case.question, "top_k": case.top_k},
+        json=build_eval_query_payload(case, query_mode=query_mode),
     )
     assert query_response.status_code == 200
     payload = query_response.json()
@@ -122,6 +129,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         },
         "e2e": {
             "case": case.name,
+            "query_mode": query_mode,
             "has_reference": case.has_reference,
             "document_status": final_payload["status"],
             "context_count": len(payload["contexts"]),
