@@ -17,18 +17,15 @@ services:
       dockerfile: docker/app/Dockerfile.dev
     working_dir: /workspace
     command:
-      - uvicorn
-      - ragflow_lite.app:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --reload
+      - sh
+      - -lc
+      - |
+        set -a
+        . data/agent-runtime/local.env
+        set +a
+        exec uvicorn ragflow_lite.app:app --host 0.0.0.0 --port 8000 --reload
     environment:
       PYTHONPATH: /workspace/src
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ARK_API_KEY: ${ARK_API_KEY}
-      ARK_EMBEDDING_MODEL: ${ARK_EMBEDDING_MODEL}
       RAGFLOW_LITE_LOG_LEVEL: INFO
       RAGFLOW_LITE_LOG_FORMAT: json
       RAGFLOW_LITE_METRICS_ENABLED: "true"
