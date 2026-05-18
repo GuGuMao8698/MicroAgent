@@ -317,9 +317,9 @@ def build_comparison_report(
 
     return {
         "run_id": current_metrics.get("run_id"),
-        "query_mode": current_metrics.get("query_mode"),
+        "query_mode": summary.get("query_mode", "unknown"),
         "baseline_run_id": baseline_metrics.get("run_id"),
-        "baseline_query_mode": baseline_metrics.get("query_mode"),
+        "baseline_query_mode": baseline_summary.get("query_mode", "unknown"),
         "pass_rate": _build_delta_payload(
             current_metrics.get("pass_rate"),
             baseline_metrics.get("pass_rate"),
@@ -365,6 +365,7 @@ def query_mode_from_run_id(run_id: str) -> str | None:
 def find_previous_summary_path(
     *,
     run_id: str,
+    query_mode: QueryMode,
     summary_dir: Path | None = None,
 ) -> Path | None:
     if summary_dir is None:
@@ -379,6 +380,7 @@ def find_previous_summary_path(
         and child.name.endswith(_REPORT_SUFFIXES["summary"])
         and _RUN_ID_RE.fullmatch(infer_run_id(child))
         and infer_run_id(child) != run_id
+        and query_mode_from_run_id(infer_run_id(child)) == query_mode
     )
     if not candidates:
         return None
@@ -577,7 +579,10 @@ def main() -> None:
 
     baseline_ref = args.baseline
     if baseline_ref is None and args.export_all:
-        baseline_ref = find_previous_summary_path(run_id=run_id)
+        baseline_ref = find_previous_summary_path(
+            run_id=run_id,
+            query_mode=args.query_mode,
+        )
 
     if compare_targets and baseline_ref is None:
         raise RuntimeError(

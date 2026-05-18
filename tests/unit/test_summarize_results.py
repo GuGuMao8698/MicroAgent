@@ -367,7 +367,9 @@ def test_build_comparison_report_handles_zero_or_missing_baseline_percent_delta(
     report = build_comparison_report(summary, baseline)
 
     assert report["run_id"] == "current-run"
+    assert report["query_mode"] == "unknown"
     assert report["baseline_run_id"] == "baseline-run"
+    assert report["baseline_query_mode"] == "unknown"
     assert report["pass_rate"] == {
         "current": 1.0,
         "baseline": 0.0,
@@ -397,19 +399,75 @@ def test_build_comparison_report_handles_zero_or_missing_baseline_percent_delta(
     }
 
 
-def test_find_previous_summary_path_ignores_latest_and_current_run(
+def test_build_comparison_report_preserves_explicit_cross_mode_baseline() -> None:
+    summary = {
+        "run_id": "20260518_170000.discorag",
+        "query_mode": "discorag",
+        "cases": [{"name": "case-a", "success": True, "metrics": []}],
+    }
+    baseline = {
+        "run_id": "20260518_160000.standard",
+        "query_mode": "standard",
+        "cases": [{"name": "case-a", "success": False, "metrics": []}],
+    }
+
+    report = build_comparison_report(summary, baseline)
+
+    assert report["query_mode"] == "discorag"
+    assert report["baseline_query_mode"] == "standard"
+
+
+def test_build_comparison_report_reports_unknown_legacy_baseline_mode() -> None:
+    summary = {
+        "run_id": "20260518_170000.discorag",
+        "query_mode": "discorag",
+        "cases": [{"name": "case-a", "success": True, "metrics": []}],
+    }
+    baseline = {
+        "run_id": "20260518_160000",
+        "cases": [{"name": "case-a", "success": False, "metrics": []}],
+    }
+
+    report = build_comparison_report(summary, baseline)
+
+    assert report["query_mode"] == "discorag"
+    assert report["baseline_query_mode"] == "unknown"
+
+
+def test_find_previous_summary_path_uses_same_mode_history_only(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "latest.summary.json").write_text("{}", encoding="utf-8")
-    older = tmp_path / "20260421_224937.summary.json"
-    newer = tmp_path / "20260421_234301.summary.json"
-    current = tmp_path / "20260422_010203.summary.json"
+    older_standard = tmp_path / "20260421_224937.standard.summary.json"
+    newer_discorag = tmp_path / "20260421_234301.discorag.summary.json"
+    current = tmp_path / "20260422_010203.standard.summary.json"
+    older_standard.write_text("{}", encoding="utf-8")
+    newer_discorag.write_text("{}", encoding="utf-8")
+    current.write_text("{}", encoding="utf-8")
+
+    resolved = find_previous_summary_path(
+        run_id="20260422_010203.standard",
+        query_mode="standard",
+        summary_dir=tmp_path,
+    )
+
+    assert resolved == older_standard
+
+
+def test_find_previous_summary_path_ignores_latest_and_current_run(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "latest.standard.summary.json").write_text("{}", encoding="utf-8")
+    older = tmp_path / "20260421_224937.standard.summary.json"
+    newer = tmp_path / "20260421_234301.standard.summary.json"
+    current = tmp_path / "20260422_010203.standard.summary.json"
     older.write_text("{}", encoding="utf-8")
     newer.write_text("{}", encoding="utf-8")
     current.write_text("{}", encoding="utf-8")
 
     resolved = find_previous_summary_path(
-        run_id="20260422_010203",
+        run_id="20260422_010203.standard",
+        query_mode="standard",
         summary_dir=tmp_path,
     )
 
@@ -428,6 +486,7 @@ def test_find_previous_summary_path_accepts_mode_suffixed_history(
 
     resolved = find_previous_summary_path(
         run_id="20260422_010203.standard",
+        query_mode="standard",
         summary_dir=tmp_path,
     )
 
