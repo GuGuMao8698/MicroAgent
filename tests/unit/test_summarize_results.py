@@ -219,6 +219,7 @@ def test_build_failed_results_report_keeps_only_failed_cases() -> None:
 
     assert report == {
         "run_id": "20260421_234301",
+        "query_mode": None,
         "test_file": "tests/evals/test_rag_deepeval.py",
         "total_cases": 2,
         "failed_cases": 1,
@@ -285,6 +286,7 @@ def test_build_metric_averages_report_aggregates_scores_and_pass_rates() -> None
 
     assert report == {
         "run_id": "20260421_234301",
+        "query_mode": None,
         "test_file": "tests/evals/test_rag_deepeval.py",
         "total_cases": 2,
         "passed_cases": 1,
@@ -595,7 +597,7 @@ def test_main_adds_mode_metadata_and_source_results_path(
     assert summary["source_results_path"] == str(raw_path)
 
 
-def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baseline(
+def test_main_export_all_writes_mode_aware_latest_and_timestamped_outputs_with_auto_baseline(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -609,7 +611,8 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
     summary_dir.mkdir(parents=True)
 
     previous_summary = {
-        "run_id": "20260421_224937",
+        "run_id": "20260421_224937.standard",
+        "query_mode": "standard",
         "test_file": "tests/evals/test_rag_deepeval.py",
         "cases": [
             {
@@ -625,7 +628,7 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
             }
         ],
     }
-    (summary_dir / "20260421_224937.summary.json").write_text(
+    (summary_dir / "20260421_224937.standard.summary.json").write_text(
         json.dumps(previous_summary),
         encoding="utf-8",
     )
@@ -697,13 +700,15 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
             "--results",
             str(raw_dir),
             "--export-all",
+            "--query-mode",
+            "standard",
         ],
     )
 
     main()
 
     latest_summary = json.loads(
-        (summary_dir / "latest.summary.json").read_text(encoding="utf-8")
+        (summary_dir / "latest.standard.summary.json").read_text(encoding="utf-8")
     )
     timestamped_summary = json.loads(
         (summary_dir / "20260421_234301.standard.summary.json").read_text(
@@ -711,17 +716,61 @@ def test_main_export_all_writes_latest_and_timestamped_outputs_with_auto_baselin
         )
     )
     latest_failed = json.loads(
-        (failed_dir / "latest.failed.json").read_text(encoding="utf-8")
+        (failed_dir / "latest.standard.failed.json").read_text(encoding="utf-8")
+    )
+    timestamped_failed = json.loads(
+        (failed_dir / "20260421_234301.standard.failed.json").read_text(
+            encoding="utf-8"
+        )
     )
     latest_metrics = json.loads(
-        (metrics_dir / "latest.metrics.json").read_text(encoding="utf-8")
+        (metrics_dir / "latest.standard.metrics.json").read_text(encoding="utf-8")
+    )
+    timestamped_metrics = json.loads(
+        (metrics_dir / "20260421_234301.standard.metrics.json").read_text(
+            encoding="utf-8"
+        )
     )
     latest_compare = json.loads(
-        (compare_dir / "latest.compare.json").read_text(encoding="utf-8")
+        (compare_dir / "latest.standard.compare.json").read_text(encoding="utf-8")
+    )
+    timestamped_compare = json.loads(
+        (compare_dir / "20260421_234301.standard.compare.json").read_text(
+            encoding="utf-8"
+        )
     )
 
     assert latest_summary["run_id"] == "20260421_234301.standard"
+    assert latest_summary["query_mode"] == "standard"
+    assert latest_summary["source_results_path"] == str(raw_path)
     assert timestamped_summary["run_id"] == "20260421_234301.standard"
+    assert timestamped_summary["query_mode"] == "standard"
+    assert timestamped_summary["source_results_path"] == str(raw_path)
+    assert latest_failed["run_id"] == "20260421_234301.standard"
+    assert latest_failed["query_mode"] == "standard"
     assert latest_failed["failed_cases"] == 0
+    assert timestamped_failed["run_id"] == "20260421_234301.standard"
+    assert timestamped_failed["query_mode"] == "standard"
+    assert timestamped_failed["failed_cases"] == 0
+    assert latest_metrics["run_id"] == "20260421_234301.standard"
+    assert latest_metrics["query_mode"] == "standard"
     assert latest_metrics["metrics"]["answer_relevancy"]["average_score"] == 1.0
-    assert latest_compare["baseline_run_id"] == "20260421_224937"
+    assert timestamped_metrics["run_id"] == "20260421_234301.standard"
+    assert timestamped_metrics["query_mode"] == "standard"
+    assert timestamped_metrics["metrics"]["answer_relevancy"]["average_score"] == 1.0
+    assert latest_compare["run_id"] == "20260421_234301.standard"
+    assert latest_compare["query_mode"] == "standard"
+    assert latest_compare["baseline_run_id"] == "20260421_224937.standard"
+    assert latest_compare["baseline_query_mode"] == "standard"
+    assert latest_compare["metrics"]["answer_relevancy"]["current"] == 1.0
+    assert latest_compare["metrics"]["answer_relevancy"]["baseline"] == 0.5
+    assert timestamped_compare["run_id"] == "20260421_234301.standard"
+    assert timestamped_compare["query_mode"] == "standard"
+    assert timestamped_compare["baseline_run_id"] == "20260421_224937.standard"
+    assert timestamped_compare["baseline_query_mode"] == "standard"
+    assert timestamped_compare["metrics"]["answer_relevancy"]["current"] == 1.0
+    assert timestamped_compare["metrics"]["answer_relevancy"]["baseline"] == 0.5
+    assert not (summary_dir / "latest.summary.json").exists()
+    assert not (failed_dir / "latest.failed.json").exists()
+    assert not (metrics_dir / "latest.metrics.json").exists()
+    assert not (compare_dir / "latest.compare.json").exists()

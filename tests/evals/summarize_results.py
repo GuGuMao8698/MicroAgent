@@ -214,6 +214,7 @@ def build_failed_results_report(summary: dict[str, Any]) -> dict[str, Any]:
     failed_cases = [case for case in cases if not case.get("success")]
     return {
         "run_id": summary.get("run_id"),
+        "query_mode": summary.get("query_mode"),
         "test_file": summary.get("test_file"),
         "total_cases": len(cases),
         "failed_cases": len(failed_cases),
@@ -280,6 +281,7 @@ def build_metric_averages_report(summary: dict[str, Any]) -> dict[str, Any]:
         pass_rate = passed_cases / total_cases
     return {
         "run_id": summary.get("run_id"),
+        "query_mode": summary.get("query_mode"),
         "test_file": summary.get("test_file"),
         "total_cases": total_cases,
         "passed_cases": passed_cases,
@@ -315,7 +317,9 @@ def build_comparison_report(
 
     return {
         "run_id": current_metrics.get("run_id"),
+        "query_mode": current_metrics.get("query_mode"),
         "baseline_run_id": baseline_metrics.get("run_id"),
+        "baseline_query_mode": baseline_metrics.get("query_mode"),
         "pass_rate": _build_delta_payload(
             current_metrics.get("pass_rate"),
             baseline_metrics.get("pass_rate"),
@@ -541,13 +545,34 @@ def main() -> None:
 
     if args.export_all:
         summary_targets.extend(
-            [DEFAULT_SUMMARY_OUTPUT, default_output_path("summary", run_id=run_id)]
+            [
+                default_output_path(
+                    "summary", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "summary", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
         failed_targets.extend(
-            [DEFAULT_FAILED_OUTPUT, default_output_path("failed", run_id=run_id)]
+            [
+                default_output_path(
+                    "failed", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "failed", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
         metrics_targets.extend(
-            [DEFAULT_METRICS_OUTPUT, default_output_path("metrics", run_id=run_id)]
+            [
+                default_output_path(
+                    "metrics", run_id="latest", query_mode=args.query_mode
+                ),
+                default_output_path(
+                    "metrics", run_id=run_id, query_mode=args.query_mode
+                ),
+            ]
         )
 
     baseline_ref = args.baseline
@@ -567,7 +592,14 @@ def main() -> None:
         comparison_report = build_comparison_report(summary, baseline_summary)
         if args.export_all:
             compare_targets.extend(
-                [DEFAULT_COMPARE_OUTPUT, default_output_path("compare", run_id=run_id)]
+                [
+                    default_output_path(
+                        "compare", run_id="latest", query_mode=args.query_mode
+                    ),
+                    default_output_path(
+                        "compare", run_id=run_id, query_mode=args.query_mode
+                    ),
+                ]
             )
 
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)
