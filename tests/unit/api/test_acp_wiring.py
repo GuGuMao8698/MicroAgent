@@ -26,6 +26,7 @@ class TestBuildAcpClient:
         agent_args: str = "--acp",
         agent_cwd: str | None = None,
         agent_config_dir: str | None = None,
+        microagent_dir: str | None = None,
     ) -> Settings:
         return Settings(
             project_root=project_root,
@@ -39,6 +40,7 @@ class TestBuildAcpClient:
             agent_args=agent_args,
             agent_cwd=agent_cwd,
             agent_config_dir=agent_config_dir,
+            microagent_dir=microagent_dir,
         )
 
     def test_constructs_acp_client_with_config_from_settings(
@@ -51,6 +53,7 @@ class TestBuildAcpClient:
             tmp_path,
             agent_cwd=str(paths.workspace_dir),
             agent_config_dir=str(paths.config_dir),
+            microagent_dir=str(paths.microagent_dir),
         )
         client = _build_acp_client(settings)
         assert isinstance(client, AcpClient)
@@ -65,6 +68,7 @@ class TestBuildAcpClient:
             agent_args="--acp --verbose",
             agent_cwd=str(paths.workspace_dir),
             agent_config_dir=str(paths.config_dir),
+            microagent_dir=str(paths.microagent_dir),
         )
         client = _build_acp_client(settings)
         config = client._config
@@ -92,6 +96,7 @@ class TestBuildAcpClient:
             tmp_path,
             agent_cwd=str(paths.workspace_dir),
             agent_config_dir=str(paths.config_dir),
+            microagent_dir=str(paths.microagent_dir),
         )
         client = _build_acp_client(settings)
         assert client._config.cwd == str(paths.workspace_dir)
@@ -105,6 +110,7 @@ class TestBuildAcpClient:
             agent_args="--acp",
             agent_cwd=str(paths.workspace_dir),
             agent_config_dir=str(paths.config_dir),
+            microagent_dir=str(paths.microagent_dir),
         )
         client = _build_acp_client(settings)
         assert client._config.args == ["--acp"]
@@ -124,41 +130,51 @@ def test_build_acp_client_sets_isolated_runtime_env(tmp_path: Path) -> None:
         ark_embedding_model="test-model",
         agent_cwd=str(paths.workspace_dir),
         agent_config_dir=str(paths.config_dir),
+        microagent_dir=str(paths.microagent_dir),
     )
 
     client = _build_acp_client(settings)
 
     assert client._config.cwd == str(paths.workspace_dir)
+    assert client._config.command == settings.agent_command
+    assert client._config.args == ["--acp", "--setting-sources", "project"]
     assert client._config.env["CLAUDE_CONFIG_DIR"] == str(paths.config_dir)
+    assert client._config.env["MICRORAG_AGENT_CWD"] == str(paths.workspace_dir)
+    assert client._config.env["MICRORAG_AGENT_CONFIG_DIR"] == str(paths.config_dir)
+    assert client._config.env["MICRORAG_MICROAGENT_DIR"] == str(paths.microagent_dir)
     assert str(tmp_path / "src") in client._config.env["PYTHONPATH"]
     assert str(tmp_path / ".venv" / "bin") in client._config.env["PATH"]
 
 
-def test_settings_default_agent_runtime_paths_use_reference_claude_code() -> None:
+def test_settings_default_agent_runtime_paths_use_microagent_bundle() -> None:
     settings = Settings.default(Path("/tmp/test-project"))
 
+    assert settings.agent_command == str(
+        Path("/tmp/test-project") / "scripts" / "run_microagent.sh"
+    )
     assert settings.agent_cwd == str(
-        Path("/tmp/test-project") / "参考项目" / "claude-code"
+        Path("/tmp/test-project") / "data" / "agent-runtime" / "workspace"
     )
     assert settings.agent_config_dir == str(
         Path("/tmp/test-project") / "data" / "agent-runtime" / "config"
     )
+    assert settings.microagent_dir == str(
+        Path("/tmp/test-project") / "src" / "ragflow_lite" / "microagent"
+    )
     assert settings.agent_args == "--acp --setting-sources project"
 
 
-def test_settings_default_agent_runtime_paths_honor_reference_override(
+def test_settings_default_agent_runtime_paths_honor_microagent_override(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    reference_runtime = tmp_path / "reference-claude-code"
-    monkeypatch.setenv("MICRORAG_REFERENCE_CLAUDE_CODE_DIR", str(reference_runtime))
+    microagent_dir = tmp_path / "external-microagent"
+    monkeypatch.setenv("MICRORAG_MICROAGENT_DIR", str(microagent_dir))
 
     settings = Settings.default(tmp_path)
 
-    assert settings.agent_cwd == str(reference_runtime)
-    assert settings.agent_config_dir == str(
-        tmp_path / "data" / "agent-runtime" / "config"
-    )
+    assert settings.microagent_dir == str(microagent_dir)
+    assert settings.agent_cwd == str(tmp_path / "data" / "agent-runtime" / "workspace")
 
 
 def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
@@ -197,18 +213,19 @@ def test_app_services_acp_client_is_lazy(tmp_path: Path) -> None:
 def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> None:
 
     default_paths = default_agent_runtime_paths(tmp_path)
-    (default_paths.workspace_dir / ".claude" / "skills" / "teach-me").mkdir(
+    (default_paths.microagent_dir / ".claude" / "skills" / "teach-me").mkdir(
         parents=True
     )
-    (default_paths.workspace_dir / ".claude" / "agents").mkdir(parents=True)
+    (default_paths.microagent_dir / ".claude" / "agents").mkdir(parents=True)
     (
-        default_paths.workspace_dir / ".claude" / "skills" / "teach-me" / "SKILL.md"
-    ).write_text("reference skill\n", encoding="utf-8")
-    (default_paths.workspace_dir / ".claude" / "agents" / "hello-agent.md").write_text(
-        "reference agent\n", encoding="utf-8"
+        default_paths.microagent_dir / ".claude" / "skills" / "teach-me" / "SKILL.md"
+    ).write_text("microagent skill\n", encoding="utf-8")
+    (default_paths.microagent_dir / ".claude" / "agents" / "hello-agent.md").write_text(
+        "microagent agent\n",
+        encoding="utf-8",
     )
     default_paths = setup_agent_runtime(default_paths)
-    (default_paths.workspace_dir / ".claude" / "settings.json").write_text(
+    (default_paths.microagent_dir / ".claude" / "settings.json").write_text(
         '{"permissions":{"defaultMode":"bypassPermissions"}}\n',
         encoding="utf-8",
     )
@@ -218,6 +235,7 @@ def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> N
             project_root=tmp_path,
             config_dir=default_paths.config_dir,
             workspace_dir=rogue_workspace,
+            microagent_dir=default_paths.microagent_dir,
         )
     )
     settings = Settings(
@@ -230,6 +248,7 @@ def test_build_acp_client_rejects_non_default_runtime_paths(tmp_path: Path) -> N
         ark_embedding_model="test-model",
         agent_cwd=str(rogue_workspace),
         agent_config_dir=str(default_paths.config_dir),
+        microagent_dir=str(default_paths.microagent_dir),
     )
 
     try:

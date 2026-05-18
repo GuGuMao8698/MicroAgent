@@ -20,25 +20,39 @@ class AgentRuntimePaths:
     project_root: Path
     config_dir: Path
     workspace_dir: Path
+    microagent_dir: Path
 
 
 def default_agent_runtime_paths(project_root: Path) -> AgentRuntimePaths:
     root = project_root.resolve()
     runtime_root = root / "data" / "agent-runtime"
-    reference_runtime = os.getenv("MICRORAG_REFERENCE_CLAUDE_CODE_DIR")
     return AgentRuntimePaths(
         project_root=root,
-        config_dir=runtime_root / "config",
-        workspace_dir=(
-            Path(reference_runtime).expanduser()
-            if reference_runtime is not None and reference_runtime.strip()
-            else root / "参考项目" / "claude-code"
+        config_dir=_env_path_or_default(
+            "MICRORAG_AGENT_CONFIG_DIR",
+            runtime_root / "config",
+        ),
+        workspace_dir=_env_path_or_default(
+            "MICRORAG_AGENT_CWD",
+            runtime_root / "workspace",
+        ),
+        microagent_dir=_env_path_or_default(
+            "MICRORAG_MICROAGENT_DIR",
+            root / "src" / "ragflow_lite" / "microagent",
         ),
     )
 
 
+def _env_path_or_default(name: str, default: Path) -> Path:
+    value = os.getenv(name)
+    if value is not None and value.strip():
+        return Path(value).expanduser()
+    return default
+
+
 def setup_agent_runtime(paths: AgentRuntimePaths) -> AgentRuntimePaths:
     paths.config_dir.mkdir(parents=True, exist_ok=True)
+    paths.workspace_dir.mkdir(parents=True, exist_ok=True)
     _write_mcrag_shim(paths)
     _migrate_legacy_workspace_assets(paths)
     return paths
@@ -114,20 +128,23 @@ def validate_agent_runtime_paths(paths: AgentRuntimePaths) -> None:
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
     if not _same_path(paths.workspace_dir, expected.workspace_dir):
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
+    if not _same_path(paths.microagent_dir, expected.microagent_dir):
+        raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
 
 
 def validate_agent_runtime_workspace(paths: AgentRuntimePaths) -> None:
     validate_agent_runtime_paths(paths)
-    claude_dir = paths.workspace_dir / ".claude"
+    microagent_claude_dir = paths.microagent_dir / ".claude"
     required = (
         paths.config_dir,
         paths.workspace_dir,
-        claude_dir / "skills",
-        claude_dir / "agents",
+        paths.microagent_dir,
+        microagent_claude_dir / "skills",
+        microagent_claude_dir / "agents",
     )
     if not all(path.exists() for path in required):
         raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
-    settings_path = claude_dir / "settings.json"
+    settings_path = microagent_claude_dir / "settings.json"
     if not settings_path.exists():
         raise RuntimeError(
             LOCAL_SETTINGS_REQUIRED_MESSAGE.format(settings_path=settings_path)
@@ -155,4 +172,7 @@ def build_agent_child_env(
         venv_bin if not existing_path else f"{venv_bin}{os.pathsep}{existing_path}"
     )
     env["CLAUDE_CONFIG_DIR"] = str(paths.config_dir)
+    env["MICRORAG_AGENT_CWD"] = str(paths.workspace_dir)
+    env["MICRORAG_AGENT_CONFIG_DIR"] = str(paths.config_dir)
+    env["MICRORAG_MICROAGENT_DIR"] = str(paths.microagent_dir)
     return env

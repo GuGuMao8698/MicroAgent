@@ -150,6 +150,7 @@ def _handle_agent_setup(args: argparse.Namespace) -> int:
         {
             "config_dir": str(paths.config_dir),
             "workspace_dir": str(paths.workspace_dir),
+            "microagent_dir": str(paths.microagent_dir),
         }
     )
     return 0
