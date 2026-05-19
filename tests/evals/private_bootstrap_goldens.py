@@ -106,7 +106,8 @@ def infer_status(text: str, *, role: CorpusRole) -> str:
 def infer_topic(relative_path: str) -> str:
     path = Path(relative_path)
     if path.name in {"AGENTS.md", "CONTRACTS.md"}:
-        return path.parent.as_posix() or "root"
+        parent = path.parent.as_posix()
+        return "root" if parent == "." else parent
     return path.stem
 
 

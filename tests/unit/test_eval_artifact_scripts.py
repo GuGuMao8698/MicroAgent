@@ -112,10 +112,12 @@ def test_private_bootstrap_discovers_only_allowed_corpus_paths(
 def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
+    root_agents = root / "AGENTS.md"
     authoritative = root / "tests" / "evals" / "CONTRACTS.md"
     distractor = root / "docs" / "superpowers" / "plans" / "2026-05-19-plan.md"
     authoritative.parent.mkdir(parents=True)
     distractor.parent.mkdir(parents=True)
+    root_agents.write_text("# Working Agreements\n", encoding="utf-8")
     authoritative.write_text("# Eval Contracts\n\nActive eval rules.\n", encoding="utf-8")
     distractor.write_text(
         "# Historical Plan\n\nStatus: Ready for implementation after confirmation\n",
@@ -134,17 +136,23 @@ def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> N
 
     entries = create_snapshot(
         repo_root=root,
-        source_paths=[authoritative, distractor],
+        source_paths=[authoritative, distractor, root_agents],
         snapshot_root=snapshot_root,
     )
 
-    assert [entry.role for entry in entries] == ["distractor", "authoritative"]
+    assert [entry.role for entry in entries] == [
+        "authoritative",
+        "distractor",
+        "authoritative",
+    ]
     assert (snapshot_root / "manifest.json").exists()
     manifest = json.loads((snapshot_root / "manifest.json").read_text(encoding="utf-8"))
     assert [entry["original_path"] for entry in manifest["entries"]] == [
+        "AGENTS.md",
         "docs/superpowers/plans/2026-05-19-plan.md",
         "tests/evals/CONTRACTS.md",
     ]
+    assert manifest["entries"][0]["topic"] == "root"
     assert (
         snapshot_root / "authoritative" / "tests__evals__CONTRACTS.md"
     ).read_text(encoding="utf-8") == "# Eval Contracts\n\nActive eval rules.\n"
