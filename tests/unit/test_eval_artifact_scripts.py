@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -43,15 +42,6 @@ from evals.private_bootstrap_goldens import (  # noqa: E402
     classify_corpus_path,
     discover_corpus_paths,
 )
-
-_EXPECTED_EVAL_SOURCE_FILES = {
-    "Best Practices for Claude Code.md": 10,
-    "CodexBestpractices.md": 10,
-    "Faithfulness.md": 10,
-    "MinerU_markdown_603260_20260417_2LSZ.md": 10,
-    "MinerU_markdown_中华人民共和国劳动法.md": 10,
-    "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md": 10,
-}
 
 
 def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
@@ -607,7 +597,7 @@ def test_golden_to_payload_preserves_eval_fixture_metadata() -> None:
 def test_checked_in_goldens_artifact_loads_via_prompt_consumer() -> None:
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 60
+    assert len(goldens) == 20
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
@@ -625,11 +615,22 @@ def test_checked_in_goldens_artifact_mirrors_context_into_retrieval_context() ->
     assert all(golden.retrieval_context == golden.context for golden in goldens)
 
 
-def test_checked_in_goldens_artifact_has_exactly_ten_per_source_document() -> None:
-    goldens = load_goldens(DEFAULT_GOLDENS_PATH)
-    counts = Counter(golden.source_file for golden in goldens if golden.source_file)
+def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
+    payload = json.loads(DEFAULT_GOLDENS_PATH.read_text(encoding="utf-8"))
 
-    assert counts == _EXPECTED_EVAL_SOURCE_FILES
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(payload)
+    goldens = load_goldens(DEFAULT_GOLDENS_PATH)
+
+    assert len(goldens) == 20
+    assert {golden.source_file for golden in goldens} == {
+        "microrag-private-bootstrap.md"
+    }
+    assert all(golden.input.strip() for golden in goldens)
+    assert all(
+        golden.expected_output and golden.expected_output.strip() for golden in goldens
+    )
 
 
 def test_generate_goldens_artifact_requires_exactly_ten_per_document(
