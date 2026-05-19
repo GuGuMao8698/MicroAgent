@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import json
+import shutil
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Iterable
 
 PRIVATE_BOOTSTRAP_FIXTURE_NAME = "microrag-private-bootstrap.md"
 PRIVATE_BOOTSTRAP_SNAPSHOT_DIR = "microrag-private-bootstrap-snapshot"
@@ -84,3 +87,76 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def snapshot_filename(relative_path: str) -> str:
+    return relative_path.replace("/", "__")
+
+
+def infer_status(text: str, *, role: CorpusRole) -> str:
+    for line in text.splitlines()[:20]:
+        stripped = line.strip()
+        if stripped.lower().startswith("status:"):
+            return stripped.split(":", 1)[1].strip() or "unknown"
+    if role is CorpusRole.AUTHORITATIVE:
+        return "active"
+    return "historical"
+
+
+def infer_topic(relative_path: str) -> str:
+    path = Path(relative_path)
+    if path.name in {"AGENTS.md", "CONTRACTS.md"}:
+        return path.parent.as_posix() or "root"
+    return path.stem
+
+
+def write_manifest(snapshot_root: Path, entries: list[ManifestEntry]) -> None:
+    payload = {
+        "dataset": "microrag-private-bootstrap",
+        "entries": [asdict(entry) for entry in entries],
+    }
+    (snapshot_root / "manifest.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def create_snapshot(
+    *,
+    repo_root: Path,
+    source_paths: Iterable[Path],
+    snapshot_root: Path,
+) -> list[ManifestEntry]:
+    if snapshot_root.exists():
+        shutil.rmtree(snapshot_root)
+    (snapshot_root / "authoritative").mkdir(parents=True, exist_ok=True)
+    (snapshot_root / "distractors").mkdir(parents=True, exist_ok=True)
+
+    entries: list[ManifestEntry] = []
+    for source_path in sorted(
+        source_paths,
+        key=lambda path: path.relative_to(repo_root).as_posix(),
+    ):
+        relative_path = normalize_relative_path(source_path.relative_to(repo_root))
+        role = classify_corpus_path(Path(relative_path))
+        if role is None:
+            continue
+
+        role_dir = "authoritative" if role is CorpusRole.AUTHORITATIVE else "distractors"
+        target_relative = f"{role_dir}/{snapshot_filename(relative_path)}"
+        target_path = snapshot_root / target_relative
+        shutil.copy2(source_path, target_path)
+        text = source_path.read_text(encoding="utf-8")
+        entries.append(
+            ManifestEntry(
+                original_path=relative_path,
+                snapshot_path=target_relative,
+                role=role.value,
+                topic=infer_topic(relative_path),
+                status=infer_status(text, role=role),
+                sha256=sha256_file(source_path),
+            )
+        )
+
+    write_manifest(snapshot_root, entries)
+    return entries

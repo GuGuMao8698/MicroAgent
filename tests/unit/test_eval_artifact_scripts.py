@@ -109,6 +109,52 @@ def test_private_bootstrap_discovers_only_allowed_corpus_paths(
     ]
 
 
+def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    authoritative = root / "tests" / "evals" / "CONTRACTS.md"
+    distractor = root / "docs" / "superpowers" / "plans" / "2026-05-19-plan.md"
+    authoritative.parent.mkdir(parents=True)
+    distractor.parent.mkdir(parents=True)
+    authoritative.write_text("# Eval Contracts\n\nActive eval rules.\n", encoding="utf-8")
+    distractor.write_text(
+        "# Historical Plan\n\nStatus: Ready for implementation after confirmation\n",
+        encoding="utf-8",
+    )
+
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    entries = create_snapshot(
+        repo_root=root,
+        source_paths=[authoritative, distractor],
+        snapshot_root=snapshot_root,
+    )
+
+    assert [entry.role for entry in entries] == ["distractor", "authoritative"]
+    assert (snapshot_root / "manifest.json").exists()
+    manifest = json.loads((snapshot_root / "manifest.json").read_text(encoding="utf-8"))
+    assert [entry["original_path"] for entry in manifest["entries"]] == [
+        "docs/superpowers/plans/2026-05-19-plan.md",
+        "tests/evals/CONTRACTS.md",
+    ]
+    assert (
+        snapshot_root / "authoritative" / "tests__evals__CONTRACTS.md"
+    ).read_text(encoding="utf-8") == "# Eval Contracts\n\nActive eval rules.\n"
+    assert (
+        snapshot_root
+        / "distractors"
+        / "docs__superpowers__plans__2026-05-19-plan.md"
+    ).exists()
+
+
 def test_sync_eval_source_documents_copies_markdown_files_only(tmp_path: Path) -> None:
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
