@@ -573,7 +573,7 @@
     "expected_output": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative AGENTS.md and CONTRACTS.md files describe local workflow, runtime boundaries, eval gates, Docker local observability, provider wiring, and module contracts, but they do not define a cloud production deployment target, region, or release cadence.",
     "expectedOutput": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative AGENTS.md and CONTRACTS.md files describe local workflow, runtime boundaries, eval gates, Docker local observability, provider wiring, and module contracts, but they do not define a cloud production deployment target, region, or release cadence.",
     "context": [
-      "The frozen authoritative sources include local runtime, tests/evals, Docker local observability, and module contracts; none establish cloud production deployment target, region, or cadence."
+      "AGENTS.md covers local workflow, src/ragflow_lite/CONTRACTS.md covers runtime/provider/package boundaries, tests/evals/CONTRACTS.md covers eval gates, and docker/CONTRACTS.md covers local observability; these rationale sources do not establish cloud production deployment target, region, or cadence."
     ],
     "sourceFile": "microrag-private-bootstrap.md",
     "source_file": "microrag-private-bootstrap.md",
@@ -585,6 +585,12 @@
       "required_authoritative_sources": [],
       "distractor_sources": [],
       "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "AGENTS.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
       "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
     },
     "additional_metadata": {
@@ -595,6 +601,12 @@
       "required_authoritative_sources": [],
       "distractor_sources": [],
       "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "AGENTS.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
       "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
     }
   },
@@ -616,6 +628,10 @@
       "required_authoritative_sources": [],
       "distractor_sources": [],
       "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "docker/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
       "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
     },
     "additional_metadata": {
@@ -626,6 +642,10 @@
       "required_authoritative_sources": [],
       "distractor_sources": [],
       "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "docker/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
       "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
     }
   },
