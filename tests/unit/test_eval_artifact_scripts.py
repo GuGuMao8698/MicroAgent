@@ -15,6 +15,11 @@ from deepeval.dataset import Golden  # noqa: E402
 from deepeval.metrics.utils import initialize_model  # noqa: E402
 from evals.cleanup_infinity import select_eval_cleanup_tables  # noqa: E402
 from evals.eval_models import DeepSeekChatDeepEvalModel  # noqa: E402
+from evals.private_bootstrap_goldens import (  # noqa: E402
+    CorpusRole,
+    classify_corpus_path,
+    discover_corpus_paths,
+)
 from evals.generate_goldens import (
     DEFAULT_GOLDENS_PATH,
     ArkContextConstructionEmbeddingModel,
@@ -45,6 +50,63 @@ _EXPECTED_EVAL_SOURCE_FILES = {
     "MinerU_markdown_中华人民共和国劳动法.md": 10,
     "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md": 10,
 }
+
+
+def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
+    assert classify_corpus_path(Path("AGENTS.md")) == CorpusRole.AUTHORITATIVE
+    assert (
+        classify_corpus_path(Path("src/ragflow_lite/CONTRACTS.md"))
+        == CorpusRole.AUTHORITATIVE
+    )
+    assert (
+        classify_corpus_path(Path("tests/evals/AGENTS.md"))
+        == CorpusRole.AUTHORITATIVE
+    )
+    assert (
+        classify_corpus_path(Path("docs/superpowers/specs/2026-05-18-example.md"))
+        == CorpusRole.DISTRACTOR
+    )
+    assert (
+        classify_corpus_path(Path("docs/superpowers/plans/2026-05-19-example.md"))
+        == CorpusRole.DISTRACTOR
+    )
+
+    assert classify_corpus_path(Path("参考项目/网页/deepeval/Faithfulness.md")) is None
+    assert classify_corpus_path(Path("tests/fixtures/documents/sample.md")) is None
+    assert classify_corpus_path(Path("data/uploads/doc.md")) is None
+    assert classify_corpus_path(Path("src/ragflow_lite/microagent/README.md")) is None
+
+
+def test_private_bootstrap_discovers_only_allowed_corpus_paths(
+    tmp_path: Path,
+) -> None:
+    files = {
+        "AGENTS.md": "# root agents\n",
+        "src/ragflow_lite/CONTRACTS.md": "# contract\n",
+        "tests/evals/AGENTS.md": "# eval agents\n",
+        "docs/superpowers/specs/2026-05-18-a.md": "# spec\n",
+        "docs/superpowers/plans/2026-05-19-b.md": "# plan\n",
+        "参考项目/网页/deepeval/Faithfulness.md": "# public docs\n",
+        "tests/fixtures/documents/sample.md": "# old fixture\n",
+        "src/ragflow_lite/microagent/README.md": "# mixed authority\n",
+    }
+    for relative, text in files.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    discovered = [
+        path.relative_to(tmp_path).as_posix()
+        for path in discover_corpus_paths(tmp_path)
+    ]
+
+    assert discovered == [
+        "AGENTS.md",
+        "docs/superpowers/plans/2026-05-19-b.md",
+        "docs/superpowers/specs/2026-05-18-a.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "tests/evals/AGENTS.md",
+    ]
 
 
 def test_sync_eval_source_documents_copies_markdown_files_only(tmp_path: Path) -> None:
