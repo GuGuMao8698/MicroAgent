@@ -25,12 +25,7 @@ _JUDGE_MODEL_ENV = {
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
-    "Best Practices for Claude Code.md": 10,
-    "CodexBestpractices.md": 10,
-    "Faithfulness.md": 10,
-    "MinerU_markdown_603260_20260417_2LSZ.md": 10,
-    "MinerU_markdown_中华人民共和国劳动法.md": 10,
-    "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md": 10,
+    "microrag-private-bootstrap.md": 20,
 }
 
 
@@ -175,7 +170,7 @@ def test_seed_dataset_tracks_generated_eval_docs_with_references() -> None:
             fixture_counts.get(case.document_fixture, 0) + 1
         )
 
-    assert len(RAG_EVAL_CASES) == 60
+    assert len(RAG_EVAL_CASES) == 20
     assert fixture_counts == _EXPECTED_EVAL_SOURCE_FILES
     assert all(case.has_reference for case in RAG_EVAL_CASES)
 
