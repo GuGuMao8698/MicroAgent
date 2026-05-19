@@ -9,6 +9,7 @@ Optional DeepEval workflow: goldens generation, prompt optimization, live RAG ev
 ## Quick commands
 ```bash
 ./.venv-goldens/bin/python tests/evals/generate_goldens.py
+./.venv/bin/python tests/evals/build_private_bootstrap_goldens.py --draft-goldens tests/fixtures/evals/private_bootstrap_goldens.draft.json
 ./.venv/bin/python tests/evals/optimize_prompt.py
 ./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
 DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw/standard ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
@@ -23,6 +24,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 
 - [test_rag_deepeval.py](test_rag_deepeval.py) — uploads fixtures, waits for terminal ingestion state, evaluates answers.
 - [generate_goldens.py](generate_goldens.py) — synthetic golden generation (isolated `.venv-goldens`).
+- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, compatibility packed fixture, and validates the draft golden artifact.
 - [optimize_prompt.py](optimize_prompt.py) — prompt optimization against committed goldens (main `.venv`).
 - [summarize_results.py](summarize_results.py) — post-processing of raw DeepEval exports.
 

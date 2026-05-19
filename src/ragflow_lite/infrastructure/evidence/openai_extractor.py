@@ -41,6 +41,8 @@ Return exactly one JSON object with this shape:
 Rules:
 - Use only facts visible in the chunks.
 - Every entity and relation must cite at least one provided chunk_id.
+- Every relation source_entity_name and target_entity_name must exactly match
+  one entity name in entities.
 - Do not invent chunk IDs.
 - Do not return markdown or prose outside the JSON object.
 """

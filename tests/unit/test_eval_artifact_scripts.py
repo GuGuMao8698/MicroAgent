@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -36,15 +35,513 @@ from evals.optimize_prompt import (  # noqa: E402
     main,
     validate_goldens,
 )
+from evals.private_bootstrap_goldens import (  # noqa: E402
+    AUTHORITY_RULE,
+    PRIVATE_BOOTSTRAP_SNAPSHOT_DIR,
+    CorpusRole,
+    ManifestEntry,
+    classify_corpus_path,
+    discover_corpus_paths,
+    load_manifest,
+    sha256_file,
+)
 
-_EXPECTED_EVAL_SOURCE_FILES = {
-    "Best Practices for Claude Code.md": 10,
-    "CodexBestpractices.md": 10,
-    "Faithfulness.md": 10,
-    "MinerU_markdown_603260_20260417_2LSZ.md": 10,
-    "MinerU_markdown_中华人民共和国劳动法.md": 10,
-    "MinerU_markdown_附件1：《期货公司监督管理办法（征求意见稿）》.md": 10,
-}
+
+def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
+    assert classify_corpus_path(Path("AGENTS.md")) == CorpusRole.AUTHORITATIVE
+    assert (
+        classify_corpus_path(Path("src/ragflow_lite/CONTRACTS.md"))
+        == CorpusRole.AUTHORITATIVE
+    )
+    assert (
+        classify_corpus_path(Path("tests/evals/AGENTS.md")) == CorpusRole.AUTHORITATIVE
+    )
+    assert (
+        classify_corpus_path(Path("docs/superpowers/specs/2026-05-18-example.md"))
+        == CorpusRole.DISTRACTOR
+    )
+    assert (
+        classify_corpus_path(Path("docs/superpowers/plans/2026-05-19-example.md"))
+        == CorpusRole.DISTRACTOR
+    )
+
+    assert classify_corpus_path(Path("参考项目/网页/deepeval/Faithfulness.md")) is None
+    assert classify_corpus_path(Path("tests/fixtures/documents/sample.md")) is None
+    assert classify_corpus_path(Path("data/uploads/doc.md")) is None
+    assert classify_corpus_path(Path("src/ragflow_lite/microagent/README.md")) is None
+
+
+def test_private_bootstrap_discovers_only_allowed_corpus_paths(
+    tmp_path: Path,
+) -> None:
+    files = {
+        "AGENTS.md": "# root agents\n",
+        "src/ragflow_lite/CONTRACTS.md": "# contract\n",
+        "tests/evals/AGENTS.md": "# eval agents\n",
+        "docs/superpowers/specs/2026-05-18-a.md": "# spec\n",
+        "docs/superpowers/plans/2026-05-19-b.md": "# plan\n",
+        "参考项目/网页/deepeval/Faithfulness.md": "# public docs\n",
+        "tests/fixtures/documents/sample.md": "# old fixture\n",
+        "src/ragflow_lite/microagent/README.md": "# mixed authority\n",
+    }
+    for relative, text in files.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    discovered = [
+        path.relative_to(tmp_path).as_posix()
+        for path in discover_corpus_paths(tmp_path)
+    ]
+
+    assert discovered == [
+        "AGENTS.md",
+        "docs/superpowers/plans/2026-05-19-b.md",
+        "docs/superpowers/specs/2026-05-18-a.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "tests/evals/AGENTS.md",
+    ]
+
+
+def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_agents = root / "AGENTS.md"
+    authoritative = root / "tests" / "evals" / "CONTRACTS.md"
+    distractor = root / "docs" / "superpowers" / "plans" / "2026-05-19-plan.md"
+    authoritative.parent.mkdir(parents=True)
+    distractor.parent.mkdir(parents=True)
+    root_agents.write_text("# Working Agreements\n", encoding="utf-8")
+    authoritative.write_text(
+        "# Eval Contracts\n\nActive eval rules.\n", encoding="utf-8"
+    )
+    distractor.write_text(
+        "# Historical Plan\n\nStatus: Ready for implementation after confirmation\n",
+        encoding="utf-8",
+    )
+
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    entries = create_snapshot(
+        repo_root=root,
+        source_paths=[authoritative, distractor, root_agents],
+        snapshot_root=snapshot_root,
+    )
+
+    assert [entry.role for entry in entries] == [
+        "authoritative",
+        "distractor",
+        "authoritative",
+    ]
+    assert (snapshot_root / "manifest.json").exists()
+    manifest = json.loads((snapshot_root / "manifest.json").read_text(encoding="utf-8"))
+    assert [entry["original_path"] for entry in manifest["entries"]] == [
+        "AGENTS.md",
+        "docs/superpowers/plans/2026-05-19-plan.md",
+        "tests/evals/CONTRACTS.md",
+    ]
+    assert manifest["entries"][0]["topic"] == "root"
+    assert (snapshot_root / "authoritative" / "tests__evals__CONTRACTS.md").read_text(
+        encoding="utf-8"
+    ) == "# Eval Contracts\n\nActive eval rules.\n"
+    assert (
+        snapshot_root / "distractors" / "docs__superpowers__plans__2026-05-19-plan.md"
+    ).exists()
+
+
+def test_private_bootstrap_builds_packed_fixture_from_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    authoritative = root / "AGENTS.md"
+    distractor = root / "docs" / "superpowers" / "specs" / "2026-05-18-spec.md"
+    distractor.parent.mkdir(parents=True)
+    authoritative.write_text(
+        "# Working Agreements\n\nUse root cause fixes.\n",
+        encoding="utf-8",
+    )
+    distractor.write_text(
+        "# Draft Spec\n\nStatus: Draft design spec\n",
+        encoding="utf-8",
+    )
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import build_packed_fixture, create_snapshot
+
+    create_snapshot(
+        repo_root=root,
+        source_paths=[authoritative, distractor],
+        snapshot_root=snapshot_root,
+    )
+    fixture_path = (
+        root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
+    )
+
+    build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
+
+    text = fixture_path.read_text(encoding="utf-8")
+    assert "# MicroRAG Private Bootstrap Corpus" in text
+    assert "# Source: AGENTS.md" in text
+    assert "Role: authoritative" in text
+    assert "# Source: docs/superpowers/specs/2026-05-18-spec.md" in text
+    assert "Role: distractor" in text
+    assert "Use root cause fixes." in text
+    assert "Status: Draft design spec" in text
+
+
+def test_private_bootstrap_rejects_unsafe_snapshot_root(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "AGENTS.md"
+    source.write_text("# Working Agreements\n", encoding="utf-8")
+    unsafe_snapshot_root = tmp_path / "outside" / "microrag-private-bootstrap-snapshot"
+    unsafe_snapshot_root.mkdir(parents=True)
+    sentinel = unsafe_snapshot_root / "sentinel.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    with pytest.raises(RuntimeError, match="Unsafe private bootstrap snapshot root"):
+        create_snapshot(
+            repo_root=root,
+            source_paths=[source],
+            snapshot_root=unsafe_snapshot_root,
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_private_bootstrap_rejects_snapshot_filename_collisions(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    source_a = root / "docs" / "superpowers" / "plans" / "a__b.md"
+    source_b = root / "docs" / "superpowers" / "plans" / "a" / "b.md"
+    source_a.parent.mkdir(parents=True)
+    source_b.parent.mkdir(parents=True)
+    source_a.write_text("# Plan A\n", encoding="utf-8")
+    source_b.write_text("# Plan B\n", encoding="utf-8")
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    with pytest.raises(RuntimeError, match="Snapshot filename collision"):
+        create_snapshot(
+            repo_root=root,
+            source_paths=[source_a, source_b],
+            snapshot_root=snapshot_root,
+        )
+
+
+def _private_bootstrap_case(
+    *,
+    name: str,
+    case_type: str,
+    answerability: str = "answerable",
+    required_sources: list[str] | None = None,
+    distractor_sources: list[str] | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "corpus_fixture": PRIVATE_BOOTSTRAP_SNAPSHOT_DIR,
+        "document_fixture": "microrag-private-bootstrap.md",
+        "top_k": 6,
+        "case_type": case_type,
+        "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+        "required_authoritative_sources": required_sources or ["AGENTS.md"],
+        "distractor_sources": distractor_sources or [],
+        "answerability": answerability,
+    }
+    if case_type == "multi_doc_synthesis":
+        metadata["required_authoritative_sources"] = required_sources or [
+            "AGENTS.md",
+            "tests/evals/CONTRACTS.md",
+        ]
+        metadata["why_multi_doc"] = "Requires root workflow and eval contract."
+    if case_type == "stale_plan_trap":
+        metadata["distractor_sources"] = distractor_sources or [
+            "docs/superpowers/specs/2026-05-18-example.md"
+        ]
+        metadata["why_not_answer_from_distractor"] = (
+            "The distractor is planning material, not an active contract."
+        )
+    if case_type == "negative_missing_evidence":
+        metadata["answerability"] = "unanswerable"
+        metadata["required_authoritative_sources"] = []
+        metadata["acceptable_refusal"] = (
+            "The authoritative MicroRAG documents in this eval corpus do not establish that."
+        )
+    return {
+        "name": name,
+        "input": f"Question for {name}?",
+        "expected_output": "Answer grounded in authoritative sources.",
+        "context": ["Source context."],
+        "sourceFile": "microrag-private-bootstrap.md",
+        "additionalMetadata": metadata,
+    }
+
+
+def _private_bootstrap_payload() -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"current-{index}", case_type="current_contract_qa"
+        )
+        for index in range(8)
+    )
+    payload.extend(
+        _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
+        for index in range(4)
+    )
+    payload.extend(
+        _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
+        for index in range(4)
+    )
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"negative-{index}", case_type="negative_missing_evidence"
+        )
+        for index in range(2)
+    )
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"comparison-{index}",
+            case_type="comparison",
+            required_sources=["AGENTS.md"],
+            distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
+        )
+        for index in range(2)
+    )
+    return payload
+
+
+def _private_bootstrap_manifest_entries() -> list[ManifestEntry]:
+    return [
+        ManifestEntry(
+            original_path=original_path,
+            snapshot_path=f"snapshot/{index}.md",
+            role="authoritative",
+            topic="test",
+            status="active",
+            sha256=f"sha256-{index}",
+        )
+        for index, original_path in enumerate(
+            [
+                "AGENTS.md",
+                "tests/evals/CONTRACTS.md",
+                "docs/superpowers/specs/2026-05-18-example.md",
+                "docs/superpowers/plans/2026-05-19-plan.md",
+            ],
+            start=1,
+        )
+    ]
+
+
+def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text("# Root\n\nRoot rule.\n", encoding="utf-8")
+    contracts = root / "tests" / "evals" / "CONTRACTS.md"
+    spec = root / "docs" / "superpowers" / "specs" / "2026-05-18-example.md"
+    plan = root / "docs" / "superpowers" / "plans" / "2026-05-19-plan.md"
+    contracts.parent.mkdir(parents=True)
+    spec.parent.mkdir(parents=True)
+    plan.parent.mkdir(parents=True)
+    contracts.write_text("# Eval Contract\n\nActive eval rule.\n", encoding="utf-8")
+    spec.write_text(
+        "# Spec\n\nStatus: Draft design spec\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n\nStatus: Ready for implementation after confirmation\n",
+        encoding="utf-8",
+    )
+    draft = (
+        root / "tests" / "fixtures" / "evals" / "private_bootstrap_goldens.draft.json"
+    )
+    draft.parent.mkdir(parents=True)
+    cases = []
+    cases.extend(
+        _private_bootstrap_case(
+            name=f"current-{index}", case_type="current_contract_qa"
+        )
+        for index in range(8)
+    )
+    cases.extend(
+        _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
+        for index in range(4)
+    )
+    cases.extend(
+        _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
+        for index in range(4)
+    )
+    cases.extend(
+        _private_bootstrap_case(
+            name=f"negative-{index}", case_type="negative_missing_evidence"
+        )
+        for index in range(2)
+    )
+    cases.extend(
+        _private_bootstrap_case(
+            name=f"comparison-{index}",
+            case_type="comparison",
+            distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
+        )
+        for index in range(2)
+    )
+    draft.write_text(json.dumps(cases), encoding="utf-8")
+
+    from evals.build_private_bootstrap_goldens import main
+
+    main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+
+    assert (
+        root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
+    ).exists()
+    assert (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+        / "manifest.json"
+    ).exists()
+
+
+def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(_private_bootstrap_payload())
+
+
+def test_private_bootstrap_validation_accepts_manifest_sources() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(
+        _private_bootstrap_payload(),
+        manifest_entries=_private_bootstrap_manifest_entries(),
+    )
+
+
+def test_private_bootstrap_validation_rejects_source_missing_from_manifest() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    entries = [
+        entry
+        for entry in _private_bootstrap_manifest_entries()
+        if entry.original_path != "tests/evals/CONTRACTS.md"
+    ]
+
+    with pytest.raises(RuntimeError, match="snapshot manifest"):
+        validate_goldens_payload(
+            _private_bootstrap_payload(),
+            manifest_entries=entries,
+        )
+
+
+def test_private_bootstrap_validation_rejects_wrong_or_missing_source_file() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    wrong_source_payload = _private_bootstrap_payload()
+    wrong_source_payload[0]["sourceFile"] = "other.md"
+
+    with pytest.raises(RuntimeError, match="sourceFile"):
+        validate_goldens_payload(wrong_source_payload)
+
+    missing_source_payload = _private_bootstrap_payload()
+    missing_source_payload[0].pop("sourceFile")
+
+    with pytest.raises(RuntimeError, match="sourceFile"):
+        validate_goldens_payload(missing_source_payload)
+
+
+def test_private_bootstrap_validation_requires_snapshot_corpus_fixture() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"].pop("corpus_fixture")
+
+    with pytest.raises(RuntimeError, match="corpus_fixture"):
+        validate_goldens_payload(payload)
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["corpus_fixture"] = "microrag-private-bootstrap.md"
+
+    with pytest.raises(RuntimeError, match="corpus_fixture"):
+        validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_malformed_required_sources() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["required_authoritative_sources"] = [
+        "AGENTS.md",
+        123,
+    ]
+
+    with pytest.raises(RuntimeError, match="required_authoritative_sources"):
+        validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_wrong_authority_rule() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["authority_rule"] = f"{AUTHORITY_RULE} Extra."
+
+    with pytest.raises(RuntimeError, match="authority_rule"):
+        validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_stale_plan_only_answer_source() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = [
+        _private_bootstrap_case(
+            name=f"current-{index}",
+            case_type="current_contract_qa",
+        )
+        for index in range(20)
+    ]
+    payload[0]["additionalMetadata"]["required_authoritative_sources"] = [
+        "docs/superpowers/specs/2026-05-18-example.md"
+    ]
+
+    with pytest.raises(RuntimeError, match="authoritative source"):
+        validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_boolean_top_k() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["top_k"] = True
+
+    with pytest.raises(RuntimeError, match="positive top_k"):
+        validate_goldens_payload(payload)
 
 
 def test_sync_eval_source_documents_copies_markdown_files_only(tmp_path: Path) -> None:
@@ -120,7 +617,7 @@ def test_golden_to_payload_preserves_eval_fixture_metadata() -> None:
 def test_checked_in_goldens_artifact_loads_via_prompt_consumer() -> None:
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 60
+    assert len(goldens) == 20
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
@@ -138,11 +635,41 @@ def test_checked_in_goldens_artifact_mirrors_context_into_retrieval_context() ->
     assert all(golden.retrieval_context == golden.context for golden in goldens)
 
 
-def test_checked_in_goldens_artifact_has_exactly_ten_per_source_document() -> None:
-    goldens = load_goldens(DEFAULT_GOLDENS_PATH)
-    counts = Counter(golden.source_file for golden in goldens if golden.source_file)
+def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
+    payload = json.loads(DEFAULT_GOLDENS_PATH.read_text(encoding="utf-8"))
 
-    assert counts == _EXPECTED_EVAL_SOURCE_FILES
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(payload)
+    goldens = load_goldens(DEFAULT_GOLDENS_PATH)
+
+    assert len(goldens) == 20
+    assert {golden.source_file for golden in goldens} == {
+        "microrag-private-bootstrap.md"
+    }
+    assert {item["additionalMetadata"]["corpus_fixture"] for item in payload} == {
+        PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+    }
+    assert all(golden.input.strip() for golden in goldens)
+    assert all(
+        golden.expected_output and golden.expected_output.strip() for golden in goldens
+    )
+
+
+def test_private_bootstrap_snapshot_matches_current_source_files() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    snapshot_root = (
+        repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+    )
+
+    for entry in load_manifest(snapshot_root):
+        source_path = repo_root / entry.original_path
+        snapshot_path = snapshot_root / entry.snapshot_path
+        assert snapshot_path.is_file()
+        assert snapshot_path.read_text(encoding="utf-8") == source_path.read_text(
+            encoding="utf-8"
+        )
+        assert entry.sha256 == sha256_file(snapshot_path)
 
 
 def test_generate_goldens_artifact_requires_exactly_ten_per_document(

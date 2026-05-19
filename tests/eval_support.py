@@ -38,10 +38,18 @@ class RagEvalCase:
     question: str
     expected_output: str | None = None
     top_k: int = 4
+    corpus_fixture: str | None = None
+    required_authoritative_sources: tuple[str, ...] = ()
+    distractor_sources: tuple[str, ...] = ()
+    answerability: str = "answerable"
 
     @property
     def has_reference(self) -> bool:
         return self.expected_output is not None
+
+    @property
+    def uses_corpus_fixture(self) -> bool:
+        return self.corpus_fixture is not None
 
 
 _EVAL_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "evals"
@@ -53,6 +61,7 @@ def ensure_rag_eval_cases_use_markdown_fixtures(cases: list[RagEvalCase]) -> Non
         {
             case.document_fixture
             for case in cases
+            if not case.uses_corpus_fixture
             if Path(case.document_fixture).suffix.lower() != ".md"
         }
     )
@@ -107,18 +116,40 @@ def _case_from_golden_payload(item: Any, *, index: int) -> RagEvalCase:
         )
 
     top_k_value = additional_metadata.get("top_k", 4)
-    if not isinstance(top_k_value, int) or top_k_value <= 0:
+    if type(top_k_value) is not int or top_k_value <= 0:
         raise RuntimeError(
             f"deepeval golden payload #{index} additionalMetadata.top_k "
             "must be a positive integer."
         )
+    corpus_fixture = _coerce_optional_string(additional_metadata.get("corpus_fixture"))
+    if corpus_fixture is not None:
+        corpus_fixture = Path(corpus_fixture).as_posix()
 
     return RagEvalCase(
         name=name,
-        document_fixture=Path(document_fixture).name,
+        document_fixture=Path(document_fixture).as_posix()
+        if corpus_fixture is not None
+        else Path(document_fixture).name,
         question=question,
         expected_output=expected_output,
         top_k=top_k_value,
+        corpus_fixture=corpus_fixture,
+        required_authoritative_sources=tuple(
+            _coerce_string_sequence(
+                additional_metadata.get("required_authoritative_sources"),
+                field_name="required_authoritative_sources",
+                index=index,
+            )
+        ),
+        distractor_sources=tuple(
+            _coerce_string_sequence(
+                additional_metadata.get("distractor_sources"),
+                field_name="distractor_sources",
+                index=index,
+            )
+        ),
+        answerability=_coerce_optional_string(additional_metadata.get("answerability"))
+        or "answerable",
     )
 
 
@@ -138,6 +169,28 @@ def _coerce_optional_string(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _coerce_string_sequence(
+    value: Any,
+    *,
+    field_name: str,
+    index: int,
+) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise RuntimeError(
+            f"deepeval golden payload #{index} additionalMetadata.{field_name} "
+            "must be a list of strings."
+        )
+    strings = [_coerce_optional_string(item) for item in value]
+    if any(item is None for item in strings):
+        raise RuntimeError(
+            f"deepeval golden payload #{index} additionalMetadata.{field_name} "
+            "must contain non-empty strings."
+        )
+    return [item for item in strings if item is not None]
 
 
 RAG_EVAL_CASES = _load_rag_eval_cases()
