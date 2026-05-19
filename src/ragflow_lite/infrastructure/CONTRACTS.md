@@ -84,6 +84,39 @@ Verification:
 - [tests/unit/infrastructure/test_infinity_dense_index.py](../../../tests/unit/infrastructure/test_infinity_dense_index.py)
 - [tests/integration/infrastructure/test_live_infinity_dense_legacy_compat.py](../../../tests/integration/infrastructure/test_live_infinity_dense_legacy_compat.py)
 
+## Ingestion Chunking Contract
+
+Reviewed at: `2026-05-19T21:01:25+08:00`
+Status: Active
+Owner: `RecursiveCharacterChunker`, `Settings`
+
+Source of truth:
+- [chunkers/recursive_character.py](chunkers/recursive_character.py)
+- [../config/settings.py](../config/settings.py)
+
+Invariant:
+- `Settings.chunk_size` and `RecursiveCharacterChunker.chunk_size` are a
+  `cl100k_base` token budget, not a character budget.
+- Default ingestion chunk budget is `512` tokens.
+- Default ingestion chunk overlap is `0`.
+- Recursive separator priority remains string-based; token counts only decide
+  whether pieces or merged chunks fit the budget.
+- Chunk metadata offsets (`start_offset`, `end_offset`) remain character
+  offsets into parsed document text.
+
+Forbidden stale interpretations:
+- Do not treat `chunk_size=512` as 512 characters.
+- Do not revive the old default overlap of `50`.
+- Do not slice token ids and decode them back as the primary fallback path.
+- Do not use per-piece token sums as the final fit check for merged chunks.
+
+Verification:
+- [tests/unit/infrastructure/test_recursive_character_chunker.py](../../../tests/unit/infrastructure/test_recursive_character_chunker.py)
+- [tests/unit/infrastructure/test_chunker.py](../../../tests/unit/infrastructure/test_chunker.py)
+- [tests/unit/application/test_ingestion.py](../../../tests/unit/application/test_ingestion.py)
+- [tests/unit/test_probe_chunking_script.py](../../../tests/unit/test_probe_chunking_script.py)
+- `scripts/probe_chunking.py --input tests/fixtures/documents/microrag-private-bootstrap.md --output-dir data/chunk-probes/token-budget-check`
+
 ## ACP Runtime and Session Store Contract
 
 Reviewed at: 2026-05-18T00:00:00+08:00

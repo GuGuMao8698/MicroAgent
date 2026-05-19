@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ragflow_lite.domain.models import Chunk, ParsedDocument
+from ragflow_lite.infrastructure.chunkers.token_counter import count_cl100k_tokens
 
 DEFAULT_SEPARATORS: list[str] = [
     "\n\n",  # paragraph / blank line
@@ -14,7 +15,7 @@ DEFAULT_SEPARATORS: list[str] = [
     "!",  # English exclamation
     "?",  # English question mark
     " ",  # space
-    "",  # character-level fallback
+    "",  # token-safe character-boundary fallback
 ]
 
 _INTERNAL_METADATA_KEYS = frozenset({"page_spans", "page_texts"})
@@ -53,23 +54,61 @@ def _chunk_metadata(
     return metadata
 
 
-def _recursive_split(text: str, separators: list[str], chunk_size: int) -> list[str]:
-    """Split *text* recursively using *separators* until every piece <= *chunk_size*.
+def _fits_token_budget(text: str, token_budget: int) -> bool:
+    return count_cl100k_tokens(text) <= token_budget
 
-    If *separators* is empty, fall back to a hard character-window split.
-    """
-    if len(text) <= chunk_size:
+
+def _find_token_safe_end(text: str, start: int, token_budget: int) -> int:
+    if start >= len(text):
+        return start
+
+    low = start + 1
+    high = len(text)
+
+    if _fits_token_budget(text[start:high], token_budget):
+        return high
+
+    known_good = start
+
+    while low <= high:
+        mid = (low + high) // 2
+        candidate = text[start:mid]
+        if candidate and _fits_token_budget(candidate, token_budget):
+            known_good = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    if known_good == start:
+        return start + 1
+    return known_good
+
+
+def _token_safe_split(text: str, token_budget: int) -> list[str]:
+    pieces: list[str] = []
+    start = 0
+    while start < len(text):
+        end = _find_token_safe_end(text, start, token_budget)
+        if end <= start:
+            end = start + 1
+        pieces.append(text[start:end])
+        start = end
+    return pieces
+
+
+def _recursive_split(text: str, separators: list[str], chunk_size: int) -> list[str]:
+    """Split *text* recursively using separators until every piece fits tokens."""
+    if _fits_token_budget(text, chunk_size):
         return [text]
 
     if not separators:
-        return _hard_split(text, chunk_size)
+        return _token_safe_split(text, chunk_size)
 
     sep = separators[0]
     remaining = separators[1:]
 
     if sep == "":
-        # Empty-string separator: split into individual characters.
-        pieces = [c for c in text if c]
+        return _token_safe_split(text, chunk_size)
     else:
         pieces = text.split(sep)
         # Re-attach the separator to each piece except the last so that
@@ -82,7 +121,7 @@ def _recursive_split(text: str, separators: list[str], chunk_size: int) -> list[
     # Recursively split any piece that still exceeds chunk_size.
     result: list[str] = []
     for piece in pieces:
-        if len(piece) <= chunk_size:
+        if _fits_token_budget(piece, chunk_size):
             result.append(piece)
         else:
             result.extend(_recursive_split(piece, remaining, chunk_size))
@@ -90,29 +129,19 @@ def _recursive_split(text: str, separators: list[str], chunk_size: int) -> list[
     return result
 
 
-def _hard_split(text: str, chunk_size: int) -> list[str]:
-    """Split *text* into fixed-size character windows."""
-    pieces: list[str] = []
-    for i in range(0, len(text), chunk_size):
-        piece = text[i : i + chunk_size]
-        if piece:
-            pieces.append(piece)
-    return pieces
-
-
 def _merge_pieces(
     pieces: list[str],
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[tuple[str, int, int]]:
-    """Merge *pieces* into chunks of at most *chunk_size* characters.
+    """Merge *pieces* into chunks of at most *chunk_size* cl100k tokens.
 
     Returns a list of ``(chunk_text, start_offset, end_offset)`` tuples where
     offsets are computed against the text reconstructed by joining all *pieces*.
 
     Overlap is implemented by prepending trailing pieces from the previous
     chunk to the beginning of the next chunk, up to approximately
-    *chunk_overlap* characters.
+    *chunk_overlap* tokens.
     """
     if not pieces:
         return []
@@ -133,12 +162,11 @@ def _merge_pieces(
     while i < len(pieces):
         # Determine how far the current chunk can extend.
         current_end = i  # exclusive index into pieces
-        current_chars = 0
         j = current_start
         while j < len(pieces):
-            if current_chars + len(pieces[j]) > chunk_size:
+            candidate = "".join(pieces[current_start : j + 1])
+            if count_cl100k_tokens(candidate) > chunk_size:
                 break
-            current_chars += len(pieces[j])
             current_end = j + 1
             j += 1
 
@@ -155,14 +183,14 @@ def _merge_pieces(
             break
 
         # Compute overlap: take trailing pieces from the current chunk
-        # until we accumulate approximately chunk_overlap characters.
-        overlap_len = 0
+        # until we accumulate approximately chunk_overlap tokens.
         overlap_count = 0
-        for k in range(current_end - 1, current_start - 1, -1):
-            if overlap_len + len(pieces[k]) > chunk_overlap:
-                break
-            overlap_len += len(pieces[k])
-            overlap_count += 1
+        if chunk_overlap > 0:
+            for k in range(current_end - 1, current_start - 1, -1):
+                candidate = "".join(pieces[k:current_end])
+                if count_cl100k_tokens(candidate) > chunk_overlap:
+                    break
+                overlap_count += 1
 
         # Next chunk starts with the overlap pieces.
         current_start = current_end - overlap_count
@@ -172,17 +200,17 @@ def _merge_pieces(
 
 
 class RecursiveCharacterChunker:
-    """Recursive character text splitter.
+    """Recursive separator chunker with a cl100k token budget.
 
-    Splits text using a priority-ordered list of separators, falling back
-    to finer separators when pieces still exceed *chunk_size*.  Produces
-    deterministic chunks with optional overlap between consecutive chunks.
+    Splits text using a priority-ordered list of separators while treating
+    *chunk_size* as a cl100k token budget. The default follows RAGFlow's
+    512-token chunk setting and keeps character-offset metadata.
     """
 
     def __init__(
         self,
-        chunk_size: int = 500,
-        chunk_overlap: int = 50,
+        chunk_size: int = 512,
+        chunk_overlap: int = 0,
         separators: list[str] | None = None,
     ) -> None:
         if chunk_size <= 0:

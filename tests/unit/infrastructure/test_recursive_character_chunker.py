@@ -8,6 +8,7 @@ from ragflow_lite.infrastructure.chunkers.recursive_character import (
     _merge_pieces,
     _recursive_split,
 )
+from ragflow_lite.infrastructure.chunkers.token_counter import count_cl100k_tokens
 
 # ---------------------------------------------------------------------------
 # Constructor validation
@@ -17,9 +18,9 @@ from ragflow_lite.infrastructure.chunkers.recursive_character import (
 class TestConstructor:
     def test_default_params(self) -> None:
         chunker = RecursiveCharacterChunker()
-        assert chunker.chunk_size == 500
-        assert chunker.chunk_overlap == 50
-        assert len(chunker.separators) == 10  # DEFAULT_SEPARATORS
+        assert chunker.chunk_size == 512
+        assert chunker.chunk_overlap == 0
+        assert len(chunker.separators) == 10
 
     def test_custom_params(self) -> None:
         chunker = RecursiveCharacterChunker(
@@ -50,51 +51,48 @@ class TestConstructor:
             RecursiveCharacterChunker(chunk_size=50, chunk_overlap=60)
 
 
+class TestTokenCounter:
+    def test_counts_cl100k_tokens_for_ascii_text(self) -> None:
+        assert count_cl100k_tokens("hello world") == 2
+
+    def test_counts_empty_text_as_zero(self) -> None:
+        assert count_cl100k_tokens("") == 0
+
+    def test_count_is_not_character_count_for_chinese_text(self) -> None:
+        text = "这是一个中文句子，用来证明 token 数不是字符数。"
+        assert count_cl100k_tokens(text) != len(text)
+
+
 # ---------------------------------------------------------------------------
 # _recursive_split unit tests
 # ---------------------------------------------------------------------------
 
 
 class TestRecursiveSplit:
-    def test_short_text_returned_as_is(self) -> None:
-        result = _recursive_split("abc", ["\n", ""], 10)
-        assert result == ["abc"]
+    def test_short_text_returned_as_is_when_within_token_budget(self) -> None:
+        result = _recursive_split("hello world", ["\n", ""], 2)
+        assert result == ["hello world"]
 
-    def test_splits_on_paragraph(self) -> None:
-        # "AAAA\n\nBBBB" splits on "\n\n" -> ["AAAA\n\n", "BBBB"].
-        # "AAAA\n\n" is 6 chars, too big for chunk_size=5, so it recursively
-        # splits on "\n" -> ["AAAA\n", "\n"].
-        text = "AAAA\n\nBBBB"
-        result = _recursive_split(text, ["\n\n", "\n", ""], 5)
-        assert result == ["AAAA\n", "\n", "BBBB"]
+    def test_splits_on_paragraph_before_fallback(self) -> None:
+        text = "Alpha paragraph.\n\nBeta paragraph."
+        result = _recursive_split(text, ["\n\n", "\n", " ", ""], 3)
         assert "".join(result) == text
+        assert result[0].endswith("\n\n")
+        assert all(count_cl100k_tokens(piece) <= 3 for piece in result)
 
-    def test_recursive_fallback_to_line_break(self) -> None:
-        # "AAABBB" is 6 chars, chunk_size=3, no paragraph break so it
-        # falls through to line-break, then to char-level.
-        text = "AAABBB"
-        result = _recursive_split(text, ["\n\n", "\n", ""], 3)
-        assert all(len(p) <= 3 for p in result)
-        # Concatenation must reconstruct original.
+    def test_long_unseparated_text_uses_token_safe_original_slices(self) -> None:
+        text = "antidisestablishmentarianism" * 40
+        result = _recursive_split(text, ["\n\n", "\n", " ", ""], 10)
         assert "".join(result) == text
+        assert len(result) > 1
+        assert all(count_cl100k_tokens(piece) <= 10 for piece in result)
 
-    def test_empty_separator_splits_chars(self) -> None:
-        text = "abc"
-        result = _recursive_split(text, [""], 1)
-        assert result == ["a", "b", "c"]
-
-    def test_preserves_text_on_concat(self) -> None:
-        text = "Para one\n\nPara two\nLine two.\nLine three."
-        result = _recursive_split(text, ["\n\n", "\n", ".", " "], 5)
+    def test_chinese_period_separator_preserves_text(self) -> None:
+        text = "第一句话说明背景。第二句话继续说明。第三句话收尾。"
+        result = _recursive_split(text, ["。", ""], 8)
         assert "".join(result) == text
-
-    def test_chinese_period_separator(self) -> None:
-        text = "第一句。第二句。第三句。"
-        result = _recursive_split(text, ["。", ""], 10)
-        # Each piece includes the separator except the last.
-        for p in result:
-            assert len(p) <= 10
-        assert "".join(result) == text
+        assert any(piece.endswith("。") for piece in result[:-1])
+        assert all(count_cl100k_tokens(piece) <= 8 for piece in result)
 
 
 # ---------------------------------------------------------------------------
@@ -108,67 +106,29 @@ class TestMergePieces:
         assert len(result) == 1
         assert result[0] == ("hello", 0, 5)
 
-    def test_merge_small_pieces(self) -> None:
-        pieces = ["ab", "cd", "ef"]
-        result = _merge_pieces(pieces, 6, 0)
-        # All three pieces fit: "abcdef" = 6 chars
-        assert len(result) == 1
-        text, start, end = result[0]
-        assert text == "abcdef"
-        assert start == 0
-        assert end == 6
+    def test_merge_small_pieces_by_whole_candidate_tokens(self) -> None:
+        pieces = ["hello", " ", "world"]
+        result = _merge_pieces(pieces, 2, 0)
+        assert result == [("hello world", 0, 11)]
 
-    def test_split_into_three_chunks(self) -> None:
-        # Each piece is 3 chars. chunk_size=5 means at most one piece per chunk.
-        pieces = ["abc", "def", "ghi"]
-        result = _merge_pieces(pieces, 5, 0)
-        assert len(result) == 3
-        assert result[0] == ("abc", 0, 3)
-        assert result[1] == ("def", 3, 6)
-        assert result[2] == ("ghi", 6, 9)
-
-    def test_overlap_between_chunks(self) -> None:
-        pieces = ["aaa", "bbb", "ccc"]
-        result = _merge_pieces(pieces, 5, 2)
-        # First chunk: pieces[0:1] = "aaa" (3 chars)
-        # overlap: from end of chunk, take pieces going backwards until > 2 chars.
-        # piece[0]="aaa" is 3 > 2, so overlap_count=0 (len(aaa)=3 > chunk_overlap=2)
-        # Actually: overlap_len=0, k=0: 0+3=3 > 2 -> break. overlap_count=0
-        # current_start = 1 - 0 = 1
-        # Second chunk: pieces[1:2] = "bbb"
-        # overlap: piece[1]="bbb" 3 > 2 -> overlap_count=0
-        # current_start = 2 - 0 = 2
-        # Third chunk: pieces[2:3] = "ccc"
-        assert len(result) == 3
-
-    def test_overlap_with_small_pieces(self) -> None:
-        pieces = ["a", "b", "c", "d", "e"]
-        result = _merge_pieces(pieces, 3, 2)
-        # First chunk: j=0..2 = "abc" (3 <= 3). j=3: 4 > 3. current_end=3
-        # chunk1 = pieces[0:3] = "abc", offset [0,3)
-        # overlap: from k=2 going back: piece[2]="c" (1 <= 2), piece[1]="b" (1+1=2 <= 2), piece[0]="a" (3 > 2) -> break
-        # overlap_count = 2 (pieces 1 and 2)
-        # current_start = 3 - 2 = 1
-        # i = 3
-        # Second chunk: j=1..3 = pieces[1]+pieces[2]+pieces[3] = "bcd" (3 <= 3). j=4: 4 > 3. current_end=4
-        # chunk2 = pieces[1:4] = "bcd", offset [1,4)
-        # overlap: k=3="d"(1<=2), k=2="c"(2<=2), k=1="b"(3>2) -> break. overlap_count=2
-        # current_start = 4 - 2 = 2
-        # i = 4
-        # Third chunk: j=2..4 = pieces[2]+pieces[3]+pieces[4] = "cde" (3 <= 3). current_end=5
-        # chunk3 = pieces[2:5] = "cde", offset [2,5)
-        assert len(result) == 3
-        assert result[0] == ("abc", 0, 3)
-        assert result[1] == ("bcd", 1, 4)
-        assert result[2] == ("cde", 2, 5)
+    def test_split_when_joined_candidate_exceeds_budget(self) -> None:
+        pieces = ["hello world", " again"]
+        result = _merge_pieces(pieces, 2, 0)
+        assert result == [("hello world", 0, 11), (" again", 11, 17)]
+        assert all(count_cl100k_tokens(text) <= 2 for text, _, _ in result)
 
     def test_offsets_preserve_positions(self) -> None:
-        pieces = ["hel", "lo ", "wor", "ld"]
-        result = _merge_pieces(pieces, 6, 0)
-        # Verify reconstruction and offsets
+        pieces = ["第一句。", "第二句。", "Third sentence."]
+        result = _merge_pieces(pieces, 8, 0)
         full_text = "".join(pieces)
         for text, start, end in result:
             assert full_text[start:end] == text
+            assert count_cl100k_tokens(text) <= 8
+
+    def test_overlap_is_disabled_by_default_contract(self) -> None:
+        pieces = ["hello world", " again"]
+        result = _merge_pieces(pieces, 2, 0)
+        assert result[0][2] == result[1][1]
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +177,7 @@ class TestChunk:
         assert [c.chunk_id for c in result1] == [c.chunk_id for c in result2]
 
     def test_no_page_info_without_page_spans(self) -> None:
-        chunker = RecursiveCharacterChunker(chunk_size=100)
+        chunker = RecursiveCharacterChunker(chunk_size=100, chunk_overlap=0)
         doc = self._make_doc("Hello world", filename="test.txt")
         chunks = chunker.chunk(doc)
         assert "page_start" not in chunks[0].metadata
@@ -226,7 +186,7 @@ class TestChunk:
         assert "page_texts" not in chunks[0].metadata
 
     def test_page_start_end_injected(self) -> None:
-        chunker = RecursiveCharacterChunker(chunk_size=100)
+        chunker = RecursiveCharacterChunker(chunk_size=100, chunk_overlap=0)
         doc = ParsedDocument(
             document_id="pdf1",
             file_type="pdf",
@@ -242,7 +202,7 @@ class TestChunk:
 
     def test_multi_page_range(self) -> None:
         text = "AAAA\n\nBBBB\n\nCCCC"
-        chunker = RecursiveCharacterChunker(chunk_size=100)
+        chunker = RecursiveCharacterChunker(chunk_size=100, chunk_overlap=0)
         doc = ParsedDocument(
             document_id="pdf2",
             file_type="pdf",
@@ -261,7 +221,7 @@ class TestChunk:
         assert chunks[0].metadata["page_end"] == 3
 
     def test_metadata_keys_copied(self) -> None:
-        chunker = RecursiveCharacterChunker(chunk_size=100)
+        chunker = RecursiveCharacterChunker(chunk_size=100, chunk_overlap=0)
         doc = self._make_doc("Hello", filename="a.txt", author="test")
         chunks = chunker.chunk(doc)
         assert chunks[0].metadata["filename"] == "a.txt"
@@ -271,7 +231,7 @@ class TestChunk:
         text = (
             "First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here."
         )
-        chunker = RecursiveCharacterChunker(chunk_size=25, chunk_overlap=0)
+        chunker = RecursiveCharacterChunker(chunk_size=8, chunk_overlap=0)
         doc = self._make_doc(text)
         chunks = chunker.chunk(doc)
         # Each paragraph should become its own chunk (or be further split).
@@ -282,6 +242,25 @@ class TestChunk:
         assert "First" in joined
         assert "Second" in joined
         assert "Third" in joined
+
+    def test_final_chunks_respect_token_budget(self) -> None:
+        text = (
+            "第一段说明 MicroRAG 的 chunk 策略。\n\n"
+            "第二段继续说明 token budget 和字符 offset 的区别。\n\n"
+            "Third paragraph mixes English and Chinese for tokenizer behavior."
+        )
+        chunker = RecursiveCharacterChunker(chunk_size=12, chunk_overlap=0)
+        doc = self._make_doc(text)
+
+        chunks = chunker.chunk(doc)
+
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert count_cl100k_tokens(chunk.text) <= 12
+            expected_text = text[
+                chunk.metadata["start_offset"] : chunk.metadata["end_offset"]
+            ].strip()
+            assert chunk.text == expected_text
 
     def test_offsets_are_correct(self) -> None:
         chunker = RecursiveCharacterChunker(chunk_size=5, chunk_overlap=0)
@@ -302,14 +281,12 @@ class TestChunk:
         doc = self._make_doc(text)
         chunks = chunker.chunk(doc)
         # Verify each offset range is valid.
-        prev_end = 0
         for chunk in chunks:
             start = chunk.metadata["start_offset"]
             end = chunk.metadata["end_offset"]
             assert start >= 0
             assert end <= len(text)
             assert end > start
-            prev_end = end
 
     def test_overlap_chunks_share_text(self) -> None:
         chunker = RecursiveCharacterChunker(chunk_size=6, chunk_overlap=3)
@@ -344,16 +321,17 @@ class TestEdgeCases:
 
     def test_single_long_word(self) -> None:
         chunker = RecursiveCharacterChunker(chunk_size=5, chunk_overlap=0)
+        text = "antidisestablishmentarianism" * 5
         doc = ParsedDocument(
             document_id="long",
             file_type="txt",
-            raw_text="abcdefghij",
+            raw_text=text,
             metadata={},
         )
         chunks = chunker.chunk(doc)
-        # Should still split via character fallback.
         assert len(chunks) >= 2
-        assert "".join(c.text for c in chunks) == "abcdefghij"
+        assert "".join(c.text for c in chunks) == text
+        assert all(count_cl100k_tokens(chunk.text) <= 5 for chunk in chunks)
 
     def test_zero_overlap(self) -> None:
         chunker = RecursiveCharacterChunker(chunk_size=5, chunk_overlap=0)
@@ -371,7 +349,7 @@ class TestEdgeCases:
             assert end <= start
 
     def test_page_spans_internal_key_stripped(self) -> None:
-        chunker = RecursiveCharacterChunker(chunk_size=100)
+        chunker = RecursiveCharacterChunker(chunk_size=100, chunk_overlap=0)
         doc = ParsedDocument(
             document_id="p1",
             file_type="pdf",

@@ -116,8 +116,8 @@ class Settings:
     uploads_dir: Path
     local_index_dir: Path
     temp_dir: Path
-    chunk_size: int = 500
-    chunk_overlap: int = 50
+    chunk_size: int = 512
+    chunk_overlap: int = 0
     app_name: str = "ragflow-lite"
     api_prefix: str = "/api/v0"
     log_level: str = field(
@@ -296,6 +296,8 @@ class Settings:
         # DeepSeek API key.  deepseek_api_key is guaranteed non-None after
         # the required_settings guard above.
         assert self.deepseek_api_key is not None  # for type narrows
+        assert self.ark_api_key is not None  # for type narrows
+        assert self.ark_embedding_model is not None  # for type narrows
         structurer_api_key: str = (
             self.discorag_structurer_api_key or self.deepseek_api_key
         )

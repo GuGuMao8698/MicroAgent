@@ -2,26 +2,25 @@ from __future__ import annotations
 
 from ragflow_lite.domain.models import ParsedDocument
 from ragflow_lite.infrastructure.chunkers import RecursiveCharacterChunker
+from ragflow_lite.infrastructure.chunkers.token_counter import count_cl100k_tokens
 
 
-def test_recursive_chunker_creates_stable_ids_and_overlap() -> None:
-    chunker = RecursiveCharacterChunker(chunk_size=5, chunk_overlap=2)
+def test_recursive_chunker_creates_stable_ids_and_offsets() -> None:
+    chunker = RecursiveCharacterChunker(chunk_size=2, chunk_overlap=0)
     document = ParsedDocument(
         document_id="doc_alpha",
         file_type="txt",
-        raw_text="abcdefghij",
+        raw_text="hello world again",
         metadata={"filename": "alpha.txt"},
     )
 
     chunks = chunker.chunk(document)
 
-    # Sequential indices and chunk_id format.
     assert [chunk.chunk_id for chunk in chunks] == [
         f"chunk_doc_alpha_{i}" for i in range(len(chunks))
     ]
     assert [chunk.index for chunk in chunks] == list(range(len(chunks)))
 
-    # Offsets are present in metadata and the text matches the slice.
     for chunk in chunks:
         assert "start_offset" in chunk.metadata
         assert "end_offset" in chunk.metadata
@@ -29,6 +28,7 @@ def test_recursive_chunker_creates_stable_ids_and_overlap() -> None:
             chunk.metadata["start_offset"] : chunk.metadata["end_offset"]
         ].strip()
         assert chunk.text == expected_text
+        assert count_cl100k_tokens(chunk.text) <= 2
 
 
 def test_recursive_chunker_adds_page_start_end_for_single_page_chunk() -> None:
@@ -113,13 +113,14 @@ def test_recursive_chunker_splits_on_chinese_punctuation() -> None:
     # Chinese punctuation 。！？ should be used as split points.
     assert len(chunks) >= 2, f"Expected multiple chunks, got {len(chunks)}"
     for chunk in chunks:
-        assert len(chunk.text) <= 10 + 1, (
-            f"Chunk text too long ({len(chunk.text)}): {chunk.text!r}"
+        assert count_cl100k_tokens(chunk.text) <= 10, (
+            f"Chunk token count too large "
+            f"({count_cl100k_tokens(chunk.text)}): {chunk.text!r}"
         )
 
 
 def test_recursive_chunker_splits_on_paragraphs_first() -> None:
-    chunker = RecursiveCharacterChunker(chunk_size=20, chunk_overlap=0)
+    chunker = RecursiveCharacterChunker(chunk_size=8, chunk_overlap=0)
     document = ParsedDocument(
         document_id="doc_para",
         file_type="txt",
@@ -140,7 +141,7 @@ def test_recursive_chunker_splits_on_paragraphs_first() -> None:
 
 
 def test_recursive_chunker_deterministic_output() -> None:
-    chunker = RecursiveCharacterChunker(chunk_size=50, chunk_overlap=10)
+    chunker = RecursiveCharacterChunker(chunk_size=50, chunk_overlap=0)
     document = ParsedDocument(
         document_id="doc_det",
         file_type="txt",

@@ -162,8 +162,8 @@ class _FakeParser:
 
 @dataclass
 class _FakeChunker:
-    chunk_size: int = 500
-    chunk_overlap: int = 50
+    chunk_size: int = 512
+    chunk_overlap: int = 0
 
     def chunk(self, document: ParsedDocument) -> list[Any]:
         return []
@@ -173,8 +173,8 @@ class _FakeChunker:
 class _ProducingChunker:
     """Chunker that yields a single chunk so downstream consumers see real chunk_ids."""
 
-    chunk_size: int = 500
-    chunk_overlap: int = 50
+    chunk_size: int = 512
+    chunk_overlap: int = 0
 
     def chunk(self, document: ParsedDocument) -> list[Chunk]:
         return [
@@ -969,8 +969,8 @@ class TestStageCache:
 
         @dataclass
         class _CountingChunker:
-            chunk_size: int = 500
-            chunk_overlap: int = 50
+            chunk_size: int = 512
+            chunk_overlap: int = 0
 
             def chunk(self, document):
                 chunk_calls.append(1)
@@ -1053,8 +1053,8 @@ class TestStageCache:
 
         @dataclass
         class _CountingChunker:
-            chunk_size: int = 500
-            chunk_overlap: int = 50
+            chunk_size: int = 512
+            chunk_overlap: int = 0
             calls: int = 0
 
             def chunk(self, document):
@@ -1468,20 +1468,20 @@ class TestChunkCacheFingerprint:
         ("left_chunker", "right_chunker", "expected_same"),
         [
             pytest.param(
-                FixedWindowChunker(500, 50),
-                RecursiveCharacterChunker(500, 50),
+                FixedWindowChunker(512, 0),
+                RecursiveCharacterChunker(512, 0),
                 False,
                 id="differs-by-chunker-type",
             ),
             pytest.param(
-                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n"]),
-                RecursiveCharacterChunker(500, 50, separators=["\n\n", "\n", "。"]),
+                RecursiveCharacterChunker(512, 0, separators=["\n\n", "\n"]),
+                RecursiveCharacterChunker(512, 0, separators=["\n\n", "\n", "。"]),
                 False,
                 id="differs-by-separators",
             ),
             pytest.param(
-                RecursiveCharacterChunker(500, 50),
-                RecursiveCharacterChunker(500, 50),
+                RecursiveCharacterChunker(512, 0),
+                RecursiveCharacterChunker(512, 0),
                 True,
                 id="stable-with-same-config",
             ),
