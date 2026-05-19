@@ -32,6 +32,16 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 - Prompt optimization: main `.venv/bin/python tests/evals/optimize_prompt.py` (imports repo runtime code, consumes committed goldens).
 - `_RAG_EVAL_GOLDENS_PATH = tests/fixtures/evals/synthetic_goldens.json` ([eval_support.py](../eval_support.py)).
 
+## Private bootstrap goldens
+
+- The private bootstrap dataset uses `tests/fixtures/documents/microrag-private-bootstrap.md` as its packed fixture.
+- The packed fixture is generated from `tests/fixtures/documents/microrag-private-bootstrap-snapshot/`.
+- `CONTRACTS.md` and `AGENTS.md` snapshot entries are authoritative sources.
+- `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims.
+- `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is the review-stage artifact.
+- `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`.
+- Run `tests/evals/build_private_bootstrap_goldens.py` before replacing the active artifact.
+
 ## Default deepeval model
 
 Source: eval_support.py.

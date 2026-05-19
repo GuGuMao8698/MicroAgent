@@ -471,7 +471,7 @@
       "role": "authoritative",
       "topic": "tests/evals",
       "status": "active",
-      "sha256": "bbdec3508188e627465271cd400ba04c173853f3cad21ff694dc9fc7d3cb9633"
+      "sha256": "fafa17b3172866ef67796f68a4106d1faaec27f4db179d8144cff41e5befb885"
     },
     {
       "original_path": "tests/evals/CONTRACTS.md",
@@ -479,7 +479,7 @@
       "role": "authoritative",
       "topic": "tests/evals",
       "status": "active",
-      "sha256": "1394f2e1832dbbd977c63887f6f04cb6643dfb38ead34b921b18ea5248bcbee3"
+      "sha256": "d810a6cc220ce27f530f9d682edb6572153090325286047035cec0029551f261"
     },
     {
       "original_path": "tests/integration/AGENTS.md",

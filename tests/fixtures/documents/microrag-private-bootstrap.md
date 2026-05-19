@@ -25814,7 +25814,7 @@ Source: [infinity_test_support.py](infinity_test_support.py).
 Role: authoritative
 Status: active
 Topic: tests/evals
-SHA256: bbdec3508188e627465271cd400ba04c173853f3cad21ff694dc9fc7d3cb9633
+SHA256: fafa17b3172866ef67796f68a4106d1faaec27f4db179d8144cff41e5befb885
 
 # AGENTS.md
 
@@ -25827,6 +25827,7 @@ Optional DeepEval workflow: goldens generation, prompt optimization, live RAG ev
 ## Quick commands
 ```bash
 ./.venv-goldens/bin/python tests/evals/generate_goldens.py
+./.venv/bin/python tests/evals/build_private_bootstrap_goldens.py --draft-goldens tests/fixtures/evals/private_bootstrap_goldens.draft.json
 ./.venv/bin/python tests/evals/optimize_prompt.py
 ./.venv/bin/python -m pytest tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
 DEEPEVAL_RESULTS_FOLDER=./data/deepeval/raw/standard ./.venv/bin/deepeval test run tests/evals/test_rag_deepeval.py --run-deepeval --query-mode standard
@@ -25841,6 +25842,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 
 - [test_rag_deepeval.py](test_rag_deepeval.py) — uploads fixtures, waits for terminal ingestion state, evaluates answers.
 - [generate_goldens.py](generate_goldens.py) — synthetic golden generation (isolated `.venv-goldens`).
+- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, packed fixture, and validates the draft golden artifact.
 - [optimize_prompt.py](optimize_prompt.py) — prompt optimization against committed goldens (main `.venv`).
 - [summarize_results.py](summarize_results.py) — post-processing of raw DeepEval exports.
 
@@ -25854,7 +25856,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 Role: authoritative
 Status: active
 Topic: tests/evals
-SHA256: 1394f2e1832dbbd977c63887f6f04cb6643dfb38ead34b921b18ea5248bcbee3
+SHA256: d810a6cc220ce27f530f9d682edb6572153090325286047035cec0029551f261
 
 # tests/evals/CONTRACTS.md
 
@@ -25889,6 +25891,16 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 - Goldens generation: `.venv-goldens/bin/python tests/evals/generate_goldens.py`. Do not mix `.venv-goldens` dependencies into the main runtime `.venv`.
 - Prompt optimization: main `.venv/bin/python tests/evals/optimize_prompt.py` (imports repo runtime code, consumes committed goldens).
 - `_RAG_EVAL_GOLDENS_PATH = tests/fixtures/evals/synthetic_goldens.json` ([eval_support.py](../eval_support.py)).
+
+## Private bootstrap goldens
+
+- The private bootstrap dataset uses `tests/fixtures/documents/microrag-private-bootstrap.md` as its packed fixture.
+- The packed fixture is generated from `tests/fixtures/documents/microrag-private-bootstrap-snapshot/`.
+- `CONTRACTS.md` and `AGENTS.md` snapshot entries are authoritative sources.
+- `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims.
+- `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is the review-stage artifact.
+- `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`.
+- Run `tests/evals/build_private_bootstrap_goldens.py` before replacing the active artifact.
 
 ## Default deepeval model
 
