@@ -192,7 +192,7 @@ def validate_goldens_payload(payload: object) -> None:
                 f"private bootstrap case #{index} must use {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
             )
         top_k = metadata.get("top_k")
-        if not isinstance(top_k, int) or top_k <= 0:
+        if type(top_k) is not int or top_k <= 0:
             raise RuntimeError(
                 f"private bootstrap case #{index} must include positive top_k."
             )
