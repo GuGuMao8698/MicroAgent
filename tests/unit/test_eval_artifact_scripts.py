@@ -163,6 +163,57 @@ def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> N
     ).exists()
 
 
+def test_private_bootstrap_builds_packed_fixture_from_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    authoritative = root / "AGENTS.md"
+    distractor = root / "docs" / "superpowers" / "specs" / "2026-05-18-spec.md"
+    distractor.parent.mkdir(parents=True)
+    authoritative.write_text(
+        "# Working Agreements\n\nUse root cause fixes.\n",
+        encoding="utf-8",
+    )
+    distractor.write_text(
+        "# Draft Spec\n\nStatus: Draft design spec\n",
+        encoding="utf-8",
+    )
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import build_packed_fixture, create_snapshot
+
+    create_snapshot(
+        repo_root=root,
+        source_paths=[authoritative, distractor],
+        snapshot_root=snapshot_root,
+    )
+    fixture_path = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap.md"
+    )
+
+    build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
+
+    text = fixture_path.read_text(encoding="utf-8")
+    assert "# MicroRAG Private Bootstrap Corpus" in text
+    assert "# Source: AGENTS.md" in text
+    assert "Role: authoritative" in text
+    assert "# Source: docs/superpowers/specs/2026-05-18-spec.md" in text
+    assert "Role: distractor" in text
+    assert "Use root cause fixes." in text
+    assert "Status: Draft design spec" in text
+
+
 def test_private_bootstrap_rejects_unsafe_snapshot_root(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()

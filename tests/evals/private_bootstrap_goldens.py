@@ -122,6 +122,14 @@ def write_manifest(snapshot_root: Path, entries: list[ManifestEntry]) -> None:
     )
 
 
+def load_manifest(snapshot_root: Path) -> list[ManifestEntry]:
+    payload = json.loads((snapshot_root / "manifest.json").read_text(encoding="utf-8"))
+    raw_entries = payload.get("entries")
+    if not isinstance(raw_entries, list):
+        raise RuntimeError("private bootstrap manifest must contain entries.")
+    return [ManifestEntry(**entry) for entry in raw_entries]
+
+
 def validate_snapshot_root(*, repo_root: Path, snapshot_root: Path) -> Path:
     repo_root_resolved = repo_root.resolve()
     snapshot_root_resolved = snapshot_root.resolve()
@@ -197,3 +205,32 @@ def create_snapshot(
 
     write_manifest(snapshot_root_resolved, entries)
     return entries
+
+
+def build_packed_fixture(*, snapshot_root: Path, fixture_path: Path) -> None:
+    entries = load_manifest(snapshot_root)
+    parts = [
+        "# MicroRAG Private Bootstrap Corpus",
+        "",
+        "This fixture is generated from a frozen corpus snapshot.",
+        "Use source headers and manifest metadata to preserve authority boundaries.",
+        "",
+    ]
+    for entry in entries:
+        source_text = (snapshot_root / entry.snapshot_path).read_text(encoding="utf-8")
+        parts.extend(
+            [
+                f"# Source: {entry.original_path}",
+                "",
+                f"Role: {entry.role}",
+                f"Status: {entry.status}",
+                f"Topic: {entry.topic}",
+                f"SHA256: {entry.sha256}",
+                "",
+                source_text.rstrip(),
+                "",
+            ]
+        )
+
+    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+    fixture_path.write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
