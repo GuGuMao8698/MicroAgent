@@ -37,7 +37,9 @@ from evals.optimize_prompt import (  # noqa: E402
     validate_goldens,
 )
 from evals.private_bootstrap_goldens import (  # noqa: E402
+    AUTHORITY_RULE,
     CorpusRole,
+    ManifestEntry,
     classify_corpus_path,
     discover_corpus_paths,
 )
@@ -305,10 +307,8 @@ def _private_bootstrap_case(
     }
 
 
-def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
-    from evals.private_bootstrap_goldens import validate_goldens_payload
-
-    payload = []
+def _private_bootstrap_payload() -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
     payload.extend(
         _private_bootstrap_case(
             name=f"current-{index}", case_type="current_contract_qa"
@@ -338,8 +338,99 @@ def test_private_bootstrap_validation_accepts_expected_case_distribution() -> No
         )
         for index in range(2)
     )
+    return payload
 
-    validate_goldens_payload(payload)
+
+def _private_bootstrap_manifest_entries() -> list[ManifestEntry]:
+    return [
+        ManifestEntry(
+            original_path=original_path,
+            snapshot_path=f"snapshot/{index}.md",
+            role="authoritative",
+            topic="test",
+            status="active",
+            sha256=f"sha256-{index}",
+        )
+        for index, original_path in enumerate(
+            [
+                "AGENTS.md",
+                "tests/evals/CONTRACTS.md",
+                "docs/superpowers/specs/2026-05-18-example.md",
+                "docs/superpowers/plans/2026-05-19-plan.md",
+            ],
+            start=1,
+        )
+    ]
+
+
+def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(_private_bootstrap_payload())
+
+
+def test_private_bootstrap_validation_accepts_manifest_sources() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(
+        _private_bootstrap_payload(),
+        manifest_entries=_private_bootstrap_manifest_entries(),
+    )
+
+
+def test_private_bootstrap_validation_rejects_source_missing_from_manifest() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    entries = [
+        entry
+        for entry in _private_bootstrap_manifest_entries()
+        if entry.original_path != "tests/evals/CONTRACTS.md"
+    ]
+
+    with pytest.raises(RuntimeError, match="snapshot manifest"):
+        validate_goldens_payload(
+            _private_bootstrap_payload(),
+            manifest_entries=entries,
+        )
+
+
+def test_private_bootstrap_validation_rejects_wrong_or_missing_source_file() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    wrong_source_payload = _private_bootstrap_payload()
+    wrong_source_payload[0]["sourceFile"] = "other.md"
+
+    with pytest.raises(RuntimeError, match="sourceFile"):
+        validate_goldens_payload(wrong_source_payload)
+
+    missing_source_payload = _private_bootstrap_payload()
+    missing_source_payload[0].pop("sourceFile")
+
+    with pytest.raises(RuntimeError, match="sourceFile"):
+        validate_goldens_payload(missing_source_payload)
+
+
+def test_private_bootstrap_validation_rejects_malformed_required_sources() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["required_authoritative_sources"] = [
+        "AGENTS.md",
+        123,
+    ]
+
+    with pytest.raises(RuntimeError, match="required_authoritative_sources"):
+        validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_wrong_authority_rule() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["authority_rule"] = f"{AUTHORITY_RULE} Extra."
+
+    with pytest.raises(RuntimeError, match="authority_rule"):
+        validate_goldens_payload(payload)
 
 
 def test_private_bootstrap_validation_rejects_stale_plan_only_answer_source() -> None:
@@ -363,36 +454,7 @@ def test_private_bootstrap_validation_rejects_stale_plan_only_answer_source() ->
 def test_private_bootstrap_validation_rejects_boolean_top_k() -> None:
     from evals.private_bootstrap_goldens import validate_goldens_payload
 
-    payload = []
-    payload.extend(
-        _private_bootstrap_case(
-            name=f"current-{index}", case_type="current_contract_qa"
-        )
-        for index in range(8)
-    )
-    payload.extend(
-        _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
-        for index in range(4)
-    )
-    payload.extend(
-        _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
-        for index in range(4)
-    )
-    payload.extend(
-        _private_bootstrap_case(
-            name=f"negative-{index}", case_type="negative_missing_evidence"
-        )
-        for index in range(2)
-    )
-    payload.extend(
-        _private_bootstrap_case(
-            name=f"comparison-{index}",
-            case_type="comparison",
-            required_sources=["AGENTS.md"],
-            distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
-        )
-        for index in range(2)
-    )
+    payload = _private_bootstrap_payload()
     payload[0]["additionalMetadata"]["top_k"] = True
 
     with pytest.raises(RuntimeError, match="positive top_k"):

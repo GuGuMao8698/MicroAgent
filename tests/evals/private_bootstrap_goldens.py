@@ -148,9 +148,18 @@ def _metadata_for_case(
     return metadata
 
 
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
+def _source_list(metadata: Mapping[str, object], field_name: str, *, index: int) -> list[str]:
+    if field_name not in metadata:
         return []
+    value = metadata[field_name]
+    if not isinstance(value, list):
+        raise RuntimeError(
+            f"private bootstrap case #{index} {field_name} must be a list of strings."
+        )
+    if not all(isinstance(item, str) and item.strip() for item in value):
+        raise RuntimeError(
+            f"private bootstrap case #{index} {field_name} must contain non-empty strings."
+        )
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
@@ -171,12 +180,51 @@ def _is_allowed_distractor(path: str) -> bool:
     return classify_corpus_path(Path(path)) is CorpusRole.DISTRACTOR
 
 
-def validate_goldens_payload(payload: object) -> None:
+def _validate_source_file(item: Mapping[str, object], *, index: int) -> None:
+    values = [
+        value
+        for key in ("sourceFile", "source_file")
+        if (value := item.get(key)) is not None
+    ]
+    if not values:
+        raise RuntimeError(f"private bootstrap case #{index} must include sourceFile.")
+    if any(value != PRIVATE_BOOTSTRAP_FIXTURE_NAME for value in values):
+        raise RuntimeError(
+            f"private bootstrap case #{index} sourceFile must be {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
+        )
+
+
+def _validate_manifest_membership(
+    *,
+    sources: Iterable[str],
+    manifest_paths: set[str] | None,
+    index: int,
+) -> None:
+    if manifest_paths is None:
+        return
+    for source in sources:
+        if source not in manifest_paths:
+            raise RuntimeError(
+                f"private bootstrap case #{index} source is missing from snapshot manifest: "
+                f"{source}"
+            )
+
+
+def validate_goldens_payload(
+    payload: object,
+    *,
+    manifest_entries: Iterable[ManifestEntry] | None = None,
+) -> None:
     if not isinstance(payload, list):
         raise RuntimeError("private bootstrap goldens must be a JSON array.")
     if len(payload) != sum(EXPECTED_CASE_COUNTS.values()):
         raise RuntimeError("private bootstrap goldens must contain exactly 20 cases.")
 
+    manifest_paths = (
+        {entry.original_path for entry in manifest_entries}
+        if manifest_entries is not None
+        else None
+    )
     counts: dict[str, int] = {case_type: 0 for case_type in EXPECTED_CASE_COUNTS}
     for index, item in enumerate(payload, start=1):
         if not isinstance(item, Mapping):
@@ -184,6 +232,7 @@ def validate_goldens_payload(payload: object) -> None:
         _require_text(item, "name", index=index)
         _require_text(item, "input", index=index)
         _require_text(item, "expected_output", index=index)
+        _validate_source_file(item, index=index)
         metadata = _metadata_for_case(item, index=index)
 
         document_fixture = metadata.get("document_fixture")
@@ -191,6 +240,8 @@ def validate_goldens_payload(payload: object) -> None:
             raise RuntimeError(
                 f"private bootstrap case #{index} must use {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
             )
+        if metadata.get("authority_rule") != AUTHORITY_RULE:
+            raise RuntimeError(f"private bootstrap case #{index} has invalid authority_rule.")
         top_k = metadata.get("top_k")
         if type(top_k) is not int or top_k <= 0:
             raise RuntimeError(
@@ -203,8 +254,15 @@ def validate_goldens_payload(payload: object) -> None:
             )
         counts[case_type] += 1
 
-        required_sources = _string_list(metadata.get("required_authoritative_sources"))
-        distractor_sources = _string_list(metadata.get("distractor_sources"))
+        required_sources = _source_list(
+            metadata, "required_authoritative_sources", index=index
+        )
+        distractor_sources = _source_list(metadata, "distractor_sources", index=index)
+        _validate_manifest_membership(
+            sources=required_sources + distractor_sources,
+            manifest_paths=manifest_paths,
+            index=index,
+        )
         for source in required_sources:
             if not _is_authoritative_source(source):
                 raise RuntimeError(
