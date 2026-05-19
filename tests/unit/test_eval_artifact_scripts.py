@@ -363,6 +363,79 @@ def _private_bootstrap_manifest_entries() -> list[ManifestEntry]:
     ]
 
 
+def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text("# Root\n\nRoot rule.\n", encoding="utf-8")
+    contracts = root / "tests" / "evals" / "CONTRACTS.md"
+    spec = root / "docs" / "superpowers" / "specs" / "2026-05-18-example.md"
+    plan = root / "docs" / "superpowers" / "plans" / "2026-05-19-plan.md"
+    contracts.parent.mkdir(parents=True)
+    spec.parent.mkdir(parents=True)
+    plan.parent.mkdir(parents=True)
+    contracts.write_text("# Eval Contract\n\nActive eval rule.\n", encoding="utf-8")
+    spec.write_text(
+        "# Spec\n\nStatus: Draft design spec\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n\nStatus: Ready for implementation after confirmation\n",
+        encoding="utf-8",
+    )
+    draft = root / "tests" / "fixtures" / "evals" / "private_bootstrap_goldens.draft.json"
+    draft.parent.mkdir(parents=True)
+    cases = []
+    cases.extend(
+        _private_bootstrap_case(name=f"current-{index}", case_type="current_contract_qa")
+        for index in range(8)
+    )
+    cases.extend(
+        _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
+        for index in range(4)
+    )
+    cases.extend(
+        _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
+        for index in range(4)
+    )
+    cases.extend(
+        _private_bootstrap_case(
+            name=f"negative-{index}", case_type="negative_missing_evidence"
+        )
+        for index in range(2)
+    )
+    cases.extend(
+        _private_bootstrap_case(
+            name=f"comparison-{index}",
+            case_type="comparison",
+            distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
+        )
+        for index in range(2)
+    )
+    draft.write_text(json.dumps(cases), encoding="utf-8")
+
+    from evals.build_private_bootstrap_goldens import main
+
+    main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+
+    assert (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap.md"
+    ).exists()
+    assert (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+        / "manifest.json"
+    ).exists()
+
+
 def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
     from evals.private_bootstrap_goldens import validate_goldens_payload
 
