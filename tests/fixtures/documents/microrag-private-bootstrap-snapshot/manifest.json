@@ -1,0 +1,533 @@
+{
+  "dataset": "microrag-private-bootstrap",
+  "entries": [
+    {
+      "original_path": "AGENTS.md",
+      "snapshot_path": "authoritative/AGENTS.md",
+      "role": "authoritative",
+      "topic": "root",
+      "status": "active",
+      "sha256": "29a49965b3e1da88819e9c925fa603d598ce405ba4590f331f0ad8aa2099cbe2"
+    },
+    {
+      "original_path": "docker/AGENTS.md",
+      "snapshot_path": "authoritative/docker__AGENTS.md",
+      "role": "authoritative",
+      "topic": "docker",
+      "status": "active",
+      "sha256": "c98f91472c68bd2f940c56203b869b4d3f475517d6af0fc6bb4856eacb3acb1a"
+    },
+    {
+      "original_path": "docker/CONTRACTS.md",
+      "snapshot_path": "authoritative/docker__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "docker",
+      "status": "active",
+      "sha256": "bc0b04b84494ff4f0cb437b22a5f9c2f252e4e5fabec63a895e0c460fd8a5d7e"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-08-discorag-repo-native-stabilization-plan.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-08-discorag-repo-native-stabilization-plan.md",
+      "role": "distractor",
+      "topic": "2026-05-08-discorag-repo-native-stabilization-plan",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "62e0abf17964805535b47aefd1c85fd76de5623db011366a2dbcda4dc3a15e95"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-10-discorag-review-findings-remediation-plan.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-10-discorag-review-findings-remediation-plan.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-review-findings-remediation-plan",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "e67c71dfcd729e3a702cf564edc49a7095c5a8e38c3f82ad1d0d5ba794c97982"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-10-discorag-structurer-retry-timeout-repair-plan.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-10-discorag-structurer-retry-timeout-repair-plan.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-structurer-retry-timeout-repair-plan",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "b3228bafb017610d868b4e1cdd5e2a563ec046db0205f0eee7e9da1527377ca7"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-10-discorag-structurer-review-remediation-plan.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-10-discorag-structurer-review-remediation-plan.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-structurer-review-remediation-plan",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "ec5a649145ba68dc352a0a84926eb9b068d657c672b2325e7634e2edfdb47def"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-11-chunk-auxiliary-legacy-field-removal.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-11-chunk-auxiliary-legacy-field-removal.md",
+      "role": "distractor",
+      "topic": "2026-05-11-chunk-auxiliary-legacy-field-removal",
+      "status": "historical",
+      "sha256": "e6b6292379adcf9f577f6364e51aa24ee1acdbe0b5fa30cc63d48b47b4282f7b"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-11-minirag-gated-retrieval-rewrite.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-11-minirag-gated-retrieval-rewrite.md",
+      "role": "distractor",
+      "topic": "2026-05-11-minirag-gated-retrieval-rewrite",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "d7eaaa1273b9d2474a8f8e64d41f5491e5c8f5b0c1e3be648013c0de7edbd707"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-14-microrag-agent-demo-shell.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-14-microrag-agent-demo-shell.md",
+      "role": "distractor",
+      "topic": "2026-05-14-microrag-agent-demo-shell",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "89985c7d495d8c3f2b420c889b04350be2e8b8fe24e75dfcc5ccb0ca896cf07f"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-15-microrag-agent-runtime-isolation-review-fix.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-15-microrag-agent-runtime-isolation-review-fix.md",
+      "role": "distractor",
+      "topic": "2026-05-15-microrag-agent-runtime-isolation-review-fix",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "a01fbc843947491cc3cc32564ebe8f538191c8cab8b668f52e95d2ef324fa371"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-15-microrag-agent-runtime-workspace-isolation.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-15-microrag-agent-runtime-workspace-isolation.md",
+      "role": "distractor",
+      "topic": "2026-05-15-microrag-agent-runtime-workspace-isolation",
+      "status": "Ready for implementation after confirmation",
+      "sha256": "57127b3ef47606fae17541486e598f5d35149c6bf3034cbb9e1802d13c9e5bf8"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-16-microrag-agent-claude-runtime-capabilities.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-16-microrag-agent-claude-runtime-capabilities.md",
+      "role": "distractor",
+      "topic": "2026-05-16-microrag-agent-claude-runtime-capabilities",
+      "status": "historical",
+      "sha256": "3740511bc8d4e2d04d45fe83e880d10be67f16ddc63ddb1e55ee77b5058cfee0"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
+      "role": "distractor",
+      "topic": "2026-05-16-microrag-agent-system-prompt-identity-boundary",
+      "status": "historical",
+      "sha256": "53ecba74b672e56905632e0f431c2b7f7f556f83555d6287c32463f3dcd7212c"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-18-deepeval-query-mode-artifacts.md",
+      "role": "distractor",
+      "topic": "2026-05-18-deepeval-query-mode-artifacts",
+      "status": "historical",
+      "sha256": "94e53c6650260688885de06c7ca44f5c67955da76b53d9fdbaa1d94a804ea370"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-18-microrag-microagent-runtime-bundle.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-18-microrag-microagent-runtime-bundle.md",
+      "role": "distractor",
+      "topic": "2026-05-18-microrag-microagent-runtime-bundle",
+      "status": "historical",
+      "sha256": "f42851c791eab36790ad2f1bc8d9a25ebea553ac7c87873a8ec1c2fbafebc411"
+    },
+    {
+      "original_path": "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md",
+      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-19-microrag-private-bootstrap-goldens.md",
+      "role": "distractor",
+      "topic": "2026-05-19-microrag-private-bootstrap-goldens",
+      "status": "historical",
+      "sha256": "f607628085ebb64dc045c1723ed3d6a58c0f6a0ee10d642ab796476c3a05bc0d"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-08-discorag-repo-native-stabilization.md",
+      "role": "distractor",
+      "topic": "2026-05-08-discorag-repo-native-stabilization",
+      "status": "Draft spec",
+      "sha256": "e739f585769a0c3f544b263b229139626825d5cb0b902b90d88dd3cbbea1e8ec"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-10-discorag-review-findings-remediation.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-10-discorag-review-findings-remediation.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-review-findings-remediation",
+      "status": "Draft remediation spec",
+      "sha256": "16803e163f2e0fbe43fc8f76071bf0dd14ba91d03fc78b388c4dfe09ba471384"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-10-discorag-structurer-retry-timeout-repair.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-10-discorag-structurer-retry-timeout-repair.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-structurer-retry-timeout-repair",
+      "status": "Draft implementation spec",
+      "sha256": "241b3d4877f18ff41b814a393efae23e0350fdcade497475a761b23ff5a23d96"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-10-discorag-structurer-review-remediation.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-10-discorag-structurer-review-remediation.md",
+      "role": "distractor",
+      "topic": "2026-05-10-discorag-structurer-review-remediation",
+      "status": "Draft remediation spec",
+      "sha256": "0c97903fe2d6fcaee5a439fcb8f9648f3c3226fc6a406ed7f73b2b2caa560282"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-11-chunk-auxiliary-legacy-field-removal.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-11-chunk-auxiliary-legacy-field-removal.md",
+      "role": "distractor",
+      "topic": "2026-05-11-chunk-auxiliary-legacy-field-removal",
+      "status": "Draft design spec",
+      "sha256": "3191c76dc59b27329e1829ca34fb58aab004dd39a4982d3f665c5da47a494dff"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-11-minirag-gated-retrieval-rewrite.md",
+      "role": "distractor",
+      "topic": "2026-05-11-minirag-gated-retrieval-rewrite",
+      "status": "Draft design spec",
+      "sha256": "212a86d9db6ce48d26487c7843de771197bce0099f7d3b18a099d8ad1ba10fc2"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-14-microrag-agent-demo-shell.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-14-microrag-agent-demo-shell.md",
+      "role": "distractor",
+      "topic": "2026-05-14-microrag-agent-demo-shell",
+      "status": "Draft design spec",
+      "sha256": "61a269bda8c5a8b48df4ba180a5bdd6682312d48aab0408d81f6ca452f860942"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-15-microrag-agent-runtime-workspace-isolation.md",
+      "role": "distractor",
+      "topic": "2026-05-15-microrag-agent-runtime-workspace-isolation",
+      "status": "Draft design spec",
+      "sha256": "122dd9780ded946fa4d6ed25504b3ff3cb6b41fe7c9c1a31c1c4a775630df0d3"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-16-microrag-agent-claude-runtime-capabilities.md",
+      "role": "distractor",
+      "topic": "2026-05-16-microrag-agent-claude-runtime-capabilities",
+      "status": "Draft design spec, awaiting user approval",
+      "sha256": "d6b0f8ec7cfb58c4d4e41e07f50e329931a3f380e5f95232738bf315014b65e1"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
+      "role": "distractor",
+      "topic": "2026-05-16-microrag-agent-system-prompt-identity-boundary",
+      "status": "Draft design spec",
+      "sha256": "c33ffb3b5b7ec4ccffaa3638edd9a746ed91df592439a9875d753605b4eaf6ee"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-17-microrag-microagent-runtime-bundle.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-17-microrag-microagent-runtime-bundle.md",
+      "role": "distractor",
+      "topic": "2026-05-17-microrag-microagent-runtime-bundle",
+      "status": "Draft design spec",
+      "sha256": "13a34f4485ba7b01a4fadf94376782e6b5b48f4be1a1c051a224175b48da35ab"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-18-deepeval-query-mode-artifacts-design.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-18-deepeval-query-mode-artifacts-design.md",
+      "role": "distractor",
+      "topic": "2026-05-18-deepeval-query-mode-artifacts-design",
+      "status": "Draft design spec",
+      "sha256": "2e8a230ac7276bceb0705220c4b474aea043d8eb092533dd386425495ad3f92f"
+    },
+    {
+      "original_path": "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md",
+      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-18-microrag-private-bootstrap-goldens.md",
+      "role": "distractor",
+      "topic": "2026-05-18-microrag-private-bootstrap-goldens",
+      "status": "Draft design spec",
+      "sha256": "1e2157627c7d3de8f6faf54d9da787dd4f64075229d3a01eecfa57f0cafcccb7"
+    },
+    {
+      "original_path": "src/ragflow_lite/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite",
+      "status": "active",
+      "sha256": "4f09083208bd7bf9fe9b1a415d20bad51b360491bd14fb2b4d1803aba3b2c1cf"
+    },
+    {
+      "original_path": "src/ragflow_lite/CONTRACTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite",
+      "status": "Active",
+      "sha256": "69063e9539d623cc5bcad3ddbef3f22d66ffc898678b4db94bdc24beddac7a28"
+    },
+    {
+      "original_path": "src/ragflow_lite/api/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__api__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/api",
+      "status": "active",
+      "sha256": "898f8cf628de5bd9802347ada568d2d44f7a4e9b87a786604dda4d268fdc3168"
+    },
+    {
+      "original_path": "src/ragflow_lite/api/CONTRACTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__api__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/api",
+      "status": "Active",
+      "sha256": "d35d4e18db32253a048c289ff7b3add4058e36861e49ac905bdbf38ae5b6f880"
+    },
+    {
+      "original_path": "src/ragflow_lite/application/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__application__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/application",
+      "status": "active",
+      "sha256": "03bff5341949ccf0760e4d2714b572b290a02502aa52d50ebaa64f0d3e503e3f"
+    },
+    {
+      "original_path": "src/ragflow_lite/application/CONTRACTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__application__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/application",
+      "status": "Active",
+      "sha256": "7ba42bf9a6a8bfb80ee07271929d26dbdffa682703c82a57054ecd5431e92262"
+    },
+    {
+      "original_path": "src/ragflow_lite/application/pipelines/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__application__pipelines__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/application/pipelines",
+      "status": "active",
+      "sha256": "47c58d7b430e788f02b4c059e578495d323a868bf83f96fd3033c297ca243b89"
+    },
+    {
+      "original_path": "src/ragflow_lite/application/services/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__application__services__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/application/services",
+      "status": "active",
+      "sha256": "3efcae1e030968dad58c8896f7358a43140612bc7b732ba0f2a35671cc238161"
+    },
+    {
+      "original_path": "src/ragflow_lite/config/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__config__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/config",
+      "status": "active",
+      "sha256": "38041bf0edad078879c7ff8d980c25103f4a082544f4389ca370dbb326320532"
+    },
+    {
+      "original_path": "src/ragflow_lite/domain/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__domain__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/domain",
+      "status": "active",
+      "sha256": "6cb21ca97658ee0206cf69536d9898751dbf7a4ecc27345893d936078fc3ca34"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure",
+      "status": "active",
+      "sha256": "c96b5ce9d748cfee0be98ad1e1db2f2dd58bc63937ecbb50788c7f9a894d5a96"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/CONTRACTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure",
+      "status": "active",
+      "sha256": "1e71c8a1f1a961fd92777a30bb5a659e40c316ecd9d8c5f5015a4b4cea386332"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/answerers/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__answerers__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/answerers",
+      "status": "active",
+      "sha256": "ad5c72767045b108c0ad8f984894bfca6ccb83f734845216a5d726a7a0ea439f"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/chunkers/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__chunkers__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/chunkers",
+      "status": "active",
+      "sha256": "3c353ae2144697d03224ca8ae39aa88315f1c8e7f745107b4519e8c1cf6b2200"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/embedders/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__embedders__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/embedders",
+      "status": "active",
+      "sha256": "093f0f1e368a5c5f6e6d11a73498be6ac7e2aa3888aeb428cff98ee89757cb6b"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/evidence/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__evidence__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/evidence",
+      "status": "active",
+      "sha256": "c8b2bcd73fc64a659fce51e76f2a0ba07ab2d3fc2a82da8a208a7a4ce9e094be"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__evidence__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/evidence",
+      "status": "Active",
+      "sha256": "25911f5d0c249325e0924bb343f9570543ca71b1131506b90fd13c0766b9489a"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/ingestion/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__ingestion__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/ingestion",
+      "status": "active",
+      "sha256": "72fad2e2836f713296fe48fd0790bc4e4d2b02cc385210da3b8129ac0fa855ec"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/llms/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__llms__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/llms",
+      "status": "active",
+      "sha256": "1e96aa97897a0135bd1e780033b17c686e3bd8f9d25b0ff821a668a54bdf4220"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/loaders/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__loaders__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/loaders",
+      "status": "active",
+      "sha256": "97e3daa16ea5c937692feb342ff61b827caea42809da04b4a82f1c17215f41c5"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/nlp/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__nlp__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/nlp",
+      "status": "active",
+      "sha256": "2032f9e78377f6264dd19c393bc21037a8618373932237a7a2cd948d9a243acd"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/parsers/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__parsers__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/parsers",
+      "status": "active",
+      "sha256": "0db27f6f2e4a1a18456098e6117dcc98cf13b1a8badd962796fec58fcc366085"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/retrievers/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__retrievers__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/retrievers",
+      "status": "active",
+      "sha256": "eaae781e609daeaae488260baeedb52d33f2b7db2d501045efed835630098547"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/storage/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__storage__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/storage",
+      "status": "active",
+      "sha256": "fdf8ad6f3ddc7bf14c00e2516864fd1edfff5f8a1954998ebd31134d36f90572"
+    },
+    {
+      "original_path": "src/ragflow_lite/infrastructure/vector_indexes/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__vector_indexes__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/infrastructure/vector_indexes",
+      "status": "active",
+      "sha256": "5e95f034a0c1921e2ec2ae4227dd374e1b48c90baf845bda426c56f9ac94543e"
+    },
+    {
+      "original_path": "src/ragflow_lite/shared/AGENTS.md",
+      "snapshot_path": "authoritative/src__ragflow_lite__shared__AGENTS.md",
+      "role": "authoritative",
+      "topic": "src/ragflow_lite/shared",
+      "status": "active",
+      "sha256": "6e15f24e1b7b94c9c20f78a816c5f41eb1a8d3d557719f810c61f1a185831366"
+    },
+    {
+      "original_path": "tests/AGENTS.md",
+      "snapshot_path": "authoritative/tests__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests",
+      "status": "active",
+      "sha256": "0b1ef2c6fd66f1e16502e62f0f6b62bad04427006492f03a0c50d248e5fa055f"
+    },
+    {
+      "original_path": "tests/CONTRACTS.md",
+      "snapshot_path": "authoritative/tests__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "tests",
+      "status": "active",
+      "sha256": "1e4c3c67065e1d744a24085313ceb08ac364333901d13f048042b6bff959637c"
+    },
+    {
+      "original_path": "tests/evals/AGENTS.md",
+      "snapshot_path": "authoritative/tests__evals__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests/evals",
+      "status": "active",
+      "sha256": "bbdec3508188e627465271cd400ba04c173853f3cad21ff694dc9fc7d3cb9633"
+    },
+    {
+      "original_path": "tests/evals/CONTRACTS.md",
+      "snapshot_path": "authoritative/tests__evals__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "tests/evals",
+      "status": "active",
+      "sha256": "1394f2e1832dbbd977c63887f6f04cb6643dfb38ead34b921b18ea5248bcbee3"
+    },
+    {
+      "original_path": "tests/integration/AGENTS.md",
+      "snapshot_path": "authoritative/tests__integration__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests/integration",
+      "status": "active",
+      "sha256": "8991d516a73b75a6bd751a4525e432791c4a70639a95365624304137e6f9fe97"
+    },
+    {
+      "original_path": "tests/integration/CONTRACTS.md",
+      "snapshot_path": "authoritative/tests__integration__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "tests/integration",
+      "status": "active",
+      "sha256": "4d018dcc43582f7779c3e0c01ec8bea7623e4a40b61b59aa1d04681824474b06"
+    },
+    {
+      "original_path": "tests/unit/CONTRACTS.md",
+      "snapshot_path": "authoritative/tests__unit__CONTRACTS.md",
+      "role": "authoritative",
+      "topic": "tests/unit",
+      "status": "active",
+      "sha256": "a92134e8a1ee689be419c8118ed4b76c3970922ea66e23fd9fff50302a5f7945"
+    },
+    {
+      "original_path": "tests/unit/application/AGENTS.md",
+      "snapshot_path": "authoritative/tests__unit__application__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests/unit/application",
+      "status": "active",
+      "sha256": "0e11dadb4745a6c6895081d06abee56cc0ee160c8b7b74984bdb053d0e0ec340"
+    },
+    {
+      "original_path": "tests/unit/domain/AGENTS.md",
+      "snapshot_path": "authoritative/tests__unit__domain__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests/unit/domain",
+      "status": "active",
+      "sha256": "f61ed181bb9c3317c1ef620a77e746741a061e34d1bd1af2c6a68a46c351b0d9"
+    },
+    {
+      "original_path": "tests/unit/infrastructure/AGENTS.md",
+      "snapshot_path": "authoritative/tests__unit__infrastructure__AGENTS.md",
+      "role": "authoritative",
+      "topic": "tests/unit/infrastructure",
+      "status": "active",
+      "sha256": "7c93201a705ef6bd1a020bbf7a05cd6abc6f40ada7b234786630a65af3a5976c"
+    }
+  ]
+}
