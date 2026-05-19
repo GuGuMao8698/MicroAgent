@@ -15,11 +15,6 @@ from deepeval.dataset import Golden  # noqa: E402
 from deepeval.metrics.utils import initialize_model  # noqa: E402
 from evals.cleanup_infinity import select_eval_cleanup_tables  # noqa: E402
 from evals.eval_models import DeepSeekChatDeepEvalModel  # noqa: E402
-from evals.private_bootstrap_goldens import (  # noqa: E402
-    CorpusRole,
-    classify_corpus_path,
-    discover_corpus_paths,
-)
 from evals.generate_goldens import (
     DEFAULT_GOLDENS_PATH,
     ArkContextConstructionEmbeddingModel,
@@ -41,6 +36,11 @@ from evals.optimize_prompt import (  # noqa: E402
     main,
     validate_goldens,
 )
+from evals.private_bootstrap_goldens import (  # noqa: E402
+    CorpusRole,
+    classify_corpus_path,
+    discover_corpus_paths,
+)
 
 _EXPECTED_EVAL_SOURCE_FILES = {
     "Best Practices for Claude Code.md": 10,
@@ -59,8 +59,7 @@ def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
         == CorpusRole.AUTHORITATIVE
     )
     assert (
-        classify_corpus_path(Path("tests/evals/AGENTS.md"))
-        == CorpusRole.AUTHORITATIVE
+        classify_corpus_path(Path("tests/evals/AGENTS.md")) == CorpusRole.AUTHORITATIVE
     )
     assert (
         classify_corpus_path(Path("docs/superpowers/specs/2026-05-18-example.md"))
@@ -118,7 +117,9 @@ def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> N
     authoritative.parent.mkdir(parents=True)
     distractor.parent.mkdir(parents=True)
     root_agents.write_text("# Working Agreements\n", encoding="utf-8")
-    authoritative.write_text("# Eval Contracts\n\nActive eval rules.\n", encoding="utf-8")
+    authoritative.write_text(
+        "# Eval Contracts\n\nActive eval rules.\n", encoding="utf-8"
+    )
     distractor.write_text(
         "# Historical Plan\n\nStatus: Ready for implementation after confirmation\n",
         encoding="utf-8",
@@ -153,13 +154,11 @@ def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> N
         "tests/evals/CONTRACTS.md",
     ]
     assert manifest["entries"][0]["topic"] == "root"
+    assert (snapshot_root / "authoritative" / "tests__evals__CONTRACTS.md").read_text(
+        encoding="utf-8"
+    ) == "# Eval Contracts\n\nActive eval rules.\n"
     assert (
-        snapshot_root / "authoritative" / "tests__evals__CONTRACTS.md"
-    ).read_text(encoding="utf-8") == "# Eval Contracts\n\nActive eval rules.\n"
-    assert (
-        snapshot_root
-        / "distractors"
-        / "docs__superpowers__plans__2026-05-19-plan.md"
+        snapshot_root / "distractors" / "docs__superpowers__plans__2026-05-19-plan.md"
     ).exists()
 
 
@@ -195,11 +194,7 @@ def test_private_bootstrap_builds_packed_fixture_from_snapshot(
         snapshot_root=snapshot_root,
     )
     fixture_path = (
-        root
-        / "tests"
-        / "fixtures"
-        / "documents"
-        / "microrag-private-bootstrap.md"
+        root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
     )
 
     build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
@@ -262,6 +257,107 @@ def test_private_bootstrap_rejects_snapshot_filename_collisions(
             source_paths=[source_a, source_b],
             snapshot_root=snapshot_root,
         )
+
+
+def _private_bootstrap_case(
+    *,
+    name: str,
+    case_type: str,
+    answerability: str = "answerable",
+    required_sources: list[str] | None = None,
+    distractor_sources: list[str] | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "document_fixture": "microrag-private-bootstrap.md",
+        "top_k": 6,
+        "case_type": case_type,
+        "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+        "required_authoritative_sources": required_sources or ["AGENTS.md"],
+        "distractor_sources": distractor_sources or [],
+        "answerability": answerability,
+    }
+    if case_type == "multi_doc_synthesis":
+        metadata["required_authoritative_sources"] = required_sources or [
+            "AGENTS.md",
+            "tests/evals/CONTRACTS.md",
+        ]
+        metadata["why_multi_doc"] = "Requires root workflow and eval contract."
+    if case_type == "stale_plan_trap":
+        metadata["distractor_sources"] = distractor_sources or [
+            "docs/superpowers/specs/2026-05-18-example.md"
+        ]
+        metadata["why_not_answer_from_distractor"] = (
+            "The distractor is planning material, not an active contract."
+        )
+    if case_type == "negative_missing_evidence":
+        metadata["answerability"] = "unanswerable"
+        metadata["required_authoritative_sources"] = []
+        metadata["acceptable_refusal"] = (
+            "The authoritative MicroRAG documents in this eval corpus do not establish that."
+        )
+    return {
+        "name": name,
+        "input": f"Question for {name}?",
+        "expected_output": "Answer grounded in authoritative sources.",
+        "context": ["Source context."],
+        "sourceFile": "microrag-private-bootstrap.md",
+        "additionalMetadata": metadata,
+    }
+
+
+def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = []
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"current-{index}", case_type="current_contract_qa"
+        )
+        for index in range(8)
+    )
+    payload.extend(
+        _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
+        for index in range(4)
+    )
+    payload.extend(
+        _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
+        for index in range(4)
+    )
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"negative-{index}", case_type="negative_missing_evidence"
+        )
+        for index in range(2)
+    )
+    payload.extend(
+        _private_bootstrap_case(
+            name=f"comparison-{index}",
+            case_type="comparison",
+            required_sources=["AGENTS.md"],
+            distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
+        )
+        for index in range(2)
+    )
+
+    validate_goldens_payload(payload)
+
+
+def test_private_bootstrap_validation_rejects_stale_plan_only_answer_source() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = [
+        _private_bootstrap_case(
+            name=f"current-{index}",
+            case_type="current_contract_qa",
+        )
+        for index in range(20)
+    ]
+    payload[0]["additionalMetadata"]["required_authoritative_sources"] = [
+        "docs/superpowers/specs/2026-05-18-example.md"
+    ]
+
+    with pytest.raises(RuntimeError, match="authoritative source"):
+        validate_goldens_payload(payload)
 
 
 def test_sync_eval_source_documents_copies_markdown_files_only(tmp_path: Path) -> None:

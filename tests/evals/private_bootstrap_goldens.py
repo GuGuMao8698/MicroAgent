@@ -6,12 +6,19 @@ import shutil
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 PRIVATE_BOOTSTRAP_FIXTURE_NAME = "microrag-private-bootstrap.md"
 PRIVATE_BOOTSTRAP_SNAPSHOT_DIR = "microrag-private-bootstrap-snapshot"
 PRIVATE_BOOTSTRAP_DRAFT_GOLDENS = "private_bootstrap_goldens.draft.json"
 AUTHORITY_RULE = "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior."
+EXPECTED_CASE_COUNTS: Mapping[str, int] = {
+    "current_contract_qa": 8,
+    "multi_doc_synthesis": 4,
+    "stale_plan_trap": 4,
+    "negative_missing_evidence": 2,
+    "comparison": 2,
+}
 
 
 class CorpusRole(StrEnum):
@@ -130,6 +137,120 @@ def load_manifest(snapshot_root: Path) -> list[ManifestEntry]:
     return [ManifestEntry(**entry) for entry in raw_entries]
 
 
+def _metadata_for_case(
+    item: Mapping[str, object], *, index: int
+) -> Mapping[str, object]:
+    metadata = item.get("additionalMetadata", item.get("additional_metadata"))
+    if not isinstance(metadata, Mapping):
+        raise RuntimeError(
+            f"private bootstrap case #{index} must include additionalMetadata."
+        )
+    return metadata
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _require_text(item: Mapping[str, object], key: str, *, index: int) -> str:
+    value = item.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(
+            f"private bootstrap case #{index} must include non-empty {key}."
+        )
+    return value
+
+
+def _is_authoritative_source(path: str) -> bool:
+    return classify_corpus_path(Path(path)) is CorpusRole.AUTHORITATIVE
+
+
+def _is_allowed_distractor(path: str) -> bool:
+    return classify_corpus_path(Path(path)) is CorpusRole.DISTRACTOR
+
+
+def validate_goldens_payload(payload: object) -> None:
+    if not isinstance(payload, list):
+        raise RuntimeError("private bootstrap goldens must be a JSON array.")
+    if len(payload) != sum(EXPECTED_CASE_COUNTS.values()):
+        raise RuntimeError("private bootstrap goldens must contain exactly 20 cases.")
+
+    counts: dict[str, int] = {case_type: 0 for case_type in EXPECTED_CASE_COUNTS}
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, Mapping):
+            raise RuntimeError(f"private bootstrap case #{index} must be an object.")
+        _require_text(item, "name", index=index)
+        _require_text(item, "input", index=index)
+        _require_text(item, "expected_output", index=index)
+        metadata = _metadata_for_case(item, index=index)
+
+        document_fixture = metadata.get("document_fixture")
+        if document_fixture != PRIVATE_BOOTSTRAP_FIXTURE_NAME:
+            raise RuntimeError(
+                f"private bootstrap case #{index} must use {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
+            )
+        top_k = metadata.get("top_k")
+        if not isinstance(top_k, int) or top_k <= 0:
+            raise RuntimeError(
+                f"private bootstrap case #{index} must include positive top_k."
+            )
+        case_type = metadata.get("case_type")
+        if not isinstance(case_type, str) or case_type not in EXPECTED_CASE_COUNTS:
+            raise RuntimeError(
+                f"private bootstrap case #{index} has unsupported case_type."
+            )
+        counts[case_type] += 1
+
+        required_sources = _string_list(metadata.get("required_authoritative_sources"))
+        distractor_sources = _string_list(metadata.get("distractor_sources"))
+        for source in required_sources:
+            if not _is_authoritative_source(source):
+                raise RuntimeError(
+                    f"private bootstrap case #{index} required source is not an "
+                    f"authoritative source: {source}"
+                )
+        for source in distractor_sources:
+            if not _is_allowed_distractor(source):
+                raise RuntimeError(
+                    f"private bootstrap case #{index} distractor source is not allowed: "
+                    f"{source}"
+                )
+
+        if case_type != "negative_missing_evidence" and not required_sources:
+            raise RuntimeError(
+                f"private bootstrap case #{index} needs an authoritative source."
+            )
+        if case_type == "multi_doc_synthesis" and len(required_sources) < 2:
+            raise RuntimeError(
+                f"private bootstrap case #{index} needs at least two authoritative sources."
+            )
+        if case_type == "stale_plan_trap" and not distractor_sources:
+            raise RuntimeError(
+                f"private bootstrap case #{index} needs a distractor source."
+            )
+        if case_type == "negative_missing_evidence":
+            if metadata.get("answerability") != "unanswerable":
+                raise RuntimeError(
+                    f"private bootstrap case #{index} must be unanswerable."
+                )
+            acceptable_refusal = metadata.get("acceptable_refusal")
+            if (
+                not isinstance(acceptable_refusal, str)
+                or not acceptable_refusal.strip()
+            ):
+                raise RuntimeError(
+                    f"private bootstrap case #{index} needs acceptable_refusal."
+                )
+
+    if counts != dict(EXPECTED_CASE_COUNTS):
+        raise RuntimeError(
+            "private bootstrap case distribution must be "
+            f"{dict(EXPECTED_CASE_COUNTS)}, got {counts}."
+        )
+
+
 def validate_snapshot_root(*, repo_root: Path, snapshot_root: Path) -> Path:
     repo_root_resolved = repo_root.resolve()
     snapshot_root_resolved = snapshot_root.resolve()
@@ -171,7 +292,9 @@ def create_snapshot(
         if role is None:
             continue
 
-        role_dir = "authoritative" if role is CorpusRole.AUTHORITATIVE else "distractors"
+        role_dir = (
+            "authoritative" if role is CorpusRole.AUTHORITATIVE else "distractors"
+        )
         target_relative = f"{role_dir}/{snapshot_filename(relative_path)}"
         previous_path = seen_targets.get(target_relative)
         if previous_path is not None:
