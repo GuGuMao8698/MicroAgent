@@ -148,7 +148,9 @@ def _metadata_for_case(
     return metadata
 
 
-def _source_list(metadata: Mapping[str, object], field_name: str, *, index: int) -> list[str]:
+def _source_list(
+    metadata: Mapping[str, object], field_name: str, *, index: int
+) -> list[str]:
     if field_name not in metadata:
         return []
     value = metadata[field_name]
@@ -191,6 +193,14 @@ def _validate_source_file(item: Mapping[str, object], *, index: int) -> None:
     if any(value != PRIVATE_BOOTSTRAP_FIXTURE_NAME for value in values):
         raise RuntimeError(
             f"private bootstrap case #{index} sourceFile must be {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
+        )
+
+
+def _validate_corpus_fixture(metadata: Mapping[str, object], *, index: int) -> None:
+    if metadata.get("corpus_fixture") != PRIVATE_BOOTSTRAP_SNAPSHOT_DIR:
+        raise RuntimeError(
+            f"private bootstrap case #{index} corpus_fixture must be "
+            f"{PRIVATE_BOOTSTRAP_SNAPSHOT_DIR}."
         )
 
 
@@ -240,8 +250,11 @@ def validate_goldens_payload(
             raise RuntimeError(
                 f"private bootstrap case #{index} must use {PRIVATE_BOOTSTRAP_FIXTURE_NAME}."
             )
+        _validate_corpus_fixture(metadata, index=index)
         if metadata.get("authority_rule") != AUTHORITY_RULE:
-            raise RuntimeError(f"private bootstrap case #{index} has invalid authority_rule.")
+            raise RuntimeError(
+                f"private bootstrap case #{index} has invalid authority_rule."
+            )
         top_k = metadata.get("top_k")
         if type(top_k) is not int or top_k <= 0:
             raise RuntimeError(

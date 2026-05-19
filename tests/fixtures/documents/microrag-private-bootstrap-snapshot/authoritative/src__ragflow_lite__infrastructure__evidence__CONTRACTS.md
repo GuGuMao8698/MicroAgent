@@ -37,6 +37,9 @@ Source of truth:
 - Extractors consume source chunks and produce `GraphEvidenceBatch` objects.
 - Empty chunk input is rejected before a model call.
 - Extracted evidence must reference known source chunks.
+- Relation endpoints must match extracted entity names. The DeepSeek-backed
+  runtime path uses one bounded validation-repair turn for invalid graph evidence
+  JSON and still fails if the regenerated output remains invalid.
 
 Runtime boundary:
 - DeepSeek-backed extraction is the current provider-wired path.

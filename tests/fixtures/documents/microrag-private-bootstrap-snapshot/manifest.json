@@ -375,7 +375,7 @@
       "role": "authoritative",
       "topic": "src/ragflow_lite/infrastructure/evidence",
       "status": "Active",
-      "sha256": "25911f5d0c249325e0924bb343f9570543ca71b1131506b90fd13c0766b9489a"
+      "sha256": "e66e43cbae12ed0edd0daade3ca7cd23bff85be2d553fc91bef03367a8c56fae"
     },
     {
       "original_path": "src/ragflow_lite/infrastructure/ingestion/AGENTS.md",
@@ -471,7 +471,7 @@
       "role": "authoritative",
       "topic": "tests/evals",
       "status": "active",
-      "sha256": "fafa17b3172866ef67796f68a4106d1faaec27f4db179d8144cff41e5befb885"
+      "sha256": "7306c819ac43f7727a1099021fad589bcb58cbe59d360cbf8ab51d9397066318"
     },
     {
       "original_path": "tests/evals/CONTRACTS.md",
@@ -479,7 +479,7 @@
       "role": "authoritative",
       "topic": "tests/evals",
       "status": "active",
-      "sha256": "d810a6cc220ce27f530f9d682edb6572153090325286047035cec0029551f261"
+      "sha256": "6da2768d6e1f383e75898243f66160a785b7d432e894233c83de1c6cb2be5179"
     },
     {
       "original_path": "tests/integration/AGENTS.md",

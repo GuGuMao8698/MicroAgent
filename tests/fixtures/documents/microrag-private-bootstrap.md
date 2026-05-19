@@ -25814,7 +25814,7 @@ Source: [infinity_test_support.py](infinity_test_support.py).
 Role: authoritative
 Status: active
 Topic: tests/evals
-SHA256: fafa17b3172866ef67796f68a4106d1faaec27f4db179d8144cff41e5befb885
+SHA256: 7306c819ac43f7727a1099021fad589bcb58cbe59d360cbf8ab51d9397066318
 
 # AGENTS.md
 
@@ -25842,7 +25842,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 
 - [test_rag_deepeval.py](test_rag_deepeval.py) — uploads fixtures, waits for terminal ingestion state, evaluates answers.
 - [generate_goldens.py](generate_goldens.py) — synthetic golden generation (isolated `.venv-goldens`).
-- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, packed fixture, and validates the draft golden artifact.
+- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, compatibility packed fixture, and validates the draft golden artifact.
 - [optimize_prompt.py](optimize_prompt.py) — prompt optimization against committed goldens (main `.venv`).
 - [summarize_results.py](summarize_results.py) — post-processing of raw DeepEval exports.
 
@@ -25856,7 +25856,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 Role: authoritative
 Status: active
 Topic: tests/evals
-SHA256: d810a6cc220ce27f530f9d682edb6572153090325286047035cec0029551f261
+SHA256: 6da2768d6e1f383e75898243f66160a785b7d432e894233c83de1c6cb2be5179
 
 # tests/evals/CONTRACTS.md
 
@@ -25894,12 +25894,15 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 
 ## Private bootstrap goldens
 
-- The private bootstrap dataset uses `tests/fixtures/documents/microrag-private-bootstrap.md` as its packed fixture.
+- The private bootstrap dataset uses `tests/fixtures/documents/microrag-private-bootstrap-snapshot/` as its active eval corpus fixture.
+- DeepEval live runs upload every file listed in the snapshot manifest as a separate runtime document before running the private bootstrap cases.
+- `tests/fixtures/documents/microrag-private-bootstrap.md` is a generated compatibility/inspection packed fixture. It must not be treated as proof of cross-document retrieval.
 - The packed fixture is generated from `tests/fixtures/documents/microrag-private-bootstrap-snapshot/`.
 - `CONTRACTS.md` and `AGENTS.md` snapshot entries are authoritative sources.
 - `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims.
 - `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is the review-stage artifact.
 - `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`.
+- Private bootstrap golden metadata must include `corpus_fixture = "microrag-private-bootstrap-snapshot"` and `document_fixture = "microrag-private-bootstrap.md"`; `document_fixture` is compatibility metadata, not the active knowledge-base input.
 - Run `tests/evals/build_private_bootstrap_goldens.py` before replacing the active artifact.
 
 ## Default deepeval model

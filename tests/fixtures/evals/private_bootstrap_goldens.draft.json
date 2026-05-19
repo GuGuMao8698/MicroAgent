@@ -18,7 +18,8 @@
         "src/ragflow_lite/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -29,7 +30,8 @@
         "src/ragflow_lite/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -51,7 +53,8 @@
         "src/ragflow_lite/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -62,7 +65,8 @@
         "src/ragflow_lite/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -84,7 +88,8 @@
         "src/ragflow_lite/api/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -95,7 +100,8 @@
         "src/ragflow_lite/api/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -117,7 +123,8 @@
         "src/ragflow_lite/api/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -128,7 +135,8 @@
         "src/ragflow_lite/api/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -150,7 +158,8 @@
         "src/ragflow_lite/infrastructure/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -161,7 +170,8 @@
         "src/ragflow_lite/infrastructure/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -183,7 +193,8 @@
         "src/ragflow_lite/application/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -194,7 +205,8 @@
         "src/ragflow_lite/application/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -216,7 +228,8 @@
         "src/ragflow_lite/application/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -227,7 +240,8 @@
         "src/ragflow_lite/application/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -249,7 +263,8 @@
         "tests/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -260,7 +275,8 @@
         "tests/CONTRACTS.md"
       ],
       "distractor_sources": [],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -284,7 +300,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The root workflow establishes `.venv` as the default, while the eval contract separately defines `.venv-goldens` for generation and main `.venv` for optimization."
+      "why_multi_doc": "The root workflow establishes `.venv` as the default, while the eval contract separately defines `.venv-goldens` for generation and main `.venv` for optimization.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -297,7 +314,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The root workflow establishes `.venv` as the default, while the eval contract separately defines `.venv-goldens` for generation and main `.venv` for optimization."
+      "why_multi_doc": "The root workflow establishes `.venv` as the default, while the eval contract separately defines `.venv-goldens` for generation and main `.venv` for optimization.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -321,7 +339,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The eval contract owns run-level selector behavior, while the API contract owns the production `POST /queries` mode surface."
+      "why_multi_doc": "The eval contract owns run-level selector behavior, while the API contract owns the production `POST /queries` mode surface.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -334,7 +353,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The eval contract owns run-level selector behavior, while the API contract owns the production `POST /queries` mode surface."
+      "why_multi_doc": "The eval contract owns run-level selector behavior, while the API contract owns the production `POST /queries` mode surface.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -358,7 +378,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The retry/exhaustion semantics live in the evidence contract, while the application contract owns the fallback policy."
+      "why_multi_doc": "The retry/exhaustion semantics live in the evidence contract, while the application contract owns the fallback policy.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -371,7 +392,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The retry/exhaustion semantics live in the evidence contract, while the application contract owns the fallback policy."
+      "why_multi_doc": "The retry/exhaustion semantics live in the evidence contract, while the application contract owns the fallback policy.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -395,7 +417,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The package contract owns provider env requirements, while the Docker contract owns local compose sourcing and artifact/secret rules."
+      "why_multi_doc": "The package contract owns provider env requirements, while the Docker contract owns local compose sourcing and artifact/secret rules.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -408,7 +431,8 @@
       ],
       "distractor_sources": [],
       "answerability": "answerable",
-      "why_multi_doc": "The package contract owns provider env requirements, while the Docker contract owns local compose sourcing and artifact/secret rules."
+      "why_multi_doc": "The package contract owns provider env requirements, while the Docker contract owns local compose sourcing and artifact/secret rules.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -433,7 +457,8 @@
         "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan is historical docs/superpowers material and is not an active current-runtime or eval contract unless reflected in AGENTS.md or CONTRACTS.md."
+      "why_not_answer_from_distractor": "The plan is historical docs/superpowers material and is not an active current-runtime or eval contract unless reflected in AGENTS.md or CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -447,7 +472,8 @@
         "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan is historical docs/superpowers material and is not an active current-runtime or eval contract unless reflected in AGENTS.md or CONTRACTS.md."
+      "why_not_answer_from_distractor": "The plan is historical docs/superpowers material and is not an active current-runtime or eval contract unless reflected in AGENTS.md or CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -472,7 +498,8 @@
         "docs/superpowers/plans/2026-05-14-microrag-agent-demo-shell.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan may describe intended work, but only the API AGENTS/CONTRACTS snapshot can justify current route response behavior."
+      "why_not_answer_from_distractor": "The plan may describe intended work, but only the API AGENTS/CONTRACTS snapshot can justify current route response behavior.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -486,7 +513,8 @@
         "docs/superpowers/plans/2026-05-14-microrag-agent-demo-shell.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan may describe intended work, but only the API AGENTS/CONTRACTS snapshot can justify current route response behavior."
+      "why_not_answer_from_distractor": "The plan may describe intended work, but only the API AGENTS/CONTRACTS snapshot can justify current route response behavior.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -511,7 +539,8 @@
         "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The draft spec can be comparison evidence but is not an active current-runtime contract unless reflected in infrastructure AGENTS/CONTRACTS."
+      "why_not_answer_from_distractor": "The draft spec can be comparison evidence but is not an active current-runtime contract unless reflected in infrastructure AGENTS/CONTRACTS.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -525,7 +554,8 @@
         "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The draft spec can be comparison evidence but is not an active current-runtime contract unless reflected in infrastructure AGENTS/CONTRACTS."
+      "why_not_answer_from_distractor": "The draft spec can be comparison evidence but is not an active current-runtime contract unless reflected in infrastructure AGENTS/CONTRACTS.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -550,7 +580,8 @@
         "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan describes implementation history; the active eval CONTRACTS file controls whether query mode belongs in golden case schema."
+      "why_not_answer_from_distractor": "The plan describes implementation history; the active eval CONTRACTS file controls whether query mode belongs in golden case schema.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -564,7 +595,8 @@
         "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
       ],
       "answerability": "answerable",
-      "why_not_answer_from_distractor": "The plan describes implementation history; the active eval CONTRACTS file controls whether query mode belongs in golden case schema."
+      "why_not_answer_from_distractor": "The plan describes implementation history; the active eval CONTRACTS file controls whether query mode belongs in golden case schema.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -591,7 +623,8 @@
         "tests/evals/CONTRACTS.md",
         "docker/CONTRACTS.md"
       ],
-      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -607,7 +640,8 @@
         "tests/evals/CONTRACTS.md",
         "docker/CONTRACTS.md"
       ],
-      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -632,7 +666,8 @@
         "docker/CONTRACTS.md",
         "src/ragflow_lite/CONTRACTS.md"
       ],
-      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -646,7 +681,8 @@
         "docker/CONTRACTS.md",
         "src/ragflow_lite/CONTRACTS.md"
       ],
-      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot."
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -671,7 +707,8 @@
       "distractor_sources": [
         "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md"
       ],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -685,7 +722,8 @@
       "distractor_sources": [
         "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md"
       ],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   },
   {
@@ -710,7 +748,8 @@
       "distractor_sources": [
         "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md"
       ],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     },
     "additional_metadata": {
       "document_fixture": "microrag-private-bootstrap.md",
@@ -724,7 +763,8 @@
       "distractor_sources": [
         "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md"
       ],
-      "answerability": "answerable"
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
   }
 ]

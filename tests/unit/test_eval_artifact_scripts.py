@@ -37,10 +37,13 @@ from evals.optimize_prompt import (  # noqa: E402
 )
 from evals.private_bootstrap_goldens import (  # noqa: E402
     AUTHORITY_RULE,
+    PRIVATE_BOOTSTRAP_SNAPSHOT_DIR,
     CorpusRole,
     ManifestEntry,
     classify_corpus_path,
     discover_corpus_paths,
+    load_manifest,
+    sha256_file,
 )
 
 
@@ -260,6 +263,7 @@ def _private_bootstrap_case(
     distractor_sources: list[str] | None = None,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {
+        "corpus_fixture": PRIVATE_BOOTSTRAP_SNAPSHOT_DIR,
         "document_fixture": "microrag-private-bootstrap.md",
         "top_k": 6,
         "case_type": case_type,
@@ -374,11 +378,15 @@ def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
         "# Plan\n\nStatus: Ready for implementation after confirmation\n",
         encoding="utf-8",
     )
-    draft = root / "tests" / "fixtures" / "evals" / "private_bootstrap_goldens.draft.json"
+    draft = (
+        root / "tests" / "fixtures" / "evals" / "private_bootstrap_goldens.draft.json"
+    )
     draft.parent.mkdir(parents=True)
     cases = []
     cases.extend(
-        _private_bootstrap_case(name=f"current-{index}", case_type="current_contract_qa")
+        _private_bootstrap_case(
+            name=f"current-{index}", case_type="current_contract_qa"
+        )
         for index in range(8)
     )
     cases.extend(
@@ -410,11 +418,7 @@ def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
     main(["--repo-root", str(root), "--draft-goldens", str(draft)])
 
     assert (
-        root
-        / "tests"
-        / "fixtures"
-        / "documents"
-        / "microrag-private-bootstrap.md"
+        root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
     ).exists()
     assert (
         root
@@ -471,6 +475,22 @@ def test_private_bootstrap_validation_rejects_wrong_or_missing_source_file() -> 
 
     with pytest.raises(RuntimeError, match="sourceFile"):
         validate_goldens_payload(missing_source_payload)
+
+
+def test_private_bootstrap_validation_requires_snapshot_corpus_fixture() -> None:
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"].pop("corpus_fixture")
+
+    with pytest.raises(RuntimeError, match="corpus_fixture"):
+        validate_goldens_payload(payload)
+
+    payload = _private_bootstrap_payload()
+    payload[0]["additionalMetadata"]["corpus_fixture"] = "microrag-private-bootstrap.md"
+
+    with pytest.raises(RuntimeError, match="corpus_fixture"):
+        validate_goldens_payload(payload)
 
 
 def test_private_bootstrap_validation_rejects_malformed_required_sources() -> None:
@@ -627,10 +647,29 @@ def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
     assert {golden.source_file for golden in goldens} == {
         "microrag-private-bootstrap.md"
     }
+    assert {item["additionalMetadata"]["corpus_fixture"] for item in payload} == {
+        PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+    }
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
     )
+
+
+def test_private_bootstrap_snapshot_matches_current_source_files() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    snapshot_root = (
+        repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+    )
+
+    for entry in load_manifest(snapshot_root):
+        source_path = repo_root / entry.original_path
+        snapshot_path = snapshot_root / entry.snapshot_path
+        assert snapshot_path.is_file()
+        assert snapshot_path.read_text(encoding="utf-8") == source_path.read_text(
+            encoding="utf-8"
+        )
+        assert entry.sha256 == sha256_file(snapshot_path)
 
 
 def test_generate_goldens_artifact_requires_exactly_ten_per_document(

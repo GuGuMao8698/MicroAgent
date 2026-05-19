@@ -10,6 +10,7 @@ from deepeval.test_case import LLMTestCase  # noqa: E402
 from eval_support import (  # noqa: E402
     RAG_EVAL_CASES,
     RagEvalCase,
+    _case_from_golden_payload,
     build_deepeval_judge_model,
     build_metrics_for_case,
     build_rag_test_case,
@@ -25,7 +26,7 @@ _JUDGE_MODEL_ENV = {
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
-    "microrag-private-bootstrap.md": 20,
+    "microrag-private-bootstrap-snapshot": 20,
 }
 
 
@@ -166,9 +167,8 @@ def test_build_metrics_for_case_returns_all_five_when_has_reference() -> None:
 def test_seed_dataset_tracks_generated_eval_docs_with_references() -> None:
     fixture_counts: dict[str, int] = {}
     for case in RAG_EVAL_CASES:
-        fixture_counts[case.document_fixture] = (
-            fixture_counts.get(case.document_fixture, 0) + 1
-        )
+        fixture = case.corpus_fixture or case.document_fixture
+        fixture_counts[fixture] = fixture_counts.get(fixture, 0) + 1
 
     assert len(RAG_EVAL_CASES) == 20
     assert fixture_counts == _EXPECTED_EVAL_SOURCE_FILES
@@ -186,7 +186,85 @@ def test_seed_dataset_uses_unique_names_and_non_empty_questions() -> None:
 
 
 def test_seed_dataset_uses_markdown_fixtures_only() -> None:
+    assert {case.corpus_fixture for case in RAG_EVAL_CASES} == {
+        "microrag-private-bootstrap-snapshot"
+    }
     assert {Path(case.document_fixture).suffix for case in RAG_EVAL_CASES} == {".md"}
+
+
+def test_private_bootstrap_cases_use_snapshot_corpus_fixture() -> None:
+    multi_doc_cases = [
+        case for case in RAG_EVAL_CASES if len(case.required_authoritative_sources) >= 2
+    ]
+
+    assert multi_doc_cases
+    assert all(case.uses_corpus_fixture for case in RAG_EVAL_CASES)
+    assert all(
+        case.corpus_fixture == "microrag-private-bootstrap-snapshot"
+        for case in RAG_EVAL_CASES
+    )
+    assert all(
+        case.document_fixture == "microrag-private-bootstrap.md"
+        for case in RAG_EVAL_CASES
+    )
+    assert {
+        case.answerability
+        for case in RAG_EVAL_CASES
+        if case.name in {"private-bootstrap-017", "private-bootstrap-018"}
+    } == {"unanswerable"}
+
+
+def test_case_loader_preserves_private_bootstrap_metadata() -> None:
+    case = _case_from_golden_payload(
+        {
+            "name": "multi-doc",
+            "input": "How do eval contracts and API contracts interact?",
+            "expected_output": "Use both active contracts.",
+            "sourceFile": "microrag-private-bootstrap.md",
+            "additionalMetadata": {
+                "corpus_fixture": "microrag-private-bootstrap-snapshot",
+                "document_fixture": "microrag-private-bootstrap.md",
+                "top_k": 6,
+                "required_authoritative_sources": [
+                    "tests/evals/CONTRACTS.md",
+                    "src/ragflow_lite/api/CONTRACTS.md",
+                ],
+                "distractor_sources": [
+                    "docs/superpowers/plans/2026-05-19-plan.md",
+                ],
+                "answerability": "answerable",
+            },
+        },
+        index=1,
+    )
+
+    assert case.uses_corpus_fixture is True
+    assert case.corpus_fixture == "microrag-private-bootstrap-snapshot"
+    assert case.document_fixture == "microrag-private-bootstrap.md"
+    assert case.required_authoritative_sources == (
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md",
+    )
+    assert case.distractor_sources == ("docs/superpowers/plans/2026-05-19-plan.md",)
+
+
+def test_private_bootstrap_snapshot_manifest_paths_are_readable() -> None:
+    from test_rag_deepeval import _fixture_documents_for_case
+
+    fixture_documents_dir = (
+        Path(__file__).resolve().parents[1] / "fixtures" / "documents"
+    )
+    fixture_names = _fixture_documents_for_case(
+        fixture_documents_dir=fixture_documents_dir,
+        case=RAG_EVAL_CASES[0],
+    )
+
+    assert fixture_names
+    assert fixture_names[0].startswith("microrag-private-bootstrap-snapshot/")
+    assert all(
+        (fixture_documents_dir / fixture_name).is_file()
+        for fixture_name in fixture_names
+    )
 
 
 def test_markdown_fixture_validation_rejects_non_markdown_cases() -> None:

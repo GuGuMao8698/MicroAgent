@@ -29,6 +29,34 @@ except ModuleNotFoundError:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def normalize_private_bootstrap_payload(payload: object) -> object:
+    if not isinstance(payload, list):
+        return payload
+    normalized_payload = []
+    for item in payload:
+        if not isinstance(item, dict):
+            normalized_payload.append(item)
+            continue
+        normalized = dict(item)
+        metadata = normalized.get(
+            "additionalMetadata", normalized.get("additional_metadata")
+        )
+        if isinstance(metadata, dict):
+            normalized_metadata = dict(metadata)
+            normalized_metadata.setdefault(
+                "corpus_fixture", PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+            )
+            normalized_metadata.setdefault(
+                "document_fixture", PRIVATE_BOOTSTRAP_FIXTURE_NAME
+            )
+            normalized["additionalMetadata"] = normalized_metadata
+            normalized["additional_metadata"] = dict(normalized_metadata)
+        normalized.setdefault("sourceFile", PRIVATE_BOOTSTRAP_FIXTURE_NAME)
+        normalized.setdefault("source_file", PRIVATE_BOOTSTRAP_FIXTURE_NAME)
+        normalized_payload.append(normalized)
+    return normalized_payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build and validate the MicroRAG private bootstrap golden inputs."
@@ -56,11 +84,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     repo_root = args.repo_root.resolve()
     snapshot_root = (
-        repo_root
-        / "tests"
-        / "fixtures"
-        / "documents"
-        / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+        repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
     )
     fixture_path = (
         repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_FIXTURE_NAME
@@ -74,7 +98,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
 
-    draft_payload = json.loads(args.draft_goldens.read_text(encoding="utf-8"))
+    draft_payload = normalize_private_bootstrap_payload(
+        json.loads(args.draft_goldens.read_text(encoding="utf-8"))
+    )
     validate_goldens_payload(draft_payload, manifest_entries=entries)
     if args.output_goldens is not None:
         args.output_goldens.parent.mkdir(parents=True, exist_ok=True)

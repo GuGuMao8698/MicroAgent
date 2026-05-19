@@ -24,7 +24,7 @@ If the DeepEval CLI does not pass custom pytest options through in a local versi
 
 - [test_rag_deepeval.py](test_rag_deepeval.py) — uploads fixtures, waits for terminal ingestion state, evaluates answers.
 - [generate_goldens.py](generate_goldens.py) — synthetic golden generation (isolated `.venv-goldens`).
-- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, packed fixture, and validates the draft golden artifact.
+- [build_private_bootstrap_goldens.py](build_private_bootstrap_goldens.py) — builds the frozen private-bootstrap snapshot, compatibility packed fixture, and validates the draft golden artifact.
 - [optimize_prompt.py](optimize_prompt.py) — prompt optimization against committed goldens (main `.venv`).
 - [summarize_results.py](summarize_results.py) — post-processing of raw DeepEval exports.
 

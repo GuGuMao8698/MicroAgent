@@ -11,8 +11,12 @@ from ragflow_lite.domain.models import (
     GraphEvidenceBatch,
     RelationEvidence,
 )
+from ragflow_lite.infrastructure.evidence.structurer_retry import (
+    build_validation_repair_messages,
+)
 
 GRAPH_SOURCE_SEPARATOR = "|"
+_MAX_VALIDATION_ATTEMPTS = 2
 
 EVIDENCE_INSTRUCTIONS = """Extract minimal graph evidence from the provided chunks.
 
@@ -41,6 +45,8 @@ Return exactly one JSON object with this shape:
 Rules:
 - Use only facts visible in the chunks.
 - Every entity and relation must cite at least one provided chunk_id.
+- Every relation source_entity_name and target_entity_name must exactly match
+  one entity name in entities.
 - Do not invent chunk IDs.
 - Do not return markdown or prose outside the JSON object.
 """
@@ -67,15 +73,37 @@ class DeepSeekChatEvidenceExtractor:
             raise ProcessingError("Graph evidence extraction requires one document.")
         document_id = next(iter(document_ids))
         allowed_chunk_ids = {chunk.chunk_id for chunk in chunks}
-        response_text = self.client.complete_json(
-            instructions=EVIDENCE_INSTRUCTIONS,
-            input_text=self._build_input(chunks),
-        )
-        payload = self._load_payload(response_text)
-        entities = self._load_entities(document_id, payload, allowed_chunk_ids)
-        relations = self._load_relations(
-            document_id, payload, entities, allowed_chunk_ids
-        )
+        input_text = self._build_input(chunks)
+        repair_messages: list[dict[str, str]] | None = None
+
+        for attempt_index in range(_MAX_VALIDATION_ATTEMPTS):
+            if repair_messages is None:
+                response_text = self.client.complete_json(
+                    instructions=EVIDENCE_INSTRUCTIONS,
+                    input_text=input_text,
+                )
+            else:
+                response_text = self.client.complete_messages_json(repair_messages)
+
+            try:
+                payload = self._load_payload(response_text)
+                entities = self._load_entities(document_id, payload, allowed_chunk_ids)
+                relations = self._load_relations(
+                    document_id, payload, entities, allowed_chunk_ids
+                )
+                break
+            except ProcessingError as exc:
+                if attempt_index >= _MAX_VALIDATION_ATTEMPTS - 1:
+                    raise
+                repair_messages = build_validation_repair_messages(
+                    instructions=EVIDENCE_INSTRUCTIONS,
+                    input_text=input_text,
+                    invalid_output=response_text,
+                    validation_error=str(exc),
+                )
+        else:  # pragma: no cover - loop always returns or raises
+            raise ProcessingError("Graph evidence extraction failed validation.")
+
         return GraphEvidenceBatch(
             document_id=document_id,
             entities=entities,
