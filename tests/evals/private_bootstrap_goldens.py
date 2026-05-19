@@ -122,30 +122,66 @@ def write_manifest(snapshot_root: Path, entries: list[ManifestEntry]) -> None:
     )
 
 
+def validate_snapshot_root(*, repo_root: Path, snapshot_root: Path) -> Path:
+    repo_root_resolved = repo_root.resolve()
+    snapshot_root_resolved = snapshot_root.resolve()
+    documents_root = repo_root_resolved / "tests" / "fixtures" / "documents"
+    if (
+        snapshot_root_resolved == repo_root_resolved
+        or snapshot_root_resolved.name != PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+        or not snapshot_root_resolved.is_relative_to(documents_root)
+    ):
+        raise RuntimeError(
+            "Unsafe private bootstrap snapshot root: "
+            f"{snapshot_root_resolved.as_posix()}"
+        )
+    return snapshot_root_resolved
+
+
 def create_snapshot(
     *,
     repo_root: Path,
     source_paths: Iterable[Path],
     snapshot_root: Path,
 ) -> list[ManifestEntry]:
-    if snapshot_root.exists():
-        shutil.rmtree(snapshot_root)
-    (snapshot_root / "authoritative").mkdir(parents=True, exist_ok=True)
-    (snapshot_root / "distractors").mkdir(parents=True, exist_ok=True)
+    repo_root_resolved = repo_root.resolve()
+    snapshot_root_resolved = validate_snapshot_root(
+        repo_root=repo_root_resolved,
+        snapshot_root=snapshot_root,
+    )
 
-    entries: list[ManifestEntry] = []
+    snapshots: list[tuple[Path, str, CorpusRole, str]] = []
+    seen_targets: dict[str, str] = {}
     for source_path in sorted(
         source_paths,
-        key=lambda path: path.relative_to(repo_root).as_posix(),
+        key=lambda path: path.resolve().relative_to(repo_root_resolved).as_posix(),
     ):
-        relative_path = normalize_relative_path(source_path.relative_to(repo_root))
+        relative_path = normalize_relative_path(
+            source_path.resolve().relative_to(repo_root_resolved)
+        )
         role = classify_corpus_path(Path(relative_path))
         if role is None:
             continue
 
         role_dir = "authoritative" if role is CorpusRole.AUTHORITATIVE else "distractors"
         target_relative = f"{role_dir}/{snapshot_filename(relative_path)}"
-        target_path = snapshot_root / target_relative
+        previous_path = seen_targets.get(target_relative)
+        if previous_path is not None:
+            raise RuntimeError(
+                "Snapshot filename collision: "
+                f"{previous_path} and {relative_path} both map to {target_relative}"
+            )
+        seen_targets[target_relative] = relative_path
+        snapshots.append((source_path, relative_path, role, target_relative))
+
+    if snapshot_root_resolved.exists():
+        shutil.rmtree(snapshot_root_resolved)
+    (snapshot_root_resolved / "authoritative").mkdir(parents=True, exist_ok=True)
+    (snapshot_root_resolved / "distractors").mkdir(parents=True, exist_ok=True)
+
+    entries: list[ManifestEntry] = []
+    for source_path, relative_path, role, target_relative in snapshots:
+        target_path = snapshot_root_resolved / target_relative
         shutil.copy2(source_path, target_path)
         text = source_path.read_text(encoding="utf-8")
         entries.append(
@@ -155,9 +191,9 @@ def create_snapshot(
                 role=role.value,
                 topic=infer_topic(relative_path),
                 status=infer_status(text, role=role),
-                sha256=sha256_file(source_path),
+                sha256=sha256_file(target_path),
             )
         )
 
-    write_manifest(snapshot_root, entries)
+    write_manifest(snapshot_root_resolved, entries)
     return entries

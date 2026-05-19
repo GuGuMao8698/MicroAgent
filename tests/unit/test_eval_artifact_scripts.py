@@ -163,6 +163,56 @@ def test_private_bootstrap_creates_frozen_snapshot_manifest(tmp_path: Path) -> N
     ).exists()
 
 
+def test_private_bootstrap_rejects_unsafe_snapshot_root(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "AGENTS.md"
+    source.write_text("# Working Agreements\n", encoding="utf-8")
+    unsafe_snapshot_root = tmp_path / "outside" / "microrag-private-bootstrap-snapshot"
+    unsafe_snapshot_root.mkdir(parents=True)
+    sentinel = unsafe_snapshot_root / "sentinel.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    with pytest.raises(RuntimeError, match="Unsafe private bootstrap snapshot root"):
+        create_snapshot(
+            repo_root=root,
+            source_paths=[source],
+            snapshot_root=unsafe_snapshot_root,
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_private_bootstrap_rejects_snapshot_filename_collisions(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    source_a = root / "docs" / "superpowers" / "plans" / "a__b.md"
+    source_b = root / "docs" / "superpowers" / "plans" / "a" / "b.md"
+    source_a.parent.mkdir(parents=True)
+    source_b.parent.mkdir(parents=True)
+    source_a.write_text("# Plan A\n", encoding="utf-8")
+    source_b.write_text("# Plan B\n", encoding="utf-8")
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+
+    from evals.private_bootstrap_goldens import create_snapshot
+
+    with pytest.raises(RuntimeError, match="Snapshot filename collision"):
+        create_snapshot(
+            repo_root=root,
+            source_paths=[source_a, source_b],
+            snapshot_root=snapshot_root,
+        )
+
+
 def test_sync_eval_source_documents_copies_markdown_files_only(tmp_path: Path) -> None:
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
