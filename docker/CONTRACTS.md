@@ -47,5 +47,11 @@ Local-only development, observability, and smoke testing. Not for production, CI
 
 Local development image only. Based on `python:3.13-slim`, installs `build-essential`, `gfortran`, `libopenblas-dev`, `pkg-config`, copies `pyproject.toml` and `src`, runs `pip install -e .`.
 
+It also sets `NLTK_DATA=/usr/local/share/nltk_data`, downloads `punkt_tab` and
+`wordnet`, then verifies both the NLTK resources and a real
+`build_chunk_text_fields(...)` call during the image build. The app requires
+these resources when `infinity.rag_tokenizer.RagTokenizer` builds `*_tks` chunk
+text fields for Infinity full-text indexing.
+
 ## Artifact/Secrets Rules
 Do not commit `.env`, secrets, compose runtime artifacts, screenshots, or local volume contents.

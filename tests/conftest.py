@@ -19,6 +19,7 @@ if str(EVALS_PATH) not in sys.path:
     sys.path.insert(0, str(EVALS_PATH))
 
 from eval_support import EVAL_QUERY_MODES, validate_deepeval_env
+from helpers.local_env import load_export_env_file
 from infinity_test_support import (
     assign_isolated_infinity_tables,
     clear_registered_infinity_tables,
@@ -26,6 +27,7 @@ from infinity_test_support import (
     register_infinity_table_cleanup,
 )
 
+load_export_env_file(PROJECT_ROOT / "data" / "agent-runtime" / "local.env")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-api-key")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
