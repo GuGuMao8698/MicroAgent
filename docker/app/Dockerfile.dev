@@ -2,7 +2,8 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    NLTK_DATA=/usr/local/share/nltk_data
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -19,3 +20,18 @@ COPY src /workspace/src
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install -e .
+
+RUN python - <<'PY'
+import nltk
+from nltk.stem import WordNetLemmatizer
+from ragflow_lite.infrastructure.vector_indexes.chunk_text_fields import (
+    build_chunk_text_fields,
+)
+
+nltk.download("punkt_tab", download_dir="/usr/local/share/nltk_data", quiet=True)
+nltk.download("wordnet", download_dir="/usr/local/share/nltk_data", quiet=True)
+nltk.data.path.insert(0, "/usr/local/share/nltk_data")
+nltk.data.find("tokenizers/punkt_tab/english")
+WordNetLemmatizer().lemmatize("documents")
+build_chunk_text_fields(filename="healthcheck.md", text="Hello world.")
+PY
