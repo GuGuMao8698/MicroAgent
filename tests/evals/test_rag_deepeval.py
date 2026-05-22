@@ -19,12 +19,18 @@ except ModuleNotFoundError:
     from evals.private_bootstrap_goldens import load_manifest  # noqa: E402
 from eval_support import (  # noqa: E402
     RAG_EVAL_CASES,
+    EvalCaseRunResult,
+    EvalQueryMode,
     RagEvalCase,
+    attach_eval_case_failure_snapshot,
+    bounded_deepeval_case_workers,
     build_deepeval_judge_model,
     build_eval_query_payload,
     build_metrics_for_case,
     build_rag_test_case,
+    resolve_deepeval_case_concurrency,
     resolve_eval_query_mode,
+    run_deepeval_cases_concurrently,
 )
 
 _CONTENT_TYPES = {
@@ -139,6 +145,109 @@ def _wait_for_document_terminal_state(
     )
 
 
+def _evaluate_rag_case(
+    *,
+    client: Any,
+    case: RagEvalCase,
+    query_mode: EvalQueryMode,
+    judge_model: Any,
+) -> dict[str, Any]:
+    query_response = client.post(
+        "/api/v0/queries",
+        json=build_eval_query_payload(case, query_mode=query_mode),
+    )
+    assert query_response.status_code == 200, (
+        f"{case.name} query returned HTTP {query_response.status_code}: "
+        f"{query_response.text}"
+    )
+    payload = query_response.json()
+    assert payload["answer"], f"{case.name} query returned an empty answer."
+    assert payload["contexts"], f"{case.name} query returned no contexts."
+
+    test_case = build_rag_test_case(
+        case=case,
+        actual_output=payload["answer"],
+        retrieval_context=[
+            _retrieval_context_for_deepeval(context) for context in payload["contexts"]
+        ],
+    )
+
+    metrics = build_metrics_for_case(
+        case,
+        model=judge_model,
+        query_mode=query_mode,
+    )
+
+    def build_snapshot() -> dict[str, Any]:
+        return {
+            "case": case.name,
+            "has_reference": case.has_reference,
+            "answerability": case.answerability,
+            "required_authoritative_sources": list(case.required_authoritative_sources),
+            "distractor_sources": list(case.distractor_sources),
+            "context_count": len(payload["contexts"]),
+            "retrieved_sources": sorted(
+                {
+                    context.get("metadata", {}).get("filename")
+                    for context in payload["contexts"]
+                    if context.get("metadata", {}).get("filename")
+                }
+            ),
+            "answer_length": len(payload["answer"]),
+            "metrics": {
+                m.__class__.__name__: {"score": m.score, "reason": m.reason}
+                for m in metrics
+            },
+        }
+
+    try:
+        assert_test(test_case, metrics=metrics)
+    except AssertionError as exc:
+        attach_eval_case_failure_snapshot(exc, build_snapshot())
+        raise
+
+    return build_snapshot()
+
+
+def _case_snapshot_from_result(result: EvalCaseRunResult) -> dict[str, Any] | None:
+    if result.snapshot is None:
+        return None
+    if not result.failed:
+        return result.snapshot
+    return {
+        **result.snapshot,
+        "failure": {
+            "type": result.failure_type or "UnknownFailure",
+            "message": result.failure_message or "",
+        },
+    }
+
+
+def _failure_snapshots(results: list[EvalCaseRunResult]) -> list[dict[str, str]]:
+    return [
+        {
+            "case": result.case_name,
+            "failure_type": result.failure_type or "UnknownFailure",
+            "message": result.failure_message or "",
+        }
+        for result in results
+        if result.failed
+    ]
+
+
+def _raise_for_case_failures(failures: list[dict[str, str]]) -> None:
+    if not failures:
+        return
+
+    lines = [
+        f"- {failure['case']}: {failure['failure_type']}: {failure['message']}"
+        for failure in failures
+    ]
+    raise AssertionError(
+        f"RAG eval failed for {len(failures)} case(s):\n" + "\n".join(lines)
+    )
+
+
 def test_single_turn_rag_eval_produces_quality_snapshot(
     client: Any,
     fixture_documents_dir: Path,
@@ -162,55 +271,34 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         os.environ,
     )
     judge_model = build_deepeval_judge_model(os.environ)
+    case_concurrency = resolve_deepeval_case_concurrency(
+        request.config.getoption("--deepeval-case-concurrency"),
+        os.environ,
+    )
+    effective_case_workers = bounded_deepeval_case_workers(
+        case_concurrency,
+        case_count=len(RAG_EVAL_CASES),
+    )
 
-    case_snapshots = []
-    for case in RAG_EVAL_CASES:
-        query_response = client.post(
-            "/api/v0/queries",
-            json=build_eval_query_payload(case, query_mode=query_mode),
-        )
-        assert query_response.status_code == 200
-        payload = query_response.json()
-        assert payload["answer"]
-        assert payload["contexts"]
-
-        test_case = build_rag_test_case(
+    def evaluate_case(case: RagEvalCase) -> dict[str, Any]:
+        return _evaluate_rag_case(
+            client=client,
             case=case,
-            actual_output=payload["answer"],
-            retrieval_context=[
-                _retrieval_context_for_deepeval(context)
-                for context in payload["contexts"]
-            ],
+            query_mode=query_mode,
+            judge_model=judge_model,
         )
 
-        metrics = build_metrics_for_case(case, model=judge_model)
-
-        assert_test(test_case, metrics=metrics)
-
-        case_snapshots.append(
-            {
-                "case": case.name,
-                "has_reference": case.has_reference,
-                "answerability": case.answerability,
-                "required_authoritative_sources": list(
-                    case.required_authoritative_sources
-                ),
-                "distractor_sources": list(case.distractor_sources),
-                "context_count": len(payload["contexts"]),
-                "retrieved_sources": sorted(
-                    {
-                        context.get("metadata", {}).get("filename")
-                        for context in payload["contexts"]
-                        if context.get("metadata", {}).get("filename")
-                    }
-                ),
-                "answer_length": len(payload["answer"]),
-                "metrics": {
-                    m.__class__.__name__: {"score": m.score, "reason": m.reason}
-                    for m in metrics
-                },
-            }
-        )
+    case_results = run_deepeval_cases_concurrently(
+        RAG_EVAL_CASES,
+        configured_concurrency=case_concurrency,
+        evaluate_case=evaluate_case,
+    )
+    case_snapshots = [
+        snapshot
+        for result in case_results
+        if (snapshot := _case_snapshot_from_result(result)) is not None
+    ]
+    case_failures = _failure_snapshots(case_results)
 
     snapshot = {
         "corpus": {
@@ -228,8 +316,15 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         },
         "e2e": {
             "query_mode": query_mode,
-            "case_count": len(case_snapshots),
+            "case_concurrency": {
+                "configured": case_concurrency,
+                "effective_workers": effective_case_workers,
+            },
+            "case_count": len(RAG_EVAL_CASES),
+            "completed_case_count": len(case_snapshots),
+            "failed_case_count": len(case_failures),
             "cases": case_snapshots,
+            "failures": case_failures,
         },
     }
 
@@ -237,6 +332,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         "\n=== RAG Quality Snapshot ===\n"
         + json.dumps(snapshot, ensure_ascii=False, indent=2)
     )
+    _raise_for_case_failures(case_failures)
 
 
 def _retrieval_context_for_deepeval(context: dict[str, Any]) -> str:

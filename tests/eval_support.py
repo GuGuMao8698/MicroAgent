@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Protocol
@@ -24,11 +26,14 @@ EvalQueryMode = Literal["standard", "discorag"]
 EVAL_QUERY_MODES: tuple[EvalQueryMode, ...] = ("standard", "discorag")
 EVAL_QUERY_MODE_ENV_VAR = "RAGFLOW_LITE_EVAL_QUERY_MODE"
 _DEFAULT_EVAL_QUERY_MODE: EvalQueryMode = "standard"
+DEEPEVAL_CASE_CONCURRENCY_ENV_VAR = "RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY"
+_DEFAULT_DEEPEVAL_CASE_CONCURRENCY = 20
 _LEADING_JSON_PREFIX_RE = re.compile(r"^\s*json\s*:\s*", re.IGNORECASE)
 _CITE_TOKEN_RE = re.compile(r"<cite:\d+>")
 _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
 _WHITESPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
 _MULTI_SPACE_RE = re.compile(r"\s{2,}")
+_EVAL_CASE_FAILURE_SNAPSHOT_ATTR = "_rag_eval_failure_snapshot"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +55,18 @@ class RagEvalCase:
     @property
     def uses_corpus_fixture(self) -> bool:
         return self.corpus_fixture is not None
+
+
+@dataclass(frozen=True, slots=True)
+class EvalCaseRunResult:
+    case_name: str
+    snapshot: dict[str, Any] | None = None
+    failure_type: str | None = None
+    failure_message: str | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.failure_type is not None
 
 
 _EVAL_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "evals"
@@ -219,6 +236,110 @@ def resolve_eval_query_mode(
     )
 
 
+def resolve_deepeval_case_concurrency(
+    cli_value: int | str | None,
+    env: Mapping[str, str | None],
+) -> int:
+    raw_value: int | str | None = (
+        cli_value
+        if cli_value is not None
+        else env.get(DEEPEVAL_CASE_CONCURRENCY_ENV_VAR)
+    )
+    if raw_value is None:
+        return _DEFAULT_DEEPEVAL_CASE_CONCURRENCY
+    return _coerce_positive_int(
+        raw_value,
+        setting_name=DEEPEVAL_CASE_CONCURRENCY_ENV_VAR,
+    )
+
+
+def _coerce_positive_int(value: int | str, *, setting_name: str) -> int:
+    if type(value) is int:
+        parsed = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError(f"{setting_name} must be a positive integer.")
+        try:
+            parsed = int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"{setting_name} must be a positive integer; got {value!r}."
+            ) from exc
+    else:
+        raise ValueError(f"{setting_name} must be a positive integer; got {value!r}.")
+
+    if parsed <= 0:
+        raise ValueError(f"{setting_name} must be a positive integer; got {value!r}.")
+    return parsed
+
+
+def bounded_deepeval_case_workers(
+    configured_concurrency: int,
+    *,
+    case_count: int,
+) -> int:
+    if configured_concurrency <= 0:
+        raise ValueError("configured_concurrency must be a positive integer.")
+    if case_count < 0:
+        raise ValueError("case_count must be non-negative.")
+    if case_count == 0:
+        return 0
+    return min(configured_concurrency, case_count)
+
+
+def run_deepeval_cases_concurrently(
+    cases: Sequence[RagEvalCase],
+    *,
+    configured_concurrency: int,
+    evaluate_case: Callable[[RagEvalCase], dict[str, Any]],
+) -> list[EvalCaseRunResult]:
+    worker_count = bounded_deepeval_case_workers(
+        configured_concurrency,
+        case_count=len(cases),
+    )
+    if worker_count == 0:
+        return []
+
+    results: list[EvalCaseRunResult | None] = [None] * len(cases)
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_index = {
+            executor.submit(evaluate_case, case): index
+            for index, case in enumerate(cases)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            case = cases[index]
+            try:
+                snapshot = future.result()
+            except Exception as exc:
+                results[index] = EvalCaseRunResult(
+                    case_name=case.name,
+                    snapshot=eval_case_failure_snapshot(exc),
+                    failure_type=exc.__class__.__name__,
+                    failure_message=str(exc),
+                )
+            else:
+                results[index] = EvalCaseRunResult(
+                    case_name=case.name,
+                    snapshot=snapshot,
+                )
+
+    return [result for result in results if result is not None]
+
+
+def attach_eval_case_failure_snapshot(
+    exc: Exception,
+    snapshot: dict[str, Any],
+) -> None:
+    setattr(exc, _EVAL_CASE_FAILURE_SNAPSHOT_ATTR, snapshot)
+
+
+def eval_case_failure_snapshot(exc: Exception) -> dict[str, Any] | None:
+    snapshot = getattr(exc, _EVAL_CASE_FAILURE_SNAPSHOT_ATTR, None)
+    return snapshot if isinstance(snapshot, dict) else None
+
+
 def build_eval_query_payload(
     case: _EvalQueryCase,
     *,
@@ -340,6 +461,19 @@ def build_triad_metrics(model: str | DeepEvalBaseLLM) -> list:
     ]
 
 
+def build_discorag_triad_metrics(model: str | DeepEvalBaseLLM) -> list:
+    """DiscoRAG referenceless metrics: AnswerRelevancy + Faithfulness."""
+    from deepeval.metrics import (
+        AnswerRelevancyMetric,
+        FaithfulnessMetric,
+    )
+
+    return [
+        AnswerRelevancyMetric(model=model),
+        FaithfulnessMetric(model=model),
+    ]
+
+
 def build_reference_based_metrics(model: str | DeepEvalBaseLLM) -> list:
     """Reference-based retrieval metrics: ContextualPrecision + ContextualRecall."""
     from deepeval.metrics import (
@@ -356,9 +490,15 @@ def build_reference_based_metrics(model: str | DeepEvalBaseLLM) -> list:
 def build_metrics_for_case(
     case: RagEvalCase,
     model: str | DeepEvalBaseLLM,
+    *,
+    query_mode: EvalQueryMode = "standard",
 ) -> list:
-    """Return triad metrics, plus reference-based metrics if case has expected_output."""
-    metrics = build_triad_metrics(model)
+    """Return query-mode-specific RAG metrics for a single eval case."""
+    metrics = (
+        build_discorag_triad_metrics(model)
+        if query_mode == "discorag"
+        else build_triad_metrics(model)
+    )
     if case.has_reference:
         metrics.extend(build_reference_based_metrics(model))
     return metrics

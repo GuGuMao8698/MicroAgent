@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -8,15 +9,21 @@ pytest.importorskip("deepeval")
 
 from deepeval.test_case import LLMTestCase  # noqa: E402
 from eval_support import (  # noqa: E402
+    DEEPEVAL_CASE_CONCURRENCY_ENV_VAR,
     RAG_EVAL_CASES,
     RagEvalCase,
     _case_from_golden_payload,
+    attach_eval_case_failure_snapshot,
+    bounded_deepeval_case_workers,
     build_deepeval_judge_model,
     build_metrics_for_case,
     build_rag_test_case,
     build_reference_based_metrics,
     build_triad_metrics,
     ensure_rag_eval_cases_use_markdown_fixtures,
+    eval_case_failure_snapshot,
+    resolve_deepeval_case_concurrency,
+    run_deepeval_cases_concurrently,
 )
 
 _JUDGE_MODEL_ENV = {
@@ -36,6 +43,223 @@ def _build_judge_model():
 
 def _metric_names(metrics: list[object]) -> list[str]:
     return [metric.__class__.__name__ for metric in metrics]
+
+
+def _runner_case(name: str) -> RagEvalCase:
+    return RagEvalCase(
+        name=name,
+        document_fixture="sample.md",
+        question=f"{name} question",
+    )
+
+
+def test_resolve_deepeval_case_concurrency_defaults_to_twenty() -> None:
+    assert resolve_deepeval_case_concurrency(None, {}) == 20
+
+
+def test_resolve_deepeval_case_concurrency_prefers_cli_value() -> None:
+    assert (
+        resolve_deepeval_case_concurrency(
+            7,
+            {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: "11"},
+        )
+        == 7
+    )
+
+
+def test_resolve_deepeval_case_concurrency_uses_env_fallback() -> None:
+    assert (
+        resolve_deepeval_case_concurrency(
+            None,
+            {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: "13"},
+        )
+        == 13
+    )
+
+
+@pytest.mark.parametrize(
+    ("cli_value", "env"),
+    [
+        (0, {}),
+        (-1, {}),
+        ("", {}),
+        ("not-an-int", {}),
+        (None, {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: ""}),
+        (None, {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: "0"}),
+        (None, {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: "-3"}),
+        (None, {DEEPEVAL_CASE_CONCURRENCY_ENV_VAR: "not-an-int"}),
+    ],
+)
+def test_resolve_deepeval_case_concurrency_rejects_invalid_values(
+    cli_value: int | str | None,
+    env: dict[str, str],
+) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        resolve_deepeval_case_concurrency(cli_value, env)
+
+
+def test_bounded_deepeval_case_workers_caps_configured_concurrency() -> None:
+    assert bounded_deepeval_case_workers(20, case_count=3) == 3
+    assert bounded_deepeval_case_workers(5, case_count=20) == 5
+    assert bounded_deepeval_case_workers(20, case_count=0) == 0
+
+
+def test_run_deepeval_cases_concurrently_preserves_input_order() -> None:
+    cases = [
+        _runner_case("slow"),
+        _runner_case("fast"),
+        _runner_case("middle"),
+    ]
+
+    def evaluate_case(case: RagEvalCase) -> dict[str, object]:
+        delays = {"slow": 0.03, "fast": 0.0, "middle": 0.01}
+        time.sleep(delays[case.name])
+        return {"case": case.name}
+
+    results = run_deepeval_cases_concurrently(
+        cases,
+        configured_concurrency=3,
+        evaluate_case=evaluate_case,
+    )
+
+    assert [result.case_name for result in results] == ["slow", "fast", "middle"]
+    assert [result.snapshot for result in results] == [
+        {"case": "slow"},
+        {"case": "fast"},
+        {"case": "middle"},
+    ]
+    assert [result.failed for result in results] == [False, False, False]
+
+
+def test_run_deepeval_cases_concurrently_records_multiple_failures() -> None:
+    cases = [
+        _runner_case("first"),
+        _runner_case("second"),
+        _runner_case("third"),
+    ]
+
+    def evaluate_case(case: RagEvalCase) -> dict[str, object]:
+        if case.name in {"first", "third"}:
+            raise AssertionError(f"{case.name} failed")
+        return {"case": case.name}
+
+    results = run_deepeval_cases_concurrently(
+        cases,
+        configured_concurrency=3,
+        evaluate_case=evaluate_case,
+    )
+
+    failures = [result for result in results if result.failed]
+
+    assert [result.case_name for result in results] == ["first", "second", "third"]
+    assert [(failure.case_name, failure.failure_type) for failure in failures] == [
+        ("first", "AssertionError"),
+        ("third", "AssertionError"),
+    ]
+    assert [failure.failure_message for failure in failures] == [
+        "first failed",
+        "third failed",
+    ]
+    assert results[1].snapshot == {"case": "second"}
+
+
+def test_run_deepeval_cases_concurrently_preserves_failure_snapshot() -> None:
+    cases = [_runner_case("scored-failure")]
+    snapshot = {
+        "case": "scored-failure",
+        "metrics": {
+            "AnswerRelevancyMetric": {
+                "score": 0.4,
+                "reason": "below threshold",
+            }
+        },
+    }
+
+    def evaluate_case(case: RagEvalCase) -> dict[str, object]:
+        exc = AssertionError(f"{case.name} failed")
+        attach_eval_case_failure_snapshot(exc, snapshot)
+        raise exc
+
+    results = run_deepeval_cases_concurrently(
+        cases,
+        configured_concurrency=1,
+        evaluate_case=evaluate_case,
+    )
+
+    assert len(results) == 1
+    assert results[0].case_name == "scored-failure"
+    assert results[0].failed is True
+    assert results[0].snapshot == snapshot
+    assert results[0].failure_type == "AssertionError"
+    assert results[0].failure_message == "scored-failure failed"
+
+
+def test_evaluate_rag_case_preserves_metrics_after_assertion_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import test_rag_deepeval
+
+    class FakeResponse:
+        status_code = 200
+        text = "ok"
+
+        def json(self) -> dict[str, object]:
+            return {
+                "answer": "A populated answer.",
+                "contexts": [
+                    {
+                        "document_id": "doc-1",
+                        "text": "Source context",
+                        "metadata": {"filename": "source.md"},
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def post(self, path: str, *, json: dict[str, object]) -> FakeResponse:
+            assert path == "/api/v0/queries"
+            assert json["mode"] == "discorag"
+            return FakeResponse()
+
+    class PopulatedMetric:
+        score: float | None = None
+        reason: str | None = None
+
+    metric = PopulatedMetric()
+
+    def fake_build_metrics_for_case(*args: object, **kwargs: object) -> list[object]:
+        return [metric]
+
+    def fake_assert_test(*args: object, **kwargs: object) -> None:
+        metric.score = 0.42
+        metric.reason = "judge populated before failure"
+        raise AssertionError("metric threshold failed")
+
+    monkeypatch.setattr(
+        test_rag_deepeval,
+        "build_metrics_for_case",
+        fake_build_metrics_for_case,
+    )
+    monkeypatch.setattr(test_rag_deepeval, "assert_test", fake_assert_test)
+
+    with pytest.raises(AssertionError, match="metric threshold failed") as exc_info:
+        test_rag_deepeval._evaluate_rag_case(
+            client=FakeClient(),
+            case=_runner_case("scored-failure"),
+            query_mode="discorag",
+            judge_model=object(),
+        )
+
+    snapshot = eval_case_failure_snapshot(exc_info.value)
+
+    assert snapshot is not None
+    assert snapshot["case"] == "scored-failure"
+    assert snapshot["metrics"] == {
+        "PopulatedMetric": {
+            "score": 0.42,
+            "reason": "judge populated before failure",
+        }
+    }
 
 
 def test_build_rag_test_case_with_expected_output() -> None:
@@ -145,7 +369,7 @@ def test_build_metrics_for_case_returns_triad_only_when_no_reference() -> None:
     ]
 
 
-def test_build_metrics_for_case_returns_all_five_when_has_reference() -> None:
+def test_build_metrics_for_case_returns_all_five_for_standard_reference_case() -> None:
     judge_model = _build_judge_model()
     case = RagEvalCase(
         name="with-ref",
@@ -154,13 +378,64 @@ def test_build_metrics_for_case_returns_all_five_when_has_reference() -> None:
         expected_output="reference answer",
     )
 
-    metrics = build_metrics_for_case(case, model=judge_model)
+    metrics = build_metrics_for_case(
+        case,
+        model=judge_model,
+        query_mode="standard",
+    )
     assert _metric_names(metrics) == [
         "AnswerRelevancyMetric",
         "FaithfulnessMetric",
         "ContextualRelevancyMetric",
         "ContextualPrecisionMetric",
         "ContextualRecallMetric",
+    ]
+
+
+def test_build_metrics_for_case_omits_contextual_relevancy_for_discorag_reference_case() -> (
+    None
+):
+    judge_model = _build_judge_model()
+    case = RagEvalCase(
+        name="with-ref",
+        document_fixture="sample.txt",
+        question="test",
+        expected_output="reference answer",
+    )
+
+    metrics = build_metrics_for_case(
+        case,
+        model=judge_model,
+        query_mode="discorag",
+    )
+
+    assert _metric_names(metrics) == [
+        "AnswerRelevancyMetric",
+        "FaithfulnessMetric",
+        "ContextualPrecisionMetric",
+        "ContextualRecallMetric",
+    ]
+
+
+def test_build_metrics_for_case_omits_contextual_relevancy_for_discorag_no_reference_case() -> (
+    None
+):
+    judge_model = _build_judge_model()
+    case = RagEvalCase(
+        name="no-ref",
+        document_fixture="sample.md",
+        question="test",
+    )
+
+    metrics = build_metrics_for_case(
+        case,
+        model=judge_model,
+        query_mode="discorag",
+    )
+
+    assert _metric_names(metrics) == [
+        "AnswerRelevancyMetric",
+        "FaithfulnessMetric",
     ]
 
 
