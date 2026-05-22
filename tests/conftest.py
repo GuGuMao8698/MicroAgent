@@ -61,6 +61,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "RAGFLOW_LITE_EVAL_QUERY_MODE when the option is omitted"
         ),
     )
+    parser.addoption(
+        "--deepeval-case-concurrency",
+        type=int,
+        default=None,
+        help=(
+            "maximum concurrent golden cases for deepeval RAG evaluation runs; "
+            "defaults to RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY or 20"
+        ),
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:

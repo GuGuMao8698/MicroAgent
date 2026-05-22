@@ -16,6 +16,25 @@ Eval-specific contracts. Navigation lives in [AGENTS.md](./AGENTS.md).
 - Query mode is run-level metadata. It must not be added to `RagEvalCase` or the golden fixture schema.
 - The eval request body sent to `/api/v0/queries` includes `mode`.
 
+## Metric policy
+
+- `standard` uses the full RAG metric set: `Answer Relevancy`, `Faithfulness`, `Contextual Relevancy`, `Contextual Precision`, and `Contextual Recall`.
+- `discorag` omits `Contextual Relevancy` because DiscoRAG returns a blueprint-shaped answer-planning context, not a traditional retrieval-only context.
+- `discorag` still uses `Answer Relevancy`, `Faithfulness`, `Contextual Precision`, and `Contextual Recall` as blocking metrics.
+- This is a query-mode policy, not a per-run skip flag. Do not add a separate CLI option for this behavior.
+
+## Case concurrency
+
+- The live DeepEval test uploads the shared fixture corpus before starting concurrent case evaluation.
+- Golden cases run with bounded case-level concurrency.
+- Default case concurrency is `20`.
+- Preferred selector: `--deepeval-case-concurrency <N>`.
+- Fallback selector when a DeepEval CLI version does not forward custom pytest options: `RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY`.
+- The explicit pytest option wins over the environment fallback.
+- Concurrency is per golden case. Each case keeps the internal order: query, build DeepEval test case, build metrics, run metrics, build snapshot.
+- The concurrent runner does not fail fast. It summarizes all failed cases after the started case evaluations finish.
+- Case concurrency is implemented inside a single test invocation; pytest-xdist behavior is outside this contract.
+
 ## Environment validation
 
 `validate_deepeval_env` (eval_support.py) checks that these env vars are set and not placeholder values:
