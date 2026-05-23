@@ -12,6 +12,7 @@ pytest.importorskip("deepeval")
 
 from deepeval.dataset import Golden  # noqa: E402
 from deepeval.metrics.utils import initialize_model  # noqa: E402
+from evals import private_bootstrap_eval_corpus as eval_corpus_module  # noqa: E402
 from evals.cleanup_infinity import select_eval_cleanup_tables  # noqa: E402
 from evals.eval_models import DeepSeekChatDeepEvalModel  # noqa: E402
 from evals.generate_goldens import (
@@ -34,6 +35,15 @@ from evals.optimize_prompt import (  # noqa: E402
     load_goldens,
     main,
     validate_goldens,
+)
+from evals.private_bootstrap_eval_corpus import (  # noqa: E402
+    PRIVATE_BOOTSTRAP_CORPUS_NAME,
+    PRIVATE_BOOTSTRAP_EVAL_TABLES,
+    PRIVATE_BOOTSTRAP_SNAPSHOT_ROOT,
+    build_private_bootstrap_corpus_manifest,
+    fixed_private_bootstrap_table_names,
+    hash_snapshot_manifest,
+    validate_private_bootstrap_corpus_manifest,
 )
 from evals.private_bootstrap_goldens import (  # noqa: E402
     AUTHORITY_RULE,
@@ -613,6 +623,148 @@ def test_private_bootstrap_checked_in_draft_has_expected_case_distribution() -> 
 
     assert len(payload) == sum(EXPECTED_CASE_COUNTS.values())
     assert counts == dict(EXPECTED_CASE_COUNTS)
+
+
+def test_private_bootstrap_eval_tables_are_fixed() -> None:
+    assert PRIVATE_BOOTSTRAP_CORPUS_NAME == "private-bootstrap"
+    assert PRIVATE_BOOTSTRAP_EVAL_TABLES == {
+        "documents": "eval_private_bootstrap_documents",
+        "chunks": "eval_private_bootstrap_chunks",
+        "datasets": "eval_private_bootstrap_documents_datasets",
+        "dataset_bindings": "eval_private_bootstrap_documents_dataset_bindings",
+        "graph_entities": "eval_private_bootstrap_graph_entities",
+        "graph_relationships": "eval_private_bootstrap_graph_relationships",
+    }
+    assert fixed_private_bootstrap_table_names() == [
+        "eval_private_bootstrap_documents",
+        "eval_private_bootstrap_chunks",
+        "eval_private_bootstrap_documents_datasets",
+        "eval_private_bootstrap_documents_dataset_bindings",
+        "eval_private_bootstrap_graph_entities",
+        "eval_private_bootstrap_graph_relationships",
+    ]
+
+
+def test_private_bootstrap_eval_manifest_records_snapshot_identity(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    entry = {
+        "original_path": "a.md",
+        "snapshot_path": "a.md",
+        "role": "authoritative",
+        "topic": "test",
+        "status": "active",
+        "sha256": "0" * 64,
+    }
+    (snapshot / "manifest.json").write_text(
+        json.dumps(
+            {
+                "entries": [
+                    entry,
+                    {**entry, "original_path": "b.md", "snapshot_path": "b.md"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = build_private_bootstrap_corpus_manifest(
+        snapshot_root=snapshot,
+        embedding_model="ep-test",
+    )
+
+    assert manifest["corpus"] == "private-bootstrap"
+    assert manifest["document_count"] == 2
+    assert manifest["embedding_model"] == "ep-test"
+    assert manifest["snapshot_manifest_sha256"] == hash_snapshot_manifest(snapshot)
+    assert manifest["tables"] == PRIVATE_BOOTSTRAP_EVAL_TABLES
+
+
+def test_private_bootstrap_eval_manifest_validation_rejects_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "manifest.json").write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "original_path": "a.md",
+                        "snapshot_path": "a.md",
+                        "role": "authoritative",
+                        "topic": "test",
+                        "status": "active",
+                        "sha256": "0" * 64,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = build_private_bootstrap_corpus_manifest(
+        snapshot_root=snapshot,
+        embedding_model="ep-old",
+    )
+
+    with pytest.raises(RuntimeError, match="embedding model"):
+        validate_private_bootstrap_corpus_manifest(
+            manifest,
+            snapshot_root=snapshot,
+            embedding_model="ep-current",
+        )
+
+    stale_manifest = {**manifest, "snapshot_manifest_sha256": "bad"}
+    with pytest.raises(RuntimeError, match="snapshot manifest hash"):
+        validate_private_bootstrap_corpus_manifest(
+            stale_manifest,
+            snapshot_root=snapshot,
+            embedding_model="ep-old",
+        )
+
+
+def test_private_bootstrap_rebuild_rejects_unsafe_snapshot_before_drop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = tmp_path / "outside-snapshot"
+    snapshot.mkdir()
+    (snapshot / "manifest.json").write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "original_path": "a.md",
+                        "snapshot_path": "a.md",
+                        "role": "authoritative",
+                        "topic": "test",
+                        "status": "active",
+                        "sha256": "0" * 64,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(_settings: object) -> None:
+        raise AssertionError("_drop_fixed_tables should not run for invalid snapshots")
+
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test")
+    monkeypatch.setattr(eval_corpus_module, "_drop_fixed_tables", fail_if_called)
+
+    with pytest.raises(RuntimeError, match="tests/fixtures/documents"):
+        eval_corpus_module.rebuild_private_bootstrap_eval_corpus(snapshot_root=snapshot)
+
+
+def test_private_bootstrap_normalizes_relative_snapshot_path() -> None:
+    normalized = eval_corpus_module._normalize_snapshot_root(
+        Path("tests/fixtures/documents/microrag-private-bootstrap-snapshot")
+    )
+
+    assert normalized == PRIVATE_BOOTSTRAP_SNAPSHOT_ROOT.resolve()
 
 
 def test_private_bootstrap_validation_accepts_manifest_sources() -> None:

@@ -20,6 +20,7 @@ if str(EVALS_PATH) not in sys.path:
     sys.path.insert(0, str(EVALS_PATH))
 
 from eval_support import EVAL_QUERY_MODES, validate_deepeval_env
+from evals.private_bootstrap_eval_corpus import assign_private_bootstrap_eval_tables
 from helpers.local_env import load_export_env_file
 from infinity_test_support import (
     assign_isolated_infinity_tables,
@@ -27,13 +28,6 @@ from infinity_test_support import (
     drop_registered_infinity_tables,
     register_infinity_table_cleanup,
 )
-
-_PRIVATE_BOOTSTRAP_EVAL_TABLES = {
-    "infinity_document_table": "eval_private_bootstrap_documents",
-    "infinity_chunk_table": "eval_private_bootstrap_chunks",
-    "infinity_graph_entity_table": "eval_private_bootstrap_graph_entities",
-    "infinity_graph_relationship_table": "eval_private_bootstrap_graph_relationships",
-}
 
 
 class _PytestOptionConfig(Protocol):
@@ -195,9 +189,7 @@ def _configure_infinity_tables_for_test_settings(
     run_deepeval = request.config.getoption("--run-deepeval")
     corpus_mode = request.config.getoption("--deepeval-corpus-mode")
     if run_deepeval and corpus_mode == "reuse":
-        for field_name, table_name in _PRIVATE_BOOTSTRAP_EVAL_TABLES.items():
-            setattr(settings, field_name, table_name)
-        return settings
+        return assign_private_bootstrap_eval_tables(settings)
 
     assign_isolated_infinity_tables(settings, tmp_path)
     register_infinity_table_cleanup(settings)
