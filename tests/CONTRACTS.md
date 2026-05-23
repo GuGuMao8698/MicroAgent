@@ -47,7 +47,7 @@ conftest.py `_set_deepeval_plain_prompt_variant` monkeypatches `RAGFLOW_LITE_OPE
 
 ## Scoped app settings and client fixtures
 
-- `app_settings` (conftest.py): creates `Settings` with `tmp_path`, calls `assign_isolated_infinity_tables`, `register_infinity_table_cleanup`, `ensure_directories`.
+- `app_settings` (conftest.py): creates `Settings` with `tmp_path`. Normal tests and DeepEval `fresh` mode call `assign_isolated_infinity_tables` and `register_infinity_table_cleanup`. DeepEval `reuse` mode assigns fixed private-bootstrap eval tables and does not register them for cleanup.
 - `app`: `create_app(app_settings)`, installs fake DeepSeek JSON clients.
 - `client`: `TestClient(app)`, installs fake query support clients.
 
@@ -57,7 +57,7 @@ Source: [infinity_test_support.py](infinity_test_support.py).
 
 - `assign_isolated_infinity_tables(settings, tmp_path)`: uses `tmp_path` hash for table name suffix (6 tables per settings).
 - `register_infinity_table_cleanup(settings)`: registers settings + table names for session-end cleanup.
-- `drop_registered_infinity_tables()`: drops all registered tables (called in `pytest_sessionfinish` when `run_live_infinity` or `run_deepeval`).
+- `drop_registered_infinity_tables()`: drops all registered isolated tables (called in `pytest_sessionfinish` when `run_live_infinity` or `run_deepeval`).
 - `clear_registered_infinity_tables()`: clears registrations without dropping (called in `pytest_sessionfinish` when no live gate).
 - `_LIVE_TABLE_PREFIXES`: `("documents_", "chunks_", "graph_entities_", "graph_relationships_")`.
 
@@ -66,6 +66,7 @@ Source: [infinity_test_support.py](infinity_test_support.py).
 `pytest_sessionfinish` (conftest.py):
 - If `run_live_infinity` or `run_deepeval`: calls `drop_registered_infinity_tables()`.
 - Otherwise: calls `clear_registered_infinity_tables()`.
+- Session cleanup drops only registered isolated tables. Reusable private-bootstrap eval tables are intentionally not registered.
 
 ## Placeholder detection
 
