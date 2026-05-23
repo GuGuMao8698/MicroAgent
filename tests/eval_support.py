@@ -34,6 +34,7 @@ _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
 _WHITESPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
 _MULTI_SPACE_RE = re.compile(r"\s{2,}")
 _EVAL_CASE_FAILURE_SNAPSHOT_ATTR = "_rag_eval_failure_snapshot"
+_ALLOWED_ANSWERABILITY_VALUES = frozenset({"answerable", "unanswerable"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,10 @@ class RagEvalCase:
     @property
     def has_reference(self) -> bool:
         return self.expected_output is not None
+
+    @property
+    def uses_reference_based_metrics(self) -> bool:
+        return self.has_reference and self.answerability != "unanswerable"
 
     @property
     def uses_corpus_fixture(self) -> bool:
@@ -165,8 +170,10 @@ def _case_from_golden_payload(item: Any, *, index: int) -> RagEvalCase:
                 index=index,
             )
         ),
-        answerability=_coerce_optional_string(additional_metadata.get("answerability"))
-        or "answerable",
+        answerability=_normalize_answerability(
+            additional_metadata.get("answerability"),
+            index=index,
+        ),
     )
 
 
@@ -186,6 +193,22 @@ def _coerce_optional_string(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _normalize_answerability(value: Any, *, index: int) -> str:
+    raw_value = _coerce_optional_string(value)
+    if raw_value is None:
+        return "answerable"
+
+    normalized = raw_value.lower()
+    if normalized in _ALLOWED_ANSWERABILITY_VALUES:
+        return normalized
+
+    allowed = ", ".join(sorted(_ALLOWED_ANSWERABILITY_VALUES))
+    raise RuntimeError(
+        f"deepeval golden payload #{index} additionalMetadata.answerability "
+        f"must be one of: {allowed}."
+    )
 
 
 def _coerce_string_sequence(
@@ -499,6 +522,6 @@ def build_metrics_for_case(
         if query_mode == "discorag"
         else build_triad_metrics(model)
     )
-    if case.has_reference:
+    if case.uses_reference_based_metrics:
         metrics.extend(build_reference_based_metrics(model))
     return metrics

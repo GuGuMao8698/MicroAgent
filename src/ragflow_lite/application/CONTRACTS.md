@@ -6,33 +6,22 @@ contracts.
 
 ## DiscoRAG Structural Pipeline Contract
 
-Reviewed at: `2026-05-09T21:00:00+08:00`
+Reviewed at: `2026-05-22T16:54:51+08:00`
 Status: Active
 Owner: `DiscoRAGQueryService`, `LLMDiscoRAGAnswerBlueprintBuilder`
 
 Source of truth:
-- Inter-chunk discourse graph is LLM-backed (listwise inference), no deterministic fallback.
-- `LLMInterChunkDiscourseGraphBuilder` replaces the former `DeterministicInterChunkDiscourseGraphBuilder`.
-- Paper relation set: 21 labels including `unrelated`; 20 non-`unrelated` labels materialize as graph edges.
-- `unrelated` is parsed and dropped, never materialized as `InterChunkDiscourseRelation`.
-- Graph builder consumes `IntraChunkDiscoursePackage` via the `InterChunkDiscourseGraphBuilder` port (sync).
-- Structurer model is configured independently from answer model via `DiscoRAGStructurerRuntimeConfig`.
-- Blueprint planner is LLM-backed via `LLMDiscoRAGAnswerBlueprintBuilder`. `DiscoRAGAnswerBlueprintBuilder` is retained only as a test stub.
+- `DiscoRAGQueryService` orchestrates MiniRAG retrieval, RST extraction, inter-chunk graph construction, blueprint planning, and answer assembly.
+- Runtime structurer collaborators are LLM-backed; application services do not provide deterministic graph or blueprint planner fallbacks.
+- Detailed planner/parser semantics live in [../infrastructure/evidence/CONTRACTS.md](../infrastructure/evidence/CONTRACTS.md).
 
 Invariant:
-- Validation failure (unparseable JSON, all relations invalid) must raise `ProcessingError`, not silently return an empty or deterministic graph.
-- Single invalid relations are dropped; per-category drop counts are observable in graph metadata.
-- LLM model/provider metadata is observable in `graph.metadata["llm"]`.
-- Blueprint maps 20 materialized labels to planning semantics: conflict (`contradicts`, `contrasts_with`, `replaces`), support (`supports`, `justifies`), background (`background_for`), elaboration (`elaborates`, `supplements`, `specifies`, `exemplifies`).
-- Promotion triggers: `contradicts`, `contrasts_with`, `replaces`. `qualifies` is not in the paper set and no longer triggers promotion.
-- RST signals (nuclearity, planning_role, rst_relation) influence blueprint constraints and lead selection when compatible with graph-derived ordering.
-- Blueprint planner validation failure raises `ProcessingError`; no deterministic blueprint fallback in runtime.
+- Upstream graph/blueprint validation failures propagate as `ProcessingError`; application services must not silently replace them with empty or deterministic planner outputs.
 - Answerer blueprint fallback (missing/invalid blueprint → score ordering) is a defensive last line with observable reason (`missing_blueprint`, `invalid_blueprint`). It is NOT a planner fallback; partially invalid blueprints (containing unknown chunk IDs) are treated as invalid.
+- `_blueprint_for_contexts()` remains a hard runtime invariant; complete final-context coverage failures should normally be rejected earlier by `parse_llm_discorag_blueprint()`.
 
 Forbidden stale interpretations:
-- Do not retain or reintroduce `DeterministicInterChunkDiscourseGraphBuilder` as runtime fallback.
-- Do not reintroduce `DiscoRAGAnswerBlueprintBuilder` as runtime planner (test-only stub).
-- Do not treat `qualifies` as a valid inter-chunk relation label for promotion or constraints.
+- Do not document evidence-layer parser, label, promotion-trigger, or RST-planning semantics here; keep them in [../infrastructure/evidence/CONTRACTS.md](../infrastructure/evidence/CONTRACTS.md).
 - Do not treat `chunk_token_budget` or `context_token_budget` as required DiscoRAG behavior.
 - Do not use [docs/superpowers/plans](../../../docs/superpowers/plans) or [docs/superpowers/specs](../../../docs/superpowers/specs) as active runtime contracts.
 

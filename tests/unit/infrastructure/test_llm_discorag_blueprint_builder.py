@@ -712,6 +712,37 @@ def test_prompt_instructions_contain_role_and_constraint_vocab() -> None:
     assert "ordering" in instructions
 
 
+def test_prompt_complete_context_ordering_instructions_and_input() -> None:
+    item_a = _evidence_item("chunk_a", "Text A.", order=0, selected_for_answer=True)
+    item_b = _evidence_item("chunk_b", "Text B.", order=1, selected_for_answer=True)
+    package = _package(item_a, item_b, source_selection={"final_context_k": 5})
+
+    client = _FakeClient(
+        _valid_blueprint_json(
+            final_ids=["chunk_a", "chunk_b"],
+            chunk_roles={"chunk_a": "lead", "chunk_b": "support"},
+        )
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client)
+    builder.build(package)
+
+    instructions = client.calls[0]["instructions"]
+    input_text = client.calls[0]["input_text"]
+    assert "final_answer_chunk_ids" in instructions
+    assert "all final answer contexts" in instructions
+    assert "not a subset" in instructions
+    assert "answer candidate" in instructions
+    assert "valid promotion" in instructions
+    assert "background" in instructions
+    assert "context" in instructions
+    assert "validation repair" in instructions
+    assert "complete JSON object" in instructions
+    assert "patch" in instructions
+    assert "top_k is a hard parser guardrail" in instructions
+    assert "do not drop required answer candidates" in instructions
+    assert "answer_candidate_ids: ['chunk_a', 'chunk_b']" in input_text
+
+
 def test_prompt_no_inter_chunk_section_when_graph_is_none() -> None:
     item_a = _evidence_item("chunk_a", "Text.", order=0, selected_for_answer=True)
     package = _package(item_a, source_selection={"final_context_k": 5})
@@ -931,6 +962,90 @@ def test_blueprint_builder_repairs_validation_error_with_multiturn_messages() ->
     assert "chunk_roles" in messages[3]["content"]
     assert "query:" not in messages[3]["content"]
     assert "Do not output a patch" in messages[3]["content"]
+
+
+def test_blueprint_builder_repairs_missing_final_context_ids() -> None:
+    client = _FakeClient(
+        responses=[
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a"],
+                    "chunk_roles": {"chunk_a": "lead"},
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a", "chunk_b"],
+                    "chunk_roles": {"chunk_a": "lead", "chunk_b": "support"},
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(
+        client=client,
+        timeout_seconds=90,
+        max_attempts=2,
+    )
+
+    blueprint = builder.build(_package_with_two_answer_chunks(), graph=_graph())
+
+    assert blueprint.ordered_chunk_ids == ["chunk_a", "chunk_b"]
+    assert len(client.calls) == 2
+    repair_call = client.calls[1]
+    assert repair_call.get("messages") is not None
+    messages = repair_call["messages"]
+    assert messages[2]["role"] == "assistant"
+    assert '"final_answer_chunk_ids": ["chunk_a"]' in messages[2]["content"]
+    feedback = messages[3]["content"]
+    assert "missing_final_context_ids=['chunk_b']" in feedback
+    assert "expected_final_context_ids=['chunk_a', 'chunk_b']" in feedback
+    assert "actual_final_answer_chunk_ids=['chunk_a']" in feedback
+    assert "complete JSON object" in feedback
+    assert "patch" in feedback
+
+
+def test_prompt_validation_repair_instruction_applies_to_semantic_failures() -> None:
+    item_a = _evidence_item("chunk_a", "Text A.", order=0, selected_for_answer=True)
+    item_b = _evidence_item("chunk_b", "Text B.", order=1, selected_for_answer=True)
+    package = _package(item_a, item_b, source_selection={"final_context_k": 5})
+
+    client = _FakeClient(
+        responses=[
+            json.dumps(
+                {
+                    "final_answer_chunk_ids": ["chunk_a"],
+                    "chunk_roles": {"chunk_a": "lead"},
+                    "promotions": [],
+                    "answer_constraints": [],
+                    "plan_steps": [],
+                    "metadata": {},
+                }
+            ),
+            _valid_blueprint_json(
+                final_ids=["chunk_a", "chunk_b"],
+                chunk_roles={"chunk_a": "lead", "chunk_b": "background"},
+            ),
+        ]
+    )
+    builder = LLMDiscoRAGAnswerBlueprintBuilder(client=client, max_attempts=2)
+
+    builder.build(package)
+
+    feedback = client.calls[1]["messages"][3]["content"]
+    assert "Validation error:" in feedback
+    assert "missing_final_context_ids=['chunk_b']" in feedback
+    assert "expected_final_context_ids=['chunk_a', 'chunk_b']" in feedback
+    assert "actual_final_answer_chunk_ids=['chunk_a']" in feedback
+    assert "complete JSON object" in feedback
+    assert "patch" in feedback
 
 
 def test_blueprint_builder_raises_after_repair_attempts_exhausted() -> None:

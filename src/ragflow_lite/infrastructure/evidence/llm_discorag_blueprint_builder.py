@@ -74,11 +74,19 @@ Output a single JSON object with this shape:
 
 Rules:
 - final_answer_chunk_ids: ordered list of chunk IDs to include in the final \
-answer. Maximum count is the top_k budget provided. All IDs must come from \
-the answer candidates or be promoted from supplemental chunks.
+answer. This is the ordering of all final answer contexts, not a subset. \
+Include every answer candidate unless a valid promotion replaces it. All IDs \
+must come from the answer candidates or be promoted from supplemental chunks.
+- top_k is a hard parser guardrail. Normal builder input should already keep \
+answer candidates within that budget. If the provided answer candidates exceed \
+top_k, no valid blueprint can satisfy both full coverage and the budget, so do \
+not drop required answer candidates just to fit top_k.
 - chunk_roles: assign exactly one role per chunk in final_answer_chunk_ids.
   Valid roles: lead, support, background, caveat, comparison, definition, \
 condition, context.
+- Weak or background answer candidates are still kept in \
+final_answer_chunk_ids unless a valid promotion replaces them; assign those \
+chunks role background or context instead of dropping them.
 - promotions: a supplemental chunk may enter final_answer_chunk_ids ONLY via \
 a promotion that replaces an answer candidate. The replace_chunk_id must be an \
 answer candidate; the with_chunk_id must be a supplemental chunk. Promotions \
@@ -88,7 +96,9 @@ are replacement, not append — the replaced answer chunk is removed.
 definition, ordering.
   Reference relation IDs and RST unit IDs must exist in the input.
 - plan_steps: ordered reasoning steps for the answerer. Reference relation IDs \
-and RST unit IDs must exist in the input.
+  and RST unit IDs must exist in the input.
+- During validation repair, do not output a patch or partial diff; always \
+regenerate one complete JSON object with all required fields.
 - Do not output markdown, prose, or commentary outside the JSON object.
 """
 
@@ -333,6 +343,9 @@ def _build_input(
     """Build the user message with all discourse context."""
     sections: list[str] = [f"query: {query}"]
     sections.append(f"top_k budget: {top_k}")
+    sections.append(
+        f"answer_candidate_ids: {[item.canonical_chunk_id for item in answer_items]!r}"
+    )
 
     # Answer candidate chunks
     if answer_items:

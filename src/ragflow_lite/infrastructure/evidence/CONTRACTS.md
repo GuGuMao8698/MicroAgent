@@ -188,7 +188,7 @@ Verification:
 
 ## LLM DiscoRAG Blueprint Planner Contract
 
-Reviewed at: `2026-05-09T21:00:00+08:00`
+Reviewed at: `2026-05-22T16:48:56+08:00`
 Status: Active
 Owner: `LLMDiscoRAGAnswerBlueprintBuilder`, `parse_llm_discorag_blueprint`
 
@@ -203,7 +203,13 @@ Invariant:
 - No deterministic blueprint planner fallback. `DiscoRAGAnswerBlueprintBuilder` is retained only as a test stub; it is not wired in runtime providers.
 - Blueprint validation failure (unparseable JSON, unknown chunk/relation/RST IDs, budget overflow, invalid promotion) raises `ProcessingError`.
 - Promotions are strictly replacement (answer chunk out, supplemental chunk in); append is rejected.
+- `final_answer_chunk_ids` is the complete ordered final-answer context list after promotion replacement, not a selected-useful subset.
 - Supplemental chunks in `final_answer_chunk_ids` require a valid matching promotion.
+- Parser coverage is computed from builder/parser input `answer_chunk_ids` plus valid promotion replacements, never from model-authored coverage fields.
+- Non-promotion outputs must contain every answer candidate id exactly once.
+- Promotion outputs must contain the expected final ids after replacing answer ids with promoted supplemental ids; missing, unexpected, or duplicate final ids raise `ProcessingError` with diagnostic fields.
+- Missing final context ids use the existing validation-repair attempt path when attempts remain; there is no independent missing-id retry loop.
+- `top_k` remains a hard parser guardrail; builder input should already fit coverage plus budget, and parser must not silently drop ids to satisfy budget.
 - Role vocabulary: lead, support, background, caveat, comparison, definition, condition, context.
 - Constraint vocabulary: caveat, condition, conflict, comparison, support, background, definition, ordering.
 - Structurer model is configured via `DiscoRAGStructurerRuntimeConfig` (same config as graph builder, decoupled from answer model).
@@ -211,6 +217,7 @@ Invariant:
 Forbidden stale interpretations:
 - Do not reintroduce `DiscoRAGAnswerBlueprintBuilder` as runtime planner.
 - Do not treat `ProcessingError` from planner as a signal to downgrade to basic RAG.
+- Do not treat `final_answer_chunk_ids` as a free subset selector.
 - Do not use [docs/superpowers/plans](../../../../docs/superpowers/plans) or [docs/superpowers/specs](../../../../docs/superpowers/specs) as active runtime contracts.
 
 Verification:

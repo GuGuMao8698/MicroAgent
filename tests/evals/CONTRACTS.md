@@ -18,9 +18,11 @@ Eval-specific contracts. Navigation lives in [AGENTS.md](./AGENTS.md).
 
 ## Metric policy
 
-- `standard` uses the full RAG metric set: `Answer Relevancy`, `Faithfulness`, `Contextual Relevancy`, `Contextual Precision`, and `Contextual Recall`.
-- `discorag` omits `Contextual Relevancy` because DiscoRAG returns a blueprint-shaped answer-planning context, not a traditional retrieval-only context.
-- `discorag` still uses `Answer Relevancy`, `Faithfulness`, `Contextual Precision`, and `Contextual Recall` as blocking metrics.
+- Answerable cases with `expected_output` add the reference-based retrieval metrics: `Contextual Precision` and `Contextual Recall`.
+- `standard` base metrics are `Answer Relevancy`, `Faithfulness`, and `Contextual Relevancy`.
+- `discorag` base metrics are `Answer Relevancy` and `Faithfulness`; it omits `Contextual Relevancy` because DiscoRAG returns a blueprint-shaped answer-planning context, not a traditional retrieval-only context.
+- Golden `additionalMetadata.answerability` allows only `answerable` and `unanswerable`; missing/blank values default to `answerable`.
+- `answerability="unanswerable"` cases do not use `Contextual Precision` or `Contextual Recall` solely because they include an expected refusal answer.
 - This is a query-mode policy, not a per-run skip flag. Do not add a separate CLI option for this behavior.
 
 ## Case concurrency

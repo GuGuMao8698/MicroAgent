@@ -392,6 +392,73 @@ def test_build_metrics_for_case_returns_all_five_for_standard_reference_case() -
     ]
 
 
+def test_build_metrics_for_case_omits_reference_metrics_for_unanswerable_case() -> None:
+    judge_model = _build_judge_model()
+    case = RagEvalCase(
+        name="unanswerable-with-refusal",
+        document_fixture="sample.txt",
+        question="test",
+        expected_output="I cannot answer that from the available sources.",
+        answerability="unanswerable",
+    )
+
+    metrics = build_metrics_for_case(
+        case,
+        model=judge_model,
+        query_mode="standard",
+    )
+
+    assert _metric_names(metrics) == [
+        "AnswerRelevancyMetric",
+        "FaithfulnessMetric",
+        "ContextualRelevancyMetric",
+    ]
+
+
+def test_case_loader_normalizes_unanswerable_answerability_and_omits_reference_metrics() -> (
+    None
+):
+    payload = {
+        "name": "normalized-unanswerable",
+        "input": "test",
+        "expectedOutput": "I cannot answer that from the available sources.",
+        "sourceFile": "sample.txt",
+        "additionalMetadata": {
+            "answerability": " Unanswerable ",
+        },
+    }
+
+    case = _case_from_golden_payload(payload, index=1)
+
+    assert case.answerability == "unanswerable"
+
+    metrics = build_metrics_for_case(
+        case,
+        model=_build_judge_model(),
+        query_mode="standard",
+    )
+
+    assert _metric_names(metrics) == [
+        "AnswerRelevancyMetric",
+        "FaithfulnessMetric",
+        "ContextualRelevancyMetric",
+    ]
+
+
+def test_case_loader_rejects_invalid_answerability() -> None:
+    payload = {
+        "name": "invalid-answerability",
+        "input": "test",
+        "sourceFile": "sample.txt",
+        "additionalMetadata": {
+            "answerability": "maybe",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="answerability"):
+        _case_from_golden_payload(payload, index=1)
+
+
 def test_build_metrics_for_case_omits_contextual_relevancy_for_discorag_reference_case() -> (
     None
 ):

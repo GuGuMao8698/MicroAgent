@@ -117,9 +117,15 @@ def _blueprint_for_contexts(
         context.chunk_id for context in contexts if context.chunk_id not in ordered_set
     ]
     if missing_context_ids:
+        raw_promotions = blueprint.metadata.get("promotions")
+        raw_promoted_chunk_ids = blueprint.metadata.get("promoted_chunk_ids")
         raise ProcessingError(
             "Answer blueprint missing final context ids after promotion/filtering: "
-            f"{missing_context_ids!r}."
+            f"missing_context_ids={missing_context_ids!r}; "
+            f"final_context_ids={answer_context_chunk_ids!r}; "
+            f"blueprint_ordered_chunk_ids={blueprint.ordered_chunk_ids!r}; "
+            f"promoted_chunk_ids={raw_promoted_chunk_ids!r}; "
+            f"promotions={raw_promotions!r}."
         )
     chunk_roles = {
         chunk_id: role

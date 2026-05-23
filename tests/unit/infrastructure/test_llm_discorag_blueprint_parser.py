@@ -235,8 +235,14 @@ class TestEmptyChunkIdsWithCandidates:
 class TestDuplicateChunkIds:
     def test_duplicate_raises(self) -> None:
         payload = _valid_blueprint(final_ids=["chunk-a", "chunk-a"])
-        with pytest.raises(ProcessingError, match="Duplicate chunk ID"):
+        with pytest.raises(ProcessingError) as exc_info:
             _parse(payload)
+
+        message = str(exc_info.value)
+        assert "Duplicate chunk ID in 'final_answer_chunk_ids': 'chunk-a'" in message
+        assert "duplicate_final_context_ids=['chunk-a']" in message
+        assert "expected_final_context_ids=['chunk-a', 'chunk-b']" in message
+        assert "actual_final_answer_chunk_ids=['chunk-a', 'chunk-a']" in message
 
 
 # ── 5. Unknown chunk IDs ────────────────────────────────────────────────────
@@ -651,25 +657,6 @@ class TestPromotionReplacementSemantics:
         ):
             _parse(payload)
 
-    def test_with_chunk_id_not_in_final_raises(self) -> None:
-        """Promotion declares replacement but supplemental chunk is missing
-        from final list."""
-        payload = _valid_blueprint(
-            final_ids=["chunk-a"],
-            promotions=[
-                {
-                    "replace_chunk_id": "chunk-b",
-                    "with_chunk_id": "chunk-c",
-                    "reason": "missing supplemental in final",
-                }
-            ],
-        )
-        with pytest.raises(
-            ProcessingError,
-            match="must appear in 'final_answer_chunk_ids'",
-        ):
-            _parse(payload)
-
     def test_duplicate_replace_chunk_id_raises(self) -> None:
         """Two promotions replacing the same answer chunk."""
         payload = _valid_blueprint(
@@ -763,6 +750,98 @@ class TestPromotionReplacementSemantics:
         assert bp.metadata["promoted_chunk_ids"] == ["chunk-c"]
 
 
+class TestFinalContextCoverage:
+    """final_answer_chunk_ids must exactly cover parser-input final contexts."""
+
+    def test_missing_answer_candidate_raises_with_diagnostics(self) -> None:
+        payload = _valid_blueprint(
+            final_ids=["chunk-a"],
+            chunk_roles={"chunk-a": "lead"},
+        )
+
+        with pytest.raises(ProcessingError) as exc_info:
+            _parse(payload)
+
+        message = str(exc_info.value)
+        assert "missing_final_context_ids=['chunk-b']" in message
+        assert "unexpected_final_context_ids=[]" in message
+        assert "duplicate_final_context_ids=[]" in message
+        assert "expected_final_context_ids=['chunk-a', 'chunk-b']" in message
+        assert "actual_final_answer_chunk_ids=['chunk-a']" in message
+
+    def test_all_answer_candidates_in_planner_order_passes(self) -> None:
+        payload = _valid_blueprint(
+            final_ids=["chunk-b", "chunk-a"],
+            chunk_roles={"chunk-b": "lead", "chunk-a": "support"},
+        )
+
+        blueprint = _parse(payload)
+
+        assert blueprint.ordered_chunk_ids == ["chunk-b", "chunk-a"]
+
+    def test_promotion_coverage_accepts_replacement_set(self) -> None:
+        payload = _valid_blueprint(
+            final_ids=["chunk-c", "chunk-a"],
+            chunk_roles={"chunk-c": "lead", "chunk-a": "support"},
+            promotions=[
+                {
+                    "replace_chunk_id": "chunk-b",
+                    "with_chunk_id": "chunk-c",
+                    "reason": "chunk-c has stronger discourse support",
+                }
+            ],
+        )
+
+        blueprint = _parse(payload)
+
+        assert blueprint.ordered_chunk_ids == ["chunk-c", "chunk-a"]
+        assert blueprint.metadata["promoted_chunk_ids"] == ["chunk-c"]
+
+    def test_promotion_missing_unpromoted_answer_candidate_raises(self) -> None:
+        payload = _valid_blueprint(
+            final_ids=["chunk-c"],
+            chunk_roles={"chunk-c": "lead"},
+            promotions=[
+                {
+                    "replace_chunk_id": "chunk-b",
+                    "with_chunk_id": "chunk-c",
+                    "reason": "chunk-c replaces chunk-b",
+                }
+            ],
+        )
+
+        with pytest.raises(ProcessingError) as exc_info:
+            _parse(payload)
+
+        message = str(exc_info.value)
+        assert "missing_final_context_ids=['chunk-a']" in message
+        assert "expected_final_context_ids=['chunk-a', 'chunk-c']" in message
+        assert "actual_final_answer_chunk_ids=['chunk-c']" in message
+
+    def test_promotion_missing_promoted_supplemental_raises_with_diagnostics(
+        self,
+    ) -> None:
+        payload = _valid_blueprint(
+            final_ids=["chunk-a"],
+            chunk_roles={"chunk-a": "lead"},
+            promotions=[
+                {
+                    "replace_chunk_id": "chunk-b",
+                    "with_chunk_id": "chunk-c",
+                    "reason": "chunk-c replaces chunk-b",
+                }
+            ],
+        )
+
+        with pytest.raises(ProcessingError) as exc_info:
+            _parse(payload)
+
+        message = str(exc_info.value)
+        assert "missing_final_context_ids=['chunk-c']" in message
+        assert "expected_final_context_ids=['chunk-a', 'chunk-c']" in message
+        assert "actual_final_answer_chunk_ids=['chunk-a']" in message
+
+
 # ============================================================================
 # Task 5: Full strict validation tests
 # ============================================================================
@@ -804,7 +883,11 @@ class TestStrictChunkRoles:
             chunk_roles={"chunk-a": "lead", "chunk-b": "support"},
         )
         with pytest.raises(ProcessingError, match="chunk_roles.*non-final"):
-            _parse(payload)
+            _parse(
+                payload,
+                answer_chunk_ids=["chunk-a"],
+                supplemental_chunk_ids=["chunk-b", "chunk-c", "chunk-d"],
+            )
 
     def test_no_chunk_roles_field_raises_when_final_chunks_exist(self) -> None:
         payload = _valid_blueprint()

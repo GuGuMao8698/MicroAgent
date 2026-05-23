@@ -96,19 +96,13 @@ def parse_llm_discorag_blueprint(
             "when answer candidates exist."
         )
 
-    # 禁止重复 chunk id，所有 id 必须是 string
-    seen_ids: set[str] = set()
+    # 所有 id 必须是 string；重复交给 coverage diagnostics 统一处理
     for cid in raw_chunk_ids:
         if not isinstance(cid, str):
             raise ProcessingError(
                 f"Chunk ID in 'final_answer_chunk_ids' must be a string, "
                 f"got {type(cid).__name__}: {cid!r}"
             )
-        if cid in seen_ids:
-            raise ProcessingError(
-                f"Duplicate chunk ID in 'final_answer_chunk_ids': {cid!r}"
-            )
-        seen_ids.add(cid)
 
     # budget overflow
     if len(raw_chunk_ids) > top_k:
@@ -130,6 +124,14 @@ def parse_llm_discorag_blueprint(
         answer_set=answer_set,
         supplemental_set=supplemental_set,
         final_chunk_ids=raw_chunk_ids,
+    )
+    expected_final_context_ids = _expected_final_context_ids(
+        answer_chunk_ids=answer_chunk_ids,
+        promotions=promotions,
+    )
+    _validate_final_context_coverage(
+        final_chunk_ids=raw_chunk_ids,
+        expected_final_context_ids=expected_final_context_ids,
     )
 
     # promoted_chunk_ids 供下游可观测
@@ -283,12 +285,6 @@ def _validate_promotions(
             raise ProcessingError(
                 f"Promotion inserts non-supplemental chunk: {with_id!r}"
             )
-        # with_chunk_id 必须出现在 final_answer_chunk_ids 中
-        if with_id not in final_set:
-            raise ProcessingError(
-                f"Promotion 'with_chunk_id' {with_id!r} "
-                f"must appear in 'final_answer_chunk_ids'."
-            )
         # replace_chunk_id 不能出现在 final_answer_chunk_ids 中
         if replace_id in final_set:
             raise ProcessingError(
@@ -321,6 +317,65 @@ def _validate_promotions(
             )
 
     return validated
+
+
+def _expected_final_context_ids(
+    answer_chunk_ids: list[str],
+    promotions: list[dict[str, Any]],
+) -> list[str]:
+    """按 answer 输入顺序计算 promotion 替换后的最终上下文集合。"""
+    replacements = {
+        promo["replace_chunk_id"]: promo["with_chunk_id"] for promo in promotions
+    }
+    expected: list[str] = []
+    for chunk_id in answer_chunk_ids:
+        expected.append(replacements.get(chunk_id, chunk_id))
+    return expected
+
+
+def _duplicate_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    return duplicates
+
+
+def _validate_final_context_coverage(
+    *,
+    final_chunk_ids: list[str],
+    expected_final_context_ids: list[str],
+) -> None:
+    expected_set = set(expected_final_context_ids)
+    actual_set = set(final_chunk_ids)
+    duplicate_ids = _duplicate_ids(final_chunk_ids)
+    missing_ids = [cid for cid in expected_final_context_ids if cid not in actual_set]
+    unexpected_ids = [cid for cid in final_chunk_ids if cid not in expected_set]
+
+    if duplicate_ids:
+        duplicate_chunk_id = duplicate_ids[0]
+        raise ProcessingError(
+            "Duplicate chunk ID in 'final_answer_chunk_ids': "
+            f"{duplicate_chunk_id!r}; "
+            f"missing_final_context_ids={missing_ids!r}; "
+            f"unexpected_final_context_ids={unexpected_ids!r}; "
+            f"duplicate_final_context_ids={duplicate_ids!r}; "
+            f"expected_final_context_ids={expected_final_context_ids!r}; "
+            f"actual_final_answer_chunk_ids={final_chunk_ids!r}."
+        )
+
+    if missing_ids or unexpected_ids:
+        raise ProcessingError(
+            "LLM blueprint 'final_answer_chunk_ids' must exactly cover "
+            "the final context set after promotion replacement: "
+            f"missing_final_context_ids={missing_ids!r}; "
+            f"unexpected_final_context_ids={unexpected_ids!r}; "
+            "duplicate_final_context_ids=[]; "
+            f"expected_final_context_ids={expected_final_context_ids!r}; "
+            f"actual_final_answer_chunk_ids={final_chunk_ids!r}."
+        )
 
 
 # ── chunk_roles validation (strict) ──────────────────────────────────────────

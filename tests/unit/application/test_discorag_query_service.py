@@ -1210,9 +1210,19 @@ def test_discorag_query_service_raises_when_blueprint_misses_final_context() -> 
         answerer=answerer,
     )
 
-    with pytest.raises(ProcessingError, match="missing final context ids"):
+    with pytest.raises(ProcessingError, match="missing final context ids") as exc_info:
         service.query("How does MiniRAG organize evidence?", top_k=2)
 
+    message = str(exc_info.value)
+    assert "missing_context_ids=['chunk_supplemental']" in message
+    assert "final_context_ids=['chunk_a', 'chunk_supplemental']" in message
+    assert "blueprint_ordered_chunk_ids=['chunk_a']" in message
+    assert "promoted_chunk_ids=None" in message
+    assert (
+        "promotions=[{'replace_chunk_id': 'chunk_b', "
+        "'with_chunk_id': 'chunk_supplemental', "
+        "'reason': 'supplemental replaces chunk_b'}]"
+    ) in message
     assert answerer.last_request is None
 
 
@@ -1263,9 +1273,14 @@ def test_discorag_build_answer_request_raises_when_blueprint_misses_final_contex
         answerer=answerer,
     )
 
-    with pytest.raises(ProcessingError, match="missing final context ids"):
+    with pytest.raises(ProcessingError, match="missing final context ids") as exc_info:
         service.build_answer_request("How does MiniRAG organize evidence?", top_k=2)
 
+    message = str(exc_info.value)
+    assert "missing_context_ids=['chunk_supplemental']" in message
+    assert "final_context_ids=['chunk_a', 'chunk_supplemental']" in message
+    assert "blueprint_ordered_chunk_ids=['chunk_a']" in message
+    assert "promoted_chunk_ids=None" in message
     assert answerer.last_request is None
 
 
