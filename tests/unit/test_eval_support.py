@@ -22,8 +22,10 @@ from eval_support import (  # noqa: E402
     build_triad_metrics,
     ensure_rag_eval_cases_use_markdown_fixtures,
     eval_case_failure_snapshot,
+    parse_deepeval_case_range,
     resolve_deepeval_case_concurrency,
     run_deepeval_cases_concurrently,
+    select_deepeval_cases,
 )
 
 _JUDGE_MODEL_ENV = {
@@ -53,8 +55,8 @@ def _runner_case(name: str) -> RagEvalCase:
     )
 
 
-def test_resolve_deepeval_case_concurrency_defaults_to_sixty() -> None:
-    assert resolve_deepeval_case_concurrency(None, {}) == 60
+def test_resolve_deepeval_case_concurrency_defaults_to_four() -> None:
+    assert resolve_deepeval_case_concurrency(None, {}) == 4
 
 
 def test_resolve_deepeval_case_concurrency_prefers_cli_value() -> None:
@@ -96,6 +98,32 @@ def test_resolve_deepeval_case_concurrency_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         resolve_deepeval_case_concurrency(cli_value, env)
+
+
+def test_parse_deepeval_case_range_accepts_one_based_inclusive_range() -> None:
+    assert parse_deepeval_case_range("21:30", case_count=60) == (21, 30)
+
+
+@pytest.mark.parametrize(
+    "raw_range",
+    ["", "0:1", "1:0", "3:2", "1", "a:b", "1:61", "-1:2"],
+)
+def test_parse_deepeval_case_range_rejects_invalid_ranges(raw_range: str) -> None:
+    with pytest.raises(ValueError, match="deepeval case range"):
+        parse_deepeval_case_range(raw_range, case_count=60)
+
+
+def test_select_deepeval_cases_preserves_active_order() -> None:
+    cases = [_runner_case("case-1"), _runner_case("case-2"), _runner_case("case-3")]
+
+    selected = select_deepeval_cases(cases, raw_range="2:3")
+
+    assert [case.name for case in selected] == ["case-2", "case-3"]
+
+
+def test_select_deepeval_cases_rejects_empty_selection() -> None:
+    with pytest.raises(ValueError, match="empty deepeval case selection"):
+        select_deepeval_cases([], raw_range=None)
 
 
 def test_bounded_deepeval_case_workers_caps_configured_concurrency() -> None:
