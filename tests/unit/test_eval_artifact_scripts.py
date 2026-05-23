@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -56,6 +58,9 @@ from evals.private_bootstrap_goldens import (  # noqa: E402
     sha256_file,
     validate_snapshot_manifest,
 )
+from evals.summarize_results import _RUN_ID_RE, merge_result_summaries  # noqa: E402
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
@@ -443,6 +448,121 @@ def _write_frozen_snapshot_cli_fixture(
     draft.parent.mkdir(parents=True)
     draft.write_text(json.dumps(_private_bootstrap_payload()), encoding="utf-8")
     return draft, fixture_path, manifest
+
+
+def _summary_with_cases(
+    *names: str,
+    query_mode: str = "discorag",
+) -> dict[str, object]:
+    return {
+        "run_id": "batch",
+        "query_mode": query_mode,
+        "test_file": "tests/evals/test_rag_deepeval.py",
+        "run_duration": 1.0,
+        "evaluation_cost": None,
+        "total_cases": len(names),
+        "passed_cases": len(names),
+        "failed_cases": 0,
+        "cases": [
+            {
+                "name": name,
+                "success": True,
+                "metrics": [],
+                "metric_map": {},
+                "retrieval_context_count": 1,
+            }
+            for name in names
+        ],
+    }
+
+
+def test_merge_result_summaries_rejects_duplicate_cases() -> None:
+    active_order = ["case-1", "case-2"]
+
+    with pytest.raises(RuntimeError, match="duplicate"):
+        merge_result_summaries(
+            [_summary_with_cases("case-1"), _summary_with_cases("case-1")],
+            query_mode="discorag",
+            active_case_order=active_order,
+            raw_inputs=["batch-a", "batch-b"],
+        )
+
+
+def test_merge_result_summaries_reports_missing_and_orders_by_active_order() -> None:
+    merged = merge_result_summaries(
+        [_summary_with_cases("case-3"), _summary_with_cases("case-1")],
+        query_mode="discorag",
+        active_case_order=["case-1", "case-2", "case-3"],
+        raw_inputs=["batch-a", "batch-b"],
+    )
+
+    assert [case["name"] for case in merged["cases"]] == ["case-1", "case-3"]
+    assert merged["case_count"] == 3
+    assert merged["completed_case_count"] == 2
+    assert merged["missing_case_count"] == 1
+    assert merged["duplicate_case_count"] == 0
+    assert merged["missing_cases"] == ["case-2"]
+    assert merged["merged_raw_inputs"] == ["batch-a", "batch-b"]
+    assert merged["full_report_valid"] is False
+
+
+def test_merge_result_summaries_rejects_query_mode_mismatch() -> None:
+    with pytest.raises(RuntimeError, match="query_mode"):
+        merge_result_summaries(
+            [_summary_with_cases("case-1", query_mode="standard")],
+            query_mode="discorag",
+            active_case_order=["case-1"],
+            raw_inputs=["batch-a"],
+        )
+
+
+def test_summarize_results_direct_script_merges_multiple_inputs(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "20260523_101010.discorag.summary.json"
+    second = tmp_path / "20260523_111111.discorag.summary.json"
+    output = tmp_path / "merged.summary.json"
+    first.write_text(
+        json.dumps(_summary_with_cases("private-bootstrap-002")),
+        encoding="utf-8",
+    )
+    second.write_text(
+        json.dumps(_summary_with_cases("private-bootstrap-001")),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(PROJECT_ROOT / "src"),
+    }
+
+    result = subprocess.run(
+        [
+            str(PROJECT_ROOT / ".venv" / "bin" / "python"),
+            "tests/evals/summarize_results.py",
+            "--results",
+            str(first),
+            "--results",
+            str(second),
+            "--query-mode",
+            "discorag",
+            "--summary-output",
+            str(output),
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(output.read_text(encoding="utf-8"))
+    assert [case["name"] for case in merged["cases"]] == [
+        "private-bootstrap-001",
+        "private-bootstrap-002",
+    ]
+    assert merged["run_id"] == "20260523_111111.discorag"
+    assert _RUN_ID_RE.fullmatch(merged["run_id"])
 
 
 def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
