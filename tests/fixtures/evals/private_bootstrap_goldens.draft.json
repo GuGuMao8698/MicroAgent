@@ -766,5 +766,1615 @@
       "answerability": "answerable",
       "corpus_fixture": "microrag-private-bootstrap-snapshot"
     }
+  },
+  {
+    "name": "private-bootstrap-021",
+    "input": "启动时配置从哪里来？缺少密钥会怎样？",
+    "expected_output": "Runtime provider configuration comes from host environment variables: `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL`. `Settings.require_runtime_provider_configs()` validates those required provider configs at startup and raises if they are missing. Secrets are not read from or committed in the source tree.",
+    "expectedOutput": "Runtime provider configuration comes from host environment variables: `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL`. `Settings.require_runtime_provider_configs()` validates those required provider configs at startup and raises if they are missing. Secrets are not read from or committed in the source tree.",
+    "context": [
+      "src/ragflow_lite/CONTRACTS.md defines host environment provider config, the three required env vars, startup validation, and the no-source-tree-secret boundary."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-022",
+    "input": "For the agent UI routes, can `/api/v0/agent/**` return `transcript_path` or Claude Code branding?",
+    "expected_output": "No. The active API contract says `/api/v0/agent/**` returns only MicroRAG-owned session/message UI metadata. Raw ACP fields such as `agentInfo`, `sessionId`, `transcript_path`, `cwd`, and `runtime_cwd`, external runtime branding such as `Claude Code` or `claude-code`, raw stderr, and raw command lines must never appear in HTTP responses.",
+    "expectedOutput": "No. The active API contract says `/api/v0/agent/**` returns only MicroRAG-owned session/message UI metadata. Raw ACP fields such as `agentInfo`, `sessionId`, `transcript_path`, `cwd`, and `runtime_cwd`, external runtime branding such as `Claude Code` or `claude-code`, raw stderr, and raw command lines must never appear in HTTP responses.",
+    "context": [
+      "src/ragflow_lite/api/CONTRACTS.md defines the agent route redaction boundary and forbids raw ACP fields and external runtime branding in HTTP responses."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-023",
+    "input": "DeepEval 环境检查会 reject 哪些 placeholder values？",
+    "expected_output": "`validate_deepeval_env` checks `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL` and rejects placeholder values. The placeholder set is `test-deepseek-api-key`, `test-ark-api-key`, and `ep-test-model`.",
+    "expectedOutput": "`validate_deepeval_env` checks `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL` and rejects placeholder values. The placeholder set is `test-deepseek-api-key`, `test-ark-api-key`, and `ep-test-model`.",
+    "context": [
+      "tests/evals/CONTRACTS.md defines DeepEval environment validation and the exact placeholder values rejected by `validate_deepeval_env`."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-024",
+    "input": "这里的本地容器编排负责生产部署，还是本地开发、观测和冒烟测试？",
+    "expected_output": "The Docker contract is local-only: development, observability, and smoke testing. It is not for production, CI, or release. Its compose entrypoint is `docker/compose.local.yml`, with local services such as Infinity, app, Prometheus, Loki, Alloy, and Grafana.",
+    "expectedOutput": "The Docker contract is local-only: development, observability, and smoke testing. It is not for production, CI, or release. Its compose entrypoint is `docker/compose.local.yml`, with local services such as Infinity, app, Prometheus, Loki, Alloy, and Grafana.",
+    "context": [
+      "docker/CONTRACTS.md scopes Docker usage to local development, observability, and smoke testing, not production, CI, or release."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "current_contract_qa",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-025",
+    "input": "If I run normal Python commands and then build private-bootstrap goldens, which venvs are involved?",
+    "expected_output": "Repository-root Python commands default to the local `.venv`. Eval golden generation is separate: `.venv-goldens/bin/python tests/evals/generate_goldens.py`, and `.venv-goldens` dependencies must not be mixed into the main runtime `.venv`. Prompt optimization uses the main `.venv`.",
+    "expectedOutput": "Repository-root Python commands default to the local `.venv`. Eval golden generation is separate: `.venv-goldens/bin/python tests/evals/generate_goldens.py`, and `.venv-goldens` dependencies must not be mixed into the main runtime `.venv`. Prompt optimization uses the main `.venv`.",
+    "context": [
+      "AGENTS.md establishes the repository-root `.venv` default; tests/evals/CONTRACTS.md establishes `.venv-goldens` for golden generation and main `.venv` for prompt optimization."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow plus eval-specific venv rules.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow plus eval-specific venv rules.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-026",
+    "input": "Explain how DeepEval query mode maps to the real `/queries` API without changing golden cases.",
+    "expected_output": "DeepEval runs target exactly one query mode, `standard` or `discorag`, selected by `--query-mode` or `RAGFLOW_LITE_EVAL_QUERY_MODE`, with the explicit pytest option winning. Query mode is run-level metadata and must not be added to `RagEvalCase` or the golden fixture schema. The HTTP API exposes `POST /queries` with a `mode` field using the same values, defaulting to `standard`, and the eval request body sent to `/api/v0/queries` includes `mode`.",
+    "expectedOutput": "DeepEval runs target exactly one query mode, `standard` or `discorag`, selected by `--query-mode` or `RAGFLOW_LITE_EVAL_QUERY_MODE`, with the explicit pytest option winning. Query mode is run-level metadata and must not be added to `RagEvalCase` or the golden fixture schema. The HTTP API exposes `POST /queries` with a `mode` field using the same values, defaulting to `standard`, and the eval request body sent to `/api/v0/queries` includes `mode`.",
+    "context": [
+      "tests/evals/CONTRACTS.md owns run-level DeepEval query-mode selection and the no-case-schema rule; src/ragflow_lite/api/CONTRACTS.md owns the production `POST /queries` mode field."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires eval query-mode policy and API route contract.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires eval query-mode policy and API route contract.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-027",
+    "input": "本地 observability app 怎么拿 provider credentials，和 runtime Settings 的要求怎么对应？",
+    "expected_output": "Runtime provider config is required from host environment variables `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL`, validated by `Settings.require_runtime_provider_configs()`. The local observability Docker app sources `data/agent-runtime/local.env` before starting Uvicorn, reusing that local credential source without committing secrets.",
+    "expectedOutput": "Runtime provider config is required from host environment variables `DEEPSEEK_API_KEY`, `ARK_API_KEY`, and `ARK_EMBEDDING_MODEL`, validated by `Settings.require_runtime_provider_configs()`. The local observability Docker app sources `data/agent-runtime/local.env` before starting Uvicorn, reusing that local credential source without committing secrets.",
+    "context": [
+      "src/ragflow_lite/CONTRACTS.md defines runtime provider env requirements; docker/CONTRACTS.md defines local compose sourcing from `data/agent-runtime/local.env` and no-secret handling."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires package runtime provider contract and Docker local env sourcing.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires package runtime provider contract and Docker local env sourcing.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-028",
+    "input": "DiscoRAG structurer attempts exhausted 后怎么办？retry 和 fallback 分别谁负责？",
+    "expected_output": "The evidence layer owns bounded structurer attempts, validation repair, timeout behavior, and raising `StructurerAttemptsExhaustedError` with safe metadata when attempts are exhausted. The application layer owns the fallback policy: `DiscoRAGQueryService` catches that specific error from structurer stages and degrades to a MiniRAG direct answer using original retrieval chunks, `mode=\"standard\"`, `blueprint=None`, `discorag_degraded == True`, and a user-visible `discorag_error` block. Plain `ProcessingError` and post-blueprint runtime errors remain hard failures.",
+    "expectedOutput": "The evidence layer owns bounded structurer attempts, validation repair, timeout behavior, and raising `StructurerAttemptsExhaustedError` with safe metadata when attempts are exhausted. The application layer owns the fallback policy: `DiscoRAGQueryService` catches that specific error from structurer stages and degrades to a MiniRAG direct answer using original retrieval chunks, `mode=\"standard\"`, `blueprint=None`, `discorag_degraded == True`, and a user-visible `discorag_error` block. Plain `ProcessingError` and post-blueprint runtime errors remain hard failures.",
+    "context": [
+      "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md defines structurer retry/exhaustion; src/ragflow_lite/application/CONTRACTS.md defines the degraded fallback policy."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires evidence retry semantics and application fallback semantics.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires evidence retry semantics and application fallback semantics.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-029",
+    "input": "Unit tests and integration tests both touch Infinity boundaries; where are fake Infinity clients allowed?",
+    "expected_output": "Fake or stub Infinity clients, databases, tables, query builders, or monkeypatches of `infinity.connect` are prohibited in unit tests. Any test crossing real Infinity SDK/table/query behavior belongs in integration tests with `@pytest.mark.live_infinity`, and without `--run-live-infinity` those marked tests are skipped.",
+    "expectedOutput": "Fake or stub Infinity clients, databases, tables, query builders, or monkeypatches of `infinity.connect` are prohibited in unit tests. Any test crossing real Infinity SDK/table/query behavior belongs in integration tests with `@pytest.mark.live_infinity`, and without `--run-live-infinity` those marked tests are skipped.",
+    "context": [
+      "tests/unit/CONTRACTS.md prohibits fake Infinity behavior in unit tests; tests/integration/CONTRACTS.md requires real Infinity behavior to use the live marker and gate."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/unit/CONTRACTS.md",
+        "tests/integration/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires unit fake prohibition plus integration live-gate placement.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/unit/CONTRACTS.md",
+        "tests/integration/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires unit fake prohibition plus integration live-gate placement.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-030",
+    "input": "检索改写会新增公开的接口模式，还是留在内部？",
+    "expected_output": "Retrieval rewrite stays internal to MiniRAG and is owned by `MiniGraphFirstRetriever`. `/queries` does not expose a rewrite strategy field, and public routing remains only `standard` or `discorag`; the application service contract also says `QueryModeRouter` dispatches by query mode only while retrieval, evidence, and answer logic stay downstream.",
+    "expectedOutput": "Retrieval rewrite stays internal to MiniRAG and is owned by `MiniGraphFirstRetriever`. `/queries` does not expose a rewrite strategy field, and public routing remains only `standard` or `discorag`; the application service contract also says `QueryModeRouter` dispatches by query mode only while retrieval, evidence, and answer logic stay downstream.",
+    "context": [
+      "src/ragflow_lite/application/CONTRACTS.md defines MiniRAG retrieval rewrite as internal and keeps HTTP routing to `standard`/`discorag` via query mode only; src/ragflow_lite/api/CONTRACTS.md defines the exposed `POST /queries` mode values."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application rewrite ownership plus API route surface.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application rewrite ownership plus API route surface.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-031",
+    "input": "Agent retrieval path 输出给 model 的 payload 可以带 mode、metadata 或 debug traces 吗？HTTP response 又怎么 redaction？",
+    "expected_output": "No. `AgentRetrievalService` is retrieval-only and its model-facing payload omits `mode`, top-level operational metadata, degraded state, source selection, retrieval rewrite state, graph internals, and debug traces. Separately, `/api/v0/agent/**` exposes only UI-safe MicroRAG session/message metadata and must not return raw ACP fields, external runtime branding, raw stderr, or raw command lines.",
+    "expectedOutput": "No. `AgentRetrievalService` is retrieval-only and its model-facing payload omits `mode`, top-level operational metadata, degraded state, source selection, retrieval rewrite state, graph internals, and debug traces. Separately, `/api/v0/agent/**` exposes only UI-safe MicroRAG session/message metadata and must not return raw ACP fields, external runtime branding, raw stderr, or raw command lines.",
+    "context": [
+      "src/ragflow_lite/application/CONTRACTS.md defines model-facing agent retrieval payload omissions; src/ragflow_lite/api/CONTRACTS.md defines HTTP agent route redaction."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application model-facing payload boundary and API HTTP redaction boundary.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application model-facing payload boundary and API HTTP redaction boundary.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-032",
+    "input": "How do eval gates combine with live Infinity cleanup when `--run-deepeval` is used?",
+    "expected_output": "`--run-deepeval` enables tests marked `deepeval` and implies live Infinity by making `run_live_infinity = --run-live-infinity or run_deepeval`. Marked tests are skipped without the relevant flag. At session finish, if `run_live_infinity` or `run_deepeval` is true, registered Infinity tables are dropped; otherwise registrations are only cleared.",
+    "expectedOutput": "`--run-deepeval` enables tests marked `deepeval` and implies live Infinity by making `run_live_infinity = --run-live-infinity or run_deepeval`. Marked tests are skipped without the relevant flag. At session finish, if `run_live_infinity` or `run_deepeval` is true, registered Infinity tables are dropped; otherwise registrations are only cleared.",
+    "context": [
+      "tests/CONTRACTS.md defines DeepEval/live Infinity gates, the implication from deepeval to live Infinity, skip behavior, and session-finish cleanup. tests/evals/CONTRACTS.md repeats that live evals require live Infinity."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires general test harness gate semantics and eval-specific live-run requirement.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires general test harness gate semantics and eval-specific live-run requirement.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-033",
+    "input": "For a private bootstrap DeepEval live run, which command/workflow path builds the fixture, what gate is required, what corpus is uploaded, and why is packed markdown not proof of cross-doc retrieval?",
+    "expected_output": "Repository-root Python commands default to `.venv`, and the eval directory lists `./.venv/bin/python tests/evals/build_private_bootstrap_goldens.py --draft-goldens tests/fixtures/evals/private_bootstrap_goldens.draft.json` as the private-bootstrap build command. DeepEval runs require explicit `--run-deepeval`, which implies live Infinity. The live private-bootstrap run uploads every file listed in `tests/fixtures/documents/microrag-private-bootstrap-snapshot/manifest.json` as a separate runtime document. The packed `microrag-private-bootstrap.md` is only a generated compatibility/inspection fixture and must not be treated as proof of cross-document retrieval.",
+    "expectedOutput": "Repository-root Python commands default to `.venv`, and the eval directory lists `./.venv/bin/python tests/evals/build_private_bootstrap_goldens.py --draft-goldens tests/fixtures/evals/private_bootstrap_goldens.draft.json` as the private-bootstrap build command. DeepEval runs require explicit `--run-deepeval`, which implies live Infinity. The live private-bootstrap run uploads every file listed in `tests/fixtures/documents/microrag-private-bootstrap-snapshot/manifest.json` as a separate runtime document. The packed `microrag-private-bootstrap.md` is only a generated compatibility/inspection fixture and must not be treated as proof of cross-document retrieval.",
+    "context": [
+      "AGENTS.md establishes root `.venv`; tests/evals/AGENTS.md lists the private-bootstrap builder command; tests/CONTRACTS.md defines the DeepEval/live Infinity gate; tests/evals/CONTRACTS.md defines separate snapshot uploads and the packed fixture boundary."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/AGENTS.md",
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow, eval builder command, DeepEval gate semantics, and private-bootstrap corpus/packed-fixture boundaries.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/AGENTS.md",
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow, eval builder command, DeepEval gate semantics, and private-bootstrap corpus/packed-fixture boundaries.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-034",
+    "input": "POST /documents 在 API、integration test、Docker local app 里分别有什么关键约束？",
+    "expected_output": "`POST /documents` requires `Idempotency-Key`, returns `202 Accepted` with `Location` immediately, and does not wait for indexing; missing keys return `400` and duplicate keys reuse the existing async task identity. Integration tests treat `POST /documents` as returning `202 + Location + queued` and clients poll `GET /documents/{id}` to terminal state. In local Docker observability, the app runs Uvicorn from `/workspace` after sourcing `data/agent-runtime/local.env` and depends on the `infinity` service.",
+    "expectedOutput": "`POST /documents` requires `Idempotency-Key`, returns `202 Accepted` with `Location` immediately, and does not wait for indexing; missing keys return `400` and duplicate keys reuse the existing async task identity. Integration tests treat `POST /documents` as returning `202 + Location + queued` and clients poll `GET /documents/{id}` to terminal state. In local Docker observability, the app runs Uvicorn from `/workspace` after sourcing `data/agent-runtime/local.env` and depends on the `infinity` service.",
+    "context": [
+      "src/ragflow_lite/api/CONTRACTS.md defines document ingestion HTTP semantics; tests/integration/CONTRACTS.md defines endpoint lifecycle expectations; docker/CONTRACTS.md defines local app startup and Infinity dependency."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "tests/integration/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API endpoint contract, integration lifecycle, and local Docker service context.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "tests/integration/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API endpoint contract, integration lifecycle, and local Docker service context.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-035",
+    "input": "What are the current runtime defaults for vector indexing and graph evidence storage, and how do they relate to provider wiring?",
+    "expected_output": "`InfinityDenseVectorIndex` is the default runtime vector index, while `LocalJsonVectorIndex` is fallback/test-double style storage. Graph evidence provider wiring uses `GraphEvidenceInfinityStore` with `InfinityGraphCandidateIndex`; local JSON graph evidence storage/indexing is a local fallback and test path, not the default runtime candidate index. Provider wiring also uses Ark embeddings and DeepSeek-backed non-embedding and structurer LLM adapters by default.",
+    "expectedOutput": "`InfinityDenseVectorIndex` is the default runtime vector index, while `LocalJsonVectorIndex` is fallback/test-double style storage. Graph evidence provider wiring uses `GraphEvidenceInfinityStore` with `InfinityGraphCandidateIndex`; local JSON graph evidence storage/indexing is a local fallback and test path, not the default runtime candidate index. Provider wiring also uses Ark embeddings and DeepSeek-backed non-embedding and structurer LLM adapters by default.",
+    "context": [
+      "src/ragflow_lite/infrastructure/CONTRACTS.md defines adapter defaults and provider wiring; src/ragflow_lite/infrastructure/evidence/CONTRACTS.md defines graph candidate/storage runtime versus local fallback paths."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires package provider boundary, infrastructure defaults, and evidence storage details.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires package provider boundary, infrastructure defaults, and evidence storage details.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-036",
+    "input": "How should I describe DiscoRAG context budgets, local RST extraction caps, and blueprint `top_k` guardrails together?",
+    "expected_output": "`QueryRequest.top_n` is normalized before application services and is the final answer context budget; default `top_n=6` gives 6 final contexts. Without an explicit discourse override, `discourse_selection_k` defaults to `2 * top_n`, so default discourse visibility is 12 chunks. Evidence extraction has no default local `max_chunks=5` cap; all retriever-selected discourse-visible chunks are eligible unless an explicit cap is visible in metadata. The blueprint parser treats `top_k` as a hard guardrail and must not silently drop ids to satisfy budget.",
+    "expectedOutput": "`QueryRequest.top_n` is normalized before application services and is the final answer context budget; default `top_n=6` gives 6 final contexts. Without an explicit discourse override, `discourse_selection_k` defaults to `2 * top_n`, so default discourse visibility is 12 chunks. Evidence extraction has no default local `max_chunks=5` cap; all retriever-selected discourse-visible chunks are eligible unless an explicit cap is visible in metadata. The blueprint parser treats `top_k` as a hard guardrail and must not silently drop ids to satisfy budget.",
+    "context": [
+      "src/ragflow_lite/application/CONTRACTS.md defines final answer and discourse-visible budgets; src/ragflow_lite/infrastructure/evidence/CONTRACTS.md defines no default local RST cap and blueprint `top_k` parser guardrail."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application budget rules, evidence extractor cap rules, and API query top-level context.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires application budget rules, evidence extractor cap rules, and API query top-level context.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-037",
+    "input": "用户询问当前运行时行为时，哪些文档可以作为依据？私有启动语料如何表达这个规则？",
+    "expected_output": "Current runtime behavior must be justified only by active `CONTRACTS.md` and `AGENTS.md` sources. The private bootstrap eval corpus treats `CONTRACTS.md` and `AGENTS.md` snapshot entries as authoritative sources, while `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims. The root workflow also says `AGENTS.md` / `CONTRACTS.md` maintenance follows governance and root docs mostly point to nearest sources of truth.",
+    "expectedOutput": "Current runtime behavior must be justified only by active `CONTRACTS.md` and `AGENTS.md` sources. The private bootstrap eval corpus treats `CONTRACTS.md` and `AGENTS.md` snapshot entries as authoritative sources, while `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims. The root workflow also says `AGENTS.md` / `CONTRACTS.md` maintenance follows governance and root docs mostly point to nearest sources of truth.",
+    "context": [
+      "AGENTS.md describes doc governance and nearest contract pointers; tests/evals/CONTRACTS.md defines private bootstrap authoritative versus historical distractor roles; src/ragflow_lite/CONTRACTS.md states active runtime contracts follow the governance standard."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root governance pointer, eval corpus role policy, and package contract governance rule.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root governance pointer, eval corpus role policy, and package contract governance rule.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-038",
+    "input": "MicroAgent runtime isolation: API、infrastructure、Docker 三边界分别禁止什么泄漏？",
+    "expected_output": "API routes must return only MicroRAG-owned UI-safe fields and must not expose raw ACP fields, external runtime branding, raw stderr, or raw command lines. Infrastructure keeps ACP as a process boundary: `_request()` returns raw results internally, redaction happens at route/response schema boundaries, `AgentSessionStore` stores UI metadata only, and product runtime paths must resolve to project-owned defaults. Docker/local artifact rules say not to commit `.env`, secrets, compose runtime artifacts, screenshots, or local volume contents.",
+    "expectedOutput": "API routes must return only MicroRAG-owned UI-safe fields and must not expose raw ACP fields, external runtime branding, raw stderr, or raw command lines. Infrastructure keeps ACP as a process boundary: `_request()` returns raw results internally, redaction happens at route/response schema boundaries, `AgentSessionStore` stores UI metadata only, and product runtime paths must resolve to project-owned defaults. Docker/local artifact rules say not to commit `.env`, secrets, compose runtime artifacts, screenshots, or local volume contents.",
+    "context": [
+      "src/ragflow_lite/api/CONTRACTS.md defines HTTP redaction; src/ragflow_lite/infrastructure/CONTRACTS.md defines ACP process/session-store/runtime-path boundaries; docker/CONTRACTS.md defines local artifact and secret rules."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API, infrastructure, and Docker boundaries together.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API, infrastructure, and Docker boundaries together.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-039",
+    "input": "Summarize the active end-to-end eval contract: local workflow, gates, query mode, and active artifact boundary.",
+    "expected_output": "Root Python commands default to `.venv`. DeepEval tests require the `deepeval` marker and explicit `--run-deepeval`, which implies live Infinity. Each RAG eval run targets exactly one query mode, `standard` or `discorag`, selected at run level, and query mode must not be added to `RagEvalCase` or golden case schema. The active DeepEval artifact remains `tests/fixtures/evals/synthetic_goldens.json`; `private_bootstrap_goldens.draft.json` is review-stage only.",
+    "expectedOutput": "Root Python commands default to `.venv`. DeepEval tests require the `deepeval` marker and explicit `--run-deepeval`, which implies live Infinity. Each RAG eval run targets exactly one query mode, `standard` or `discorag`, selected at run level, and query mode must not be added to `RagEvalCase` or golden case schema. The active DeepEval artifact remains `tests/fixtures/evals/synthetic_goldens.json`; `private_bootstrap_goldens.draft.json` is review-stage only.",
+    "context": [
+      "AGENTS.md defines root `.venv`; tests/CONTRACTS.md defines gates; tests/evals/CONTRACTS.md defines query mode and active versus draft artifact boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md",
+        "tests/evals/AGENTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow, general test gates, eval contracts, and eval directory commands.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "AGENTS.md",
+        "tests/CONTRACTS.md",
+        "tests/evals/CONTRACTS.md",
+        "tests/evals/AGENTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires root workflow, general test gates, eval contracts, and eval directory commands.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-040",
+    "input": "What is the active layered answer for query execution from HTTP request through retrieval organization and provider defaults?",
+    "expected_output": "`POST /queries` exposes only `mode` values `standard` and `discorag`; retrieval strategy parameters are not exposed at the HTTP layer. `QueryModeRouter` dispatches by query mode only, while retrieval, evidence, and answer logic stay downstream. DiscoRAG orchestration uses MiniRAG retrieval, RST extraction, inter-chunk graph construction, blueprint planning, and answer assembly. Infrastructure defaults use Infinity for vector indexing, Ark for embeddings, DeepSeek-backed non-embedding LLMs, and a separate structurer config for graph and blueprint builders.",
+    "expectedOutput": "`POST /queries` exposes only `mode` values `standard` and `discorag`; retrieval strategy parameters are not exposed at the HTTP layer. `QueryModeRouter` dispatches by query mode only, while retrieval, evidence, and answer logic stay downstream. DiscoRAG orchestration uses MiniRAG retrieval, RST extraction, inter-chunk graph construction, blueprint planning, and answer assembly. Infrastructure defaults use Infinity for vector indexing, Ark for embeddings, DeepSeek-backed non-embedding LLMs, and a separate structurer config for graph and blueprint builders.",
+    "context": [
+      "src/ragflow_lite/api/CONTRACTS.md defines the HTTP query surface; src/ragflow_lite/application/CONTRACTS.md defines query routing and DiscoRAG orchestration; src/ragflow_lite/infrastructure/CONTRACTS.md defines provider defaults; src/ragflow_lite/infrastructure/evidence/CONTRACTS.md defines graph/blueprint evidence semantics."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API, application, infrastructure, and evidence contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "multi_doc_synthesis",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [],
+      "answerability": "answerable",
+      "why_multi_doc": "Requires API, application, infrastructure, and evidence contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-041",
+    "input": "我记得旧 DiscoRAG stabilization plan 说 invalid blueprint 要 hard fail、no downgrade；现在还是完整规则吗？",
+    "expected_output": "No. The old stabilization plan is historical planning material. Current behavior separates cases: application-level validation failures still propagate as `ProcessingError`, but exhausted structurer attempts from RST extraction, inter-chunk graph, or blueprint stages specifically raise `StructurerAttemptsExhaustedError` and trigger a degraded MiniRAG direct answer with visible degradation metadata. Post-blueprint runtime errors remain hard failures.",
+    "expectedOutput": "No. The old stabilization plan is historical planning material. Current behavior separates cases: application-level validation failures still propagate as `ProcessingError`, but exhausted structurer attempts from RST extraction, inter-chunk graph, or blueprint stages specifically raise `StructurerAttemptsExhaustedError` and trigger a degraded MiniRAG direct answer with visible degradation metadata. Post-blueprint runtime errors remain hard failures.",
+    "context": [
+      "docs/superpowers/plans/2026-05-08-discorag-repo-native-stabilization-plan.md is a distractor. src/ragflow_lite/application/CONTRACTS.md owns current degraded fallback behavior."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-08-discorag-repo-native-stabilization-plan.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The old plan predates the active degraded fallback contract and cannot override application CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-08-discorag-repo-native-stabilization-plan.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The old plan predates the active degraded fallback contract and cannot override application CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-042",
+    "input": "旧 spec 说没有 deterministic fallback；那现在 StructurerAttemptsExhaustedError 会不会直接 hard fail？",
+    "expected_output": "Not always. Historical specs cannot alone define current behavior. The active evidence contract says exhausted structurer attempts raise `StructurerAttemptsExhaustedError`; the active application contract says `DiscoRAGQueryService` catches that specific error from structurer stages and degrades to MiniRAG direct answer. This is not a deterministic graph or blueprint planner fallback. Plain `ProcessingError` and post-blueprint runtime errors remain hard failures.",
+    "expectedOutput": "Not always. Historical specs cannot alone define current behavior. The active evidence contract says exhausted structurer attempts raise `StructurerAttemptsExhaustedError`; the active application contract says `DiscoRAGQueryService` catches that specific error from structurer stages and degrades to MiniRAG direct answer. This is not a deterministic graph or blueprint planner fallback. Plain `ProcessingError` and post-blueprint runtime errors remain hard failures.",
+    "context": [
+      "docs/superpowers/specs/2026-05-10-discorag-structurer-retry-timeout-repair.md is a distractor. src/ragflow_lite/infrastructure/evidence/CONTRACTS.md and src/ragflow_lite/application/CONTRACTS.md define current exhaustion and fallback behavior."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-10-discorag-structurer-retry-timeout-repair.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The stale spec describes intent; current fallback boundaries come from evidence and application contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-10-discorag-structurer-retry-timeout-repair.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The stale spec describes intent; current fallback boundaries come from evidence and application contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-043",
+    "input": "A MiniRAG rewrite spec mentioned no new HTTP parameter. Can I cite that spec as the current reason `/queries` has no rewrite strategy?",
+    "expected_output": "Do not cite the spec alone for current behavior. The current application contract says retrieval rewrite is internal to `MiniGraphFirstRetriever` and `/queries` does not expose a rewrite strategy field. The current API contract says `POST /queries` exposes only `mode` values `standard` and `discorag` and does not expose retrieval strategy parameters.",
+    "expectedOutput": "Do not cite the spec alone for current behavior. The current application contract says retrieval rewrite is internal to `MiniGraphFirstRetriever` and `/queries` does not expose a rewrite strategy field. The current API contract says `POST /queries` exposes only `mode` values `standard` and `discorag` and does not expose retrieval strategy parameters.",
+    "context": [
+      "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md is a distractor. src/ragflow_lite/application/CONTRACTS.md and src/ragflow_lite/api/CONTRACTS.md define the active no-public-rewrite-parameter behavior."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The historical spec can be background only; active no-public-field claims require application/API contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The historical spec can be background only; active no-public-field claims require application/API contracts.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-044",
+    "input": "I saw a chunk auxiliary legacy cleanup plan. Does current match_text still include `filename^10,text` for fallback?",
+    "expected_output": "No. The current infrastructure contract says default chunk auxiliary `match_text` uses only tokenizer-derived fields: `filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks`. `filename` and `text` remain stored columns but are not default fallback fields, and `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.",
+    "expectedOutput": "No. The current infrastructure contract says default chunk auxiliary `match_text` uses only tokenizer-derived fields: `filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks`. `filename` and `text` remain stored columns but are not default fallback fields, and `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.",
+    "context": [
+      "docs/superpowers/plans/2026-05-11-chunk-auxiliary-legacy-field-removal.md is a distractor. src/ragflow_lite/infrastructure/CONTRACTS.md defines the active chunk auxiliary text field contract."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-11-chunk-auxiliary-legacy-field-removal.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The plan is historical; active match_text fields come from infrastructure CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-11-chunk-auxiliary-legacy-field-removal.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The plan is historical; active match_text fields come from infrastructure CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-045",
+    "input": "旧 agent runtime workspace isolation 方案能不能证明当前可以用 repo root 作为 ACP cwd？",
+    "expected_output": "No. The active infrastructure contract forbids falling back to repository root as product ACP cwd. Product conversation workspace state remains under `data/agent-runtime/workspace`, `setup_agent_runtime()` prepares workspace/config/shim state, and `_build_acp_client(settings)` rejects runtime paths that do not resolve to project-owned defaults from `default_agent_runtime_paths(settings.project_root)`.",
+    "expectedOutput": "No. The active infrastructure contract forbids falling back to repository root as product ACP cwd. Product conversation workspace state remains under `data/agent-runtime/workspace`, `setup_agent_runtime()` prepares workspace/config/shim state, and `_build_acp_client(settings)` rejects runtime paths that do not resolve to project-owned defaults from `default_agent_runtime_paths(settings.project_root)`.",
+    "context": [
+      "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md is a distractor. src/ragflow_lite/infrastructure/CONTRACTS.md defines current ACP workspace isolation."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The stale workspace plan cannot override the active infrastructure ACP runtime contract.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The stale workspace plan cannot override the active infrastructure ACP runtime contract.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-046",
+    "input": "旧 DeepEval artifact plan 加了 mode-aware summaries；现在是不是要把 `query_mode` 写进每个 case？",
+    "expected_output": "No. The active eval contract says query mode is run-level metadata and must not be added to `RagEvalCase` or the golden fixture schema. Mode-aware summary artifacts exist, and eval requests include `mode`, but cases remain mode-independent.",
+    "expectedOutput": "No. The active eval contract says query mode is run-level metadata and must not be added to `RagEvalCase` or the golden fixture schema. Mode-aware summary artifacts exist, and eval requests include `mode`, but cases remain mode-independent.",
+    "context": [
+      "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md is a distractor. tests/evals/CONTRACTS.md defines the active query-mode and golden schema boundary."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The historical plan cannot justify adding query_mode to case schema; the active eval contract forbids it.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The historical plan cannot justify adding query_mode to case schema; the active eval contract forbids it.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-047",
+    "input": "The private bootstrap golden spec talks about expansion workflow. Does that mean the active synthetic goldens are already 60 cases?",
+    "expected_output": "No. The active eval contract says `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is a review-stage artifact and `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`. Draft planning or expansion material does not by itself promote cases into the active artifact.",
+    "expectedOutput": "No. The active eval contract says `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is a review-stage artifact and `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`. Draft planning or expansion material does not by itself promote cases into the active artifact.",
+    "context": [
+      "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md is historical planning material. tests/evals/CONTRACTS.md defines draft versus active artifact boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The spec is planning material; active artifact status is controlled by tests/evals/CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-18-microrag-private-bootstrap-goldens.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The spec is planning material; active artifact status is controlled by tests/evals/CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-048",
+    "input": "Old plan said use DeepSeek as structurer for now. Is the current contract still that structurer config is separate from answer model?",
+    "expected_output": "Yes, but the current claim must come from active contracts. The infrastructure contract says `LLMInterChunkDiscourseGraphBuilder` and `LLMDiscoRAGAnswerBlueprintBuilder` both use `DiscoRAGStructurerRuntimeConfig`, decoupled from the answer model. The evidence contract also says the structurer model is configured via that same config and is decoupled from the answer model.",
+    "expectedOutput": "Yes, but the current claim must come from active contracts. The infrastructure contract says `LLMInterChunkDiscourseGraphBuilder` and `LLMDiscoRAGAnswerBlueprintBuilder` both use `DiscoRAGStructurerRuntimeConfig`, decoupled from the answer model. The evidence contract also says the structurer model is configured via that same config and is decoupled from the answer model.",
+    "context": [
+      "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md is a distractor. src/ragflow_lite/infrastructure/CONTRACTS.md and src/ragflow_lite/infrastructure/evidence/CONTRACTS.md define the active structurer config boundary."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The old spec aligns with current behavior, but the authoritative support is infrastructure/evidence CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "stale_plan_trap",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md"
+      ],
+      "answerability": "answerable",
+      "why_not_answer_from_distractor": "The old spec aligns with current behavior, but the authoritative support is infrastructure/evidence CONTRACTS.md.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-049",
+    "input": "这个项目当前保证什么生产可用性目标和升级处理策略？",
+    "expected_output": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative documents in this eval corpus do not establish a production SLA, uptime target, or on-call escalation policy.",
+    "expectedOutput": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative documents in this eval corpus do not establish a production SLA, uptime target, or on-call escalation policy.",
+    "context": [
+      "The authoritative AGENTS.md and CONTRACTS.md snapshot entries cover local workflow, runtime boundaries, eval contracts, tests, Docker local observability, and module contracts, but not production SLA or on-call policy."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "AGENTS.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "AGENTS.md",
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-050",
+    "input": "当前 private bootstrap corpus 里有没有记录真实 `DEEPSEEK_API_KEY` 和 `ARK_API_KEY` 的 secret value？",
+    "expected_output": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative documents name required provider environment variables and local env sourcing, but they do not include the actual secret values, and secrets must not be committed.",
+    "expectedOutput": "Not answerable from the frozen authoritative MicroRAG snapshot. The authoritative documents name required provider environment variables and local env sourcing, but they do not include the actual secret values, and secrets must not be committed.",
+    "context": [
+      "src/ragflow_lite/CONTRACTS.md and docker/CONTRACTS.md describe provider env sources and no-secret rules without containing secret values."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "src/ragflow_lite/CONTRACTS.md",
+        "docker/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-051",
+    "input": "当前是否承诺在现有向量索引之后迁移到某个托管云服务？",
+    "expected_output": "Not answerable from the frozen authoritative MicroRAG snapshot. The active contracts define current Infinity defaults and local/test fallback boundaries, but they do not commit to a future managed cloud vector database migration.",
+    "expectedOutput": "Not answerable from the frozen authoritative MicroRAG snapshot. The active contracts define current Infinity defaults and local/test fallback boundaries, but they do not commit to a future managed cloud vector database migration.",
+    "context": [
+      "src/ragflow_lite/infrastructure/CONTRACTS.md defines current Infinity vector index defaults and fallback/test storage, but no future cloud migration commitment."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-052",
+    "input": "Does the current contract promise compatibility with every future DeepEval CLI version?",
+    "expected_output": "Not answerable from the frozen authoritative MicroRAG snapshot. The eval contract defines current selectors and a fallback environment variable for cases where a DeepEval CLI version does not forward custom pytest options, but it does not promise compatibility with every future DeepEval CLI version.",
+    "expectedOutput": "Not answerable from the frozen authoritative MicroRAG snapshot. The eval contract defines current selectors and a fallback environment variable for cases where a DeepEval CLI version does not forward custom pytest options, but it does not promise compatibility with every future DeepEval CLI version.",
+    "context": [
+      "tests/evals/CONTRACTS.md defines current DeepEval query-mode/concurrency selectors and environment fallbacks, but no future-version guarantee."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "negative_missing_evidence",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [],
+      "distractor_sources": [],
+      "answerability": "unanswerable",
+      "refusal_rationale_sources": [
+        "tests/evals/CONTRACTS.md"
+      ],
+      "acceptable_refusal": "Not answerable from the frozen authoritative MicroRAG snapshot.",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-053",
+    "input": "Compare the old DiscoRAG stabilization spec with today's application/evidence contracts around deterministic fallbacks.",
+    "expected_output": "The old spec is historical design material that argued for LLM-backed structural stages and no deterministic graph or blueprint generation fallback. The current application and evidence contracts preserve that boundary: runtime structurer collaborators are LLM-backed, deterministic graph fallback is not wired, `DiscoRAGAnswerBlueprintBuilder` is retained only as a test stub, and validation failures use strict parser/repair/exhaustion paths. Current contracts also add a specific degraded MiniRAG fallback only for `StructurerAttemptsExhaustedError`, which is not a deterministic planner fallback.",
+    "expectedOutput": "The old spec is historical design material that argued for LLM-backed structural stages and no deterministic graph or blueprint generation fallback. The current application and evidence contracts preserve that boundary: runtime structurer collaborators are LLM-backed, deterministic graph fallback is not wired, `DiscoRAGAnswerBlueprintBuilder` is retained only as a test stub, and validation failures use strict parser/repair/exhaustion paths. Current contracts also add a specific degraded MiniRAG fallback only for `StructurerAttemptsExhaustedError`, which is not a deterministic planner fallback.",
+    "context": [
+      "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md is comparison material; src/ragflow_lite/application/CONTRACTS.md and src/ragflow_lite/infrastructure/evidence/CONTRACTS.md define current deterministic-fallback and degraded-fallback boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/evidence/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-054",
+    "input": "Compare query-mode artifact planning with the active eval/API contract. What is current, what is historical?",
+    "expected_output": "The query-mode artifact plan is historical implementation material. The current eval contract says each DeepEval RAG run targets one run-level mode, selected by `--query-mode` or `RAGFLOW_LITE_EVAL_QUERY_MODE`, and query mode must not be added to `RagEvalCase` or the golden schema. The current API contract exposes the same `standard`/`discorag` values through `POST /queries` `mode`, defaulting to `standard`. Mode-aware summary artifact names are current eval behavior, but per-case `query_mode` remains forbidden.",
+    "expectedOutput": "The query-mode artifact plan is historical implementation material. The current eval contract says each DeepEval RAG run targets one run-level mode, selected by `--query-mode` or `RAGFLOW_LITE_EVAL_QUERY_MODE`, and query mode must not be added to `RagEvalCase` or the golden schema. The current API contract exposes the same `standard`/`discorag` values through `POST /queries` `mode`, defaulting to `standard`. Mode-aware summary artifact names are current eval behavior, but per-case `query_mode` remains forbidden.",
+    "context": [
+      "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md is comparison material; tests/evals/CONTRACTS.md and src/ragflow_lite/api/CONTRACTS.md define active query-mode behavior."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-055",
+    "input": "把旧的 MicroAgent runtime isolation spec 和 current API/infrastructure contracts 对比一下：哪些边界现在有效？",
+    "expected_output": "The old runtime-isolation spec is comparison/history material. Current API behavior is that `/api/v0/agent/**` returns only UI-safe MicroRAG session/message metadata and never raw ACP fields, external runtime branding, raw stderr, or raw command lines. Current infrastructure behavior is that ACP integration is a process boundary, raw JSON-RPC results stay internal, redaction happens at HTTP route/response schema boundaries, product workspace state stays under `data/agent-runtime/workspace`, and runtime paths must resolve to project-owned defaults.",
+    "expectedOutput": "The old runtime-isolation spec is comparison/history material. Current API behavior is that `/api/v0/agent/**` returns only UI-safe MicroRAG session/message metadata and never raw ACP fields, external runtime branding, raw stderr, or raw command lines. Current infrastructure behavior is that ACP integration is a process boundary, raw JSON-RPC results stay internal, redaction happens at HTTP route/response schema boundaries, product workspace state stays under `data/agent-runtime/workspace`, and runtime paths must resolve to project-owned defaults.",
+    "context": [
+      "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md is comparison material; src/ragflow_lite/api/CONTRACTS.md and src/ragflow_lite/infrastructure/CONTRACTS.md define current agent runtime boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-056",
+    "input": "Compare the private-bootstrap goldens plan with active eval contracts before promotion.",
+    "expected_output": "The private-bootstrap goldens plan is review/promotion workflow material. The active eval contract says the snapshot corpus is `microrag-private-bootstrap-snapshot`, the packed fixture is compatibility/inspection only, `CONTRACTS.md` and `AGENTS.md` entries are authoritative, `docs/superpowers` entries are historical distractors, `private_bootstrap_goldens.draft.json` is review-stage, and `synthetic_goldens.json` remains the active DeepEval artifact until promotion. Therefore the plan can guide review, but it cannot by itself change the active artifact.",
+    "expectedOutput": "The private-bootstrap goldens plan is review/promotion workflow material. The active eval contract says the snapshot corpus is `microrag-private-bootstrap-snapshot`, the packed fixture is compatibility/inspection only, `CONTRACTS.md` and `AGENTS.md` entries are authoritative, `docs/superpowers` entries are historical distractors, `private_bootstrap_goldens.draft.json` is review-stage, and `synthetic_goldens.json` remains the active DeepEval artifact until promotion. Therefore the plan can guide review, but it cannot by itself change the active artifact.",
+    "context": [
+      "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md is comparison material; tests/evals/CONTRACTS.md and tests/CONTRACTS.md define active eval/test behavior."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "tests/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "tests/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-057",
+    "input": "对比旧的块辅助字段清理计划和当前基础设施契约：现在匹配文本到底用哪些字段？",
+    "expected_output": "The legacy-removal plan is historical implementation material. The current infrastructure contract is explicit: default chunk auxiliary `match_text` uses `filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks`; `filename` and `text` are stored columns but not default fallback fields; missing tokenizer-derived columns make chunk tables incompatible; and `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.",
+    "expectedOutput": "The legacy-removal plan is historical implementation material. The current infrastructure contract is explicit: default chunk auxiliary `match_text` uses `filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks`; `filename` and `text` are stored columns but not default fallback fields; missing tokenizer-derived columns make chunk tables incompatible; and `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.",
+    "context": [
+      "docs/superpowers/specs/2026-05-11-chunk-auxiliary-legacy-field-removal.md is comparison material; src/ragflow_lite/infrastructure/CONTRACTS.md defines the active chunk auxiliary text field contract."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-chunk-auxiliary-legacy-field-removal.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/infrastructure/CONTRACTS.md",
+        "src/ragflow_lite/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-chunk-auxiliary-legacy-field-removal.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-058",
+    "input": "旧 MiniRAG rewrite spec 跟当前 API/application contract 比起来，public surface 有变化吗？",
+    "expected_output": "The old rewrite spec is historical design material. Current application contracts say retrieval rewrite is internal to `MiniGraphFirstRetriever`, CoT rewrite may run at most once, rewrite failure falls back to the cached initial candidate snapshot, and `DiscoRAGQueryService` does not own rewrite decisions. Current API contracts still expose only `POST /queries` `mode` values `standard` and `discorag`; retrieval strategy parameters and rewrite strategy fields are not exposed at HTTP level.",
+    "expectedOutput": "The old rewrite spec is historical design material. Current application contracts say retrieval rewrite is internal to `MiniGraphFirstRetriever`, CoT rewrite may run at most once, rewrite failure falls back to the cached initial candidate snapshot, and `DiscoRAGQueryService` does not own rewrite decisions. Current API contracts still expose only `POST /queries` `mode` values `standard` and `discorag`; retrieval strategy parameters and rewrite strategy fields are not exposed at HTTP level.",
+    "context": [
+      "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md is comparison material; src/ragflow_lite/application/CONTRACTS.md and src/ragflow_lite/api/CONTRACTS.md define active rewrite/API boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/application/CONTRACTS.md",
+        "src/ragflow_lite/api/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/specs/2026-05-11-minirag-gated-retrieval-rewrite.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-059",
+    "input": "Compare old structurer retry planning with current metric/eval expectations for unanswerable cases.",
+    "expected_output": "The structurer retry plan is historical runtime planning material and does not define eval metric policy. The current eval contract says answerability is case metadata with values `answerable` or `unanswerable`; unanswerable cases do not use `Contextual Precision` or `Contextual Recall` merely because they include an expected refusal answer. The current application/evidence contracts separately define structurer retry and degraded fallback behavior for DiscoRAG runtime stages.",
+    "expectedOutput": "The structurer retry plan is historical runtime planning material and does not define eval metric policy. The current eval contract says answerability is case metadata with values `answerable` or `unanswerable`; unanswerable cases do not use `Contextual Precision` or `Contextual Recall` merely because they include an expected refusal answer. The current application/evidence contracts separately define structurer retry and degraded fallback behavior for DiscoRAG runtime stages.",
+    "context": [
+      "docs/superpowers/plans/2026-05-10-discorag-structurer-retry-timeout-repair-plan.md is comparison material; tests/evals/CONTRACTS.md defines eval metric policy; src/ragflow_lite/application/CONTRACTS.md defines runtime fallback separation."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-10-discorag-structurer-retry-timeout-repair-plan.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "tests/evals/CONTRACTS.md",
+        "src/ragflow_lite/application/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-10-discorag-structurer-retry-timeout-repair-plan.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
+  },
+  {
+    "name": "private-bootstrap-060",
+    "input": "Compare the old agent system-prompt identity plan with the active route/runtime redaction contracts.",
+    "expected_output": "The system-prompt identity plan is historical comparison material. Active HTTP behavior comes from the API contract: agent routes expose MicroRAG-branded, UI-safe session/message fields only and must not leak external runtime branding or raw ACP data. Active runtime behavior comes from the infrastructure contract: ACP raw results remain internal, redaction is available for result/error data, `AgentSessionStore` stores local UI metadata only, and product runtime settings come from project-owned runtime paths and environment fields.",
+    "expectedOutput": "The system-prompt identity plan is historical comparison material. Active HTTP behavior comes from the API contract: agent routes expose MicroRAG-branded, UI-safe session/message fields only and must not leak external runtime branding or raw ACP data. Active runtime behavior comes from the infrastructure contract: ACP raw results remain internal, redaction is available for result/error data, `AgentSessionStore` stores local UI metadata only, and product runtime settings come from project-owned runtime paths and environment fields.",
+    "context": [
+      "docs/superpowers/plans/2026-05-16-microrag-agent-system-prompt-identity-boundary.md is comparison material; src/ragflow_lite/api/CONTRACTS.md and src/ragflow_lite/infrastructure/CONTRACTS.md define active redaction/runtime boundaries."
+    ],
+    "sourceFile": "microrag-private-bootstrap.md",
+    "source_file": "microrag-private-bootstrap.md",
+    "additionalMetadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-16-microrag-agent-system-prompt-identity-boundary.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    },
+    "additional_metadata": {
+      "document_fixture": "microrag-private-bootstrap.md",
+      "top_k": 6,
+      "case_type": "comparison",
+      "authority_rule": "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior.",
+      "required_authoritative_sources": [
+        "src/ragflow_lite/api/CONTRACTS.md",
+        "src/ragflow_lite/infrastructure/CONTRACTS.md"
+      ],
+      "distractor_sources": [
+        "docs/superpowers/plans/2026-05-16-microrag-agent-system-prompt-identity-boundary.md"
+      ],
+      "answerability": "answerable",
+      "corpus_fixture": "microrag-private-bootstrap-snapshot"
+    }
   }
 ]

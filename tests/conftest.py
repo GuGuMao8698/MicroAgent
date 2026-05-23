@@ -69,7 +69,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help=(
             "maximum concurrent golden cases for deepeval RAG evaluation runs; "
-            "defaults to RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY or 20"
+            "defaults to RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY or 60"
         ),
     )
 

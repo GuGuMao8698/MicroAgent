@@ -13,11 +13,11 @@ PRIVATE_BOOTSTRAP_SNAPSHOT_DIR = "microrag-private-bootstrap-snapshot"
 PRIVATE_BOOTSTRAP_DRAFT_GOLDENS = "private_bootstrap_goldens.draft.json"
 AUTHORITY_RULE = "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior."
 EXPECTED_CASE_COUNTS: Mapping[str, int] = {
-    "current_contract_qa": 8,
-    "multi_doc_synthesis": 4,
-    "stale_plan_trap": 4,
-    "negative_missing_evidence": 2,
-    "comparison": 2,
+    "current_contract_qa": 12,
+    "multi_doc_synthesis": 20,
+    "stale_plan_trap": 12,
+    "negative_missing_evidence": 6,
+    "comparison": 10,
 }
 
 
@@ -137,6 +137,25 @@ def load_manifest(snapshot_root: Path) -> list[ManifestEntry]:
     return [ManifestEntry(**entry) for entry in raw_entries]
 
 
+def validate_snapshot_manifest(snapshot_root: Path) -> list[ManifestEntry]:
+    entries = load_manifest(snapshot_root)
+    for entry in entries:
+        snapshot_path = snapshot_root / entry.snapshot_path
+        if not snapshot_path.is_file():
+            raise RuntimeError(
+                "private bootstrap snapshot manifest references missing snapshot "
+                f"file: {entry.original_path} -> {entry.snapshot_path}"
+            )
+        actual_sha256 = sha256_file(snapshot_path)
+        if entry.sha256 != actual_sha256:
+            raise RuntimeError(
+                "private bootstrap snapshot manifest hash mismatch; corrupt "
+                f"snapshot file: {entry.original_path} -> {entry.snapshot_path} "
+                f"(expected {entry.sha256}, got {actual_sha256})"
+            )
+    return entries
+
+
 def _metadata_for_case(
     item: Mapping[str, object], *, index: int
 ) -> Mapping[str, object]:
@@ -227,8 +246,11 @@ def validate_goldens_payload(
 ) -> None:
     if not isinstance(payload, list):
         raise RuntimeError("private bootstrap goldens must be a JSON array.")
-    if len(payload) != sum(EXPECTED_CASE_COUNTS.values()):
-        raise RuntimeError("private bootstrap goldens must contain exactly 20 cases.")
+    expected_total = sum(EXPECTED_CASE_COUNTS.values())
+    if len(payload) != expected_total:
+        raise RuntimeError(
+            f"private bootstrap goldens must contain exactly {expected_total} cases."
+        )
 
     manifest_paths = (
         {entry.original_path for entry in manifest_entries}

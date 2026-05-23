@@ -29,7 +29,7 @@ Eval-specific contracts. Navigation lives in [AGENTS.md](./AGENTS.md).
 
 - The live DeepEval test uploads the shared fixture corpus before starting concurrent case evaluation.
 - Golden cases run with bounded case-level concurrency.
-- Default case concurrency is `20`.
+- Default case concurrency is `60`.
 - Preferred selector: `--deepeval-case-concurrency <N>`.
 - Fallback selector when a DeepEval CLI version does not forward custom pytest options: `RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY`.
 - The explicit pytest option wins over the environment fallback.
@@ -62,7 +62,8 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 - `CONTRACTS.md` and `AGENTS.md` snapshot entries are authoritative sources.
 - `docs/superpowers` snapshot entries are historical distractors and must not be the sole support for current-runtime claims.
 - `tests/fixtures/evals/private_bootstrap_goldens.draft.json` is the review-stage artifact.
-- `tests/fixtures/evals/synthetic_goldens.json` remains the active DeepEval artifact consumed by `tests/eval_support.py`.
+- `tests/fixtures/evals/synthetic_goldens.json` is the active 60-case private bootstrap DeepEval artifact consumed by `tests/eval_support.py`.
+- The active 60-case distribution is: 12 `current_contract_qa`, 20 `multi_doc_synthesis`, 12 `stale_plan_trap`, 6 `negative_missing_evidence`, and 10 `comparison`.
 - Private bootstrap golden metadata must include `corpus_fixture = "microrag-private-bootstrap-snapshot"` and `document_fixture = "microrag-private-bootstrap.md"`; `document_fixture` is compatibility metadata, not the active knowledge-base input.
 - Run `tests/evals/build_private_bootstrap_goldens.py` before replacing the active artifact.
 

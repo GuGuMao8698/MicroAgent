@@ -33,7 +33,7 @@ _JUDGE_MODEL_ENV = {
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
-    "microrag-private-bootstrap-snapshot": 20,
+    "microrag-private-bootstrap-snapshot": 60,
 }
 
 
@@ -53,8 +53,8 @@ def _runner_case(name: str) -> RagEvalCase:
     )
 
 
-def test_resolve_deepeval_case_concurrency_defaults_to_twenty() -> None:
-    assert resolve_deepeval_case_concurrency(None, {}) == 20
+def test_resolve_deepeval_case_concurrency_defaults_to_sixty() -> None:
+    assert resolve_deepeval_case_concurrency(None, {}) == 60
 
 
 def test_resolve_deepeval_case_concurrency_prefers_cli_value() -> None:
@@ -512,7 +512,7 @@ def test_seed_dataset_tracks_generated_eval_docs_with_references() -> None:
         fixture = case.corpus_fixture or case.document_fixture
         fixture_counts[fixture] = fixture_counts.get(fixture, 0) + 1
 
-    assert len(RAG_EVAL_CASES) == 20
+    assert len(RAG_EVAL_CASES) == 60
     assert fixture_counts == _EXPECTED_EVAL_SOURCE_FILES
     assert all(case.has_reference for case in RAG_EVAL_CASES)
 
