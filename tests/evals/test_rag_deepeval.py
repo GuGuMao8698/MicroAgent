@@ -17,6 +17,14 @@ try:
     from private_bootstrap_goldens import load_manifest  # noqa: E402
 except ModuleNotFoundError:
     from evals.private_bootstrap_goldens import load_manifest  # noqa: E402
+try:
+    from private_bootstrap_eval_corpus import (  # noqa: E402
+        validate_private_bootstrap_reuse_ready,
+    )
+except ModuleNotFoundError:
+    from evals.private_bootstrap_eval_corpus import (  # noqa: E402
+        validate_private_bootstrap_reuse_ready,
+    )
 from eval_support import (  # noqa: E402
     RAG_EVAL_CASES,
     EvalCaseRunResult,
@@ -31,6 +39,7 @@ from eval_support import (  # noqa: E402
     resolve_deepeval_case_concurrency,
     resolve_eval_query_mode,
     run_deepeval_cases_concurrently,
+    select_deepeval_cases,
 )
 
 _CONTENT_TYPES = {
@@ -152,10 +161,13 @@ def _evaluate_rag_case(
     query_mode: EvalQueryMode,
     judge_model: Any,
 ) -> dict[str, Any]:
+    case_started = time.monotonic()
+    query_started = time.monotonic()
     query_response = client.post(
         "/api/v0/queries",
         json=build_eval_query_payload(case, query_mode=query_mode),
     )
+    app_query_seconds = time.monotonic() - query_started
     assert query_response.status_code == 200, (
         f"{case.name} query returned HTTP {query_response.status_code}: "
         f"{query_response.text}"
@@ -177,6 +189,7 @@ def _evaluate_rag_case(
         model=judge_model,
         query_mode=query_mode,
     )
+    deepeval_metric_seconds = 0.0
 
     def build_snapshot() -> dict[str, Any]:
         return {
@@ -198,13 +211,21 @@ def _evaluate_rag_case(
                 m.__class__.__name__: {"score": m.score, "reason": m.reason}
                 for m in metrics
             },
+            "timings": {
+                "app_query_seconds": app_query_seconds,
+                "deepeval_metric_seconds": deepeval_metric_seconds,
+                "total_case_seconds": time.monotonic() - case_started,
+            },
         }
 
+    metric_started = time.monotonic()
     try:
         assert_test(test_case, metrics=metrics)
     except AssertionError as exc:
+        deepeval_metric_seconds = time.monotonic() - metric_started
         attach_eval_case_failure_snapshot(exc, build_snapshot())
         raise
+    deepeval_metric_seconds = time.monotonic() - metric_started
 
     return build_snapshot()
 
@@ -250,21 +271,30 @@ def _raise_for_case_failures(failures: list[dict[str, str]]) -> None:
 
 def test_single_turn_rag_eval_produces_quality_snapshot(
     client: Any,
+    app_settings: Any,
     fixture_documents_dir: Path,
     request: pytest.FixtureRequest,
 ) -> None:
     vector_index = client.app.state.services.ingestion_pipeline.vector_index
     assert vector_index._client.__class__.__name__ != "FakeInfinityClient"
 
+    raw_case_range = request.config.getoption("--deepeval-case-range")
+    selected_cases = select_deepeval_cases(RAG_EVAL_CASES, raw_range=raw_case_range)
+    corpus_mode = request.config.getoption("--deepeval-corpus-mode")
     fixture_names = _fixture_documents_for_cases(
         fixture_documents_dir=fixture_documents_dir,
-        cases=RAG_EVAL_CASES,
+        cases=selected_cases,
     )
-    document_statuses = _upload_fixture_documents(
-        client,
-        fixture_documents_dir,
-        fixture_names,
-    )
+    if corpus_mode == "reuse":
+        reusable_manifest = validate_private_bootstrap_reuse_ready(app_settings)
+        document_statuses: list[dict[str, Any]] = []
+    else:
+        reusable_manifest = None
+        document_statuses = _upload_fixture_documents(
+            client,
+            fixture_documents_dir,
+            fixture_names,
+        )
 
     query_mode = resolve_eval_query_mode(
         request.config.getoption("--query-mode"),
@@ -277,7 +307,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
     )
     effective_case_workers = bounded_deepeval_case_workers(
         case_concurrency,
-        case_count=len(RAG_EVAL_CASES),
+        case_count=len(selected_cases),
     )
 
     def evaluate_case(case: RagEvalCase) -> dict[str, Any]:
@@ -289,7 +319,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         )
 
     case_results = run_deepeval_cases_concurrently(
-        RAG_EVAL_CASES,
+        selected_cases,
         configured_concurrency=case_concurrency,
         evaluate_case=evaluate_case,
     )
@@ -302,9 +332,14 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
 
     snapshot = {
         "corpus": {
+            "mode": corpus_mode,
             "fixture_count": len(fixture_names),
-            "fixture_root": RAG_EVAL_CASES[0].corpus_fixture,
-            "document_count": len(document_statuses),
+            "fixture_root": selected_cases[0].corpus_fixture,
+            "document_count": (
+                reusable_manifest.get("document_count")
+                if reusable_manifest is not None
+                else len(document_statuses)
+            ),
             "document_statuses": [
                 {
                     "document_id": document["document_id"],
@@ -313,14 +348,20 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
                 }
                 for document in document_statuses
             ],
+            "reusable_manifest": reusable_manifest,
         },
         "e2e": {
             "query_mode": query_mode,
+            "case_selector": {
+                "raw_range": raw_case_range,
+                "selected_case_count": len(selected_cases),
+                "active_case_count": len(RAG_EVAL_CASES),
+            },
             "case_concurrency": {
                 "configured": case_concurrency,
                 "effective_workers": effective_case_workers,
             },
-            "case_count": len(RAG_EVAL_CASES),
+            "case_count": len(selected_cases),
             "completed_case_count": len(case_snapshots),
             "failed_case_count": len(case_failures),
             "cases": case_snapshots,

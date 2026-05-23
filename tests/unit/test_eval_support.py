@@ -288,6 +288,63 @@ def test_evaluate_rag_case_preserves_metrics_after_assertion_failure(
             "reason": "judge populated before failure",
         }
     }
+    assert snapshot["timings"]["app_query_seconds"] >= 0
+    assert snapshot["timings"]["deepeval_metric_seconds"] >= 0
+    assert snapshot["timings"]["total_case_seconds"] >= 0
+
+
+def test_evaluate_rag_case_records_timing_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import test_rag_deepeval
+
+    class FakeResponse:
+        status_code = 200
+        text = "ok"
+
+        def json(self) -> dict[str, object]:
+            return {
+                "answer": "A populated answer.",
+                "contexts": [
+                    {
+                        "document_id": "doc-1",
+                        "text": "Source context",
+                        "metadata": {"filename": "source.md"},
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def post(self, path: str, *, json: dict[str, object]) -> FakeResponse:
+            assert path == "/api/v0/queries"
+            return FakeResponse()
+
+    class PopulatedMetric:
+        score = 1.0
+        reason = "ok"
+
+    monkeypatch.setattr(
+        test_rag_deepeval,
+        "build_metrics_for_case",
+        lambda *args, **kwargs: [PopulatedMetric()],
+    )
+    monkeypatch.setattr(test_rag_deepeval, "assert_test", lambda *args, **kwargs: None)
+
+    snapshot = test_rag_deepeval._evaluate_rag_case(
+        client=FakeClient(),
+        case=_runner_case("timed"),
+        query_mode="discorag",
+        judge_model=object(),
+    )
+
+    assert set(snapshot["timings"]) == {
+        "app_query_seconds",
+        "deepeval_metric_seconds",
+        "total_case_seconds",
+    }
+    assert snapshot["timings"]["app_query_seconds"] >= 0
+    assert snapshot["timings"]["deepeval_metric_seconds"] >= 0
+    assert snapshot["timings"]["total_case_seconds"] >= 0
 
 
 def test_build_rag_test_case_with_expected_output() -> None:
