@@ -14,6 +14,7 @@ try:
         create_snapshot,
         discover_corpus_paths,
         validate_goldens_payload,
+        validate_snapshot_manifest,
     )
 except ModuleNotFoundError:
     from evals.private_bootstrap_goldens import (
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
         create_snapshot,
         discover_corpus_paths,
         validate_goldens_payload,
+        validate_snapshot_manifest,
     )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -77,6 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output path. If omitted, only validates the draft artifact.",
     )
+    parser.add_argument(
+        "--rebuild-snapshot",
+        action="store_true",
+        help=(
+            "Rebuild the frozen snapshot from current repo sources before validation. "
+            "By default, validate against the existing frozen snapshot manifest."
+        ),
+    )
     return parser
 
 
@@ -90,13 +100,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_FIXTURE_NAME
     )
 
-    source_paths = discover_corpus_paths(repo_root)
-    entries = create_snapshot(
-        repo_root=repo_root,
-        source_paths=source_paths,
-        snapshot_root=snapshot_root,
-    )
-    build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
+    if args.rebuild_snapshot:
+        source_paths = discover_corpus_paths(repo_root)
+        entries = create_snapshot(
+            repo_root=repo_root,
+            source_paths=source_paths,
+            snapshot_root=snapshot_root,
+        )
+    else:
+        entries = validate_snapshot_manifest(snapshot_root)
+    if args.rebuild_snapshot or not fixture_path.exists():
+        build_packed_fixture(snapshot_root=snapshot_root, fixture_path=fixture_path)
 
     draft_payload = normalize_private_bootstrap_payload(
         json.loads(args.draft_goldens.read_text(encoding="utf-8"))

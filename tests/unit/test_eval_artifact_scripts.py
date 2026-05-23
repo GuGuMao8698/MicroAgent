@@ -37,13 +37,14 @@ from evals.optimize_prompt import (  # noqa: E402
 )
 from evals.private_bootstrap_goldens import (  # noqa: E402
     AUTHORITY_RULE,
+    EXPECTED_CASE_COUNTS,
     PRIVATE_BOOTSTRAP_SNAPSHOT_DIR,
     CorpusRole,
     ManifestEntry,
     classify_corpus_path,
     discover_corpus_paths,
-    load_manifest,
     sha256_file,
+    validate_snapshot_manifest,
 )
 
 
@@ -307,21 +308,21 @@ def _private_bootstrap_payload() -> list[dict[str, object]]:
         _private_bootstrap_case(
             name=f"current-{index}", case_type="current_contract_qa"
         )
-        for index in range(8)
+        for index in range(EXPECTED_CASE_COUNTS["current_contract_qa"])
     )
     payload.extend(
         _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
-        for index in range(4)
+        for index in range(EXPECTED_CASE_COUNTS["multi_doc_synthesis"])
     )
     payload.extend(
         _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
-        for index in range(4)
+        for index in range(EXPECTED_CASE_COUNTS["stale_plan_trap"])
     )
     payload.extend(
         _private_bootstrap_case(
             name=f"negative-{index}", case_type="negative_missing_evidence"
         )
-        for index in range(2)
+        for index in range(EXPECTED_CASE_COUNTS["negative_missing_evidence"])
     )
     payload.extend(
         _private_bootstrap_case(
@@ -330,7 +331,7 @@ def _private_bootstrap_payload() -> list[dict[str, object]]:
             required_sources=["AGENTS.md"],
             distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
         )
-        for index in range(2)
+        for index in range(EXPECTED_CASE_COUNTS["comparison"])
     )
     return payload
 
@@ -355,6 +356,83 @@ def _private_bootstrap_manifest_entries() -> list[ManifestEntry]:
             start=1,
         )
     ]
+
+
+def _write_frozen_snapshot_cli_fixture(
+    root: Path,
+) -> tuple[Path, Path, dict[str, object]]:
+    root.mkdir()
+    source = root / "AGENTS.md"
+    source.write_text("# Root\n\nCurrent live source changed.\n", encoding="utf-8")
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+    snapshot_root.mkdir(parents=True)
+    snapshot_text_by_path = {
+        "snapshot/1.md": "# Root\n\nFrozen snapshot source.\n",
+        "snapshot/2.md": "# Eval Contract\n\nFrozen eval contract.\n",
+        "snapshot/3.md": "# Spec\n\nFrozen spec distractor.\n",
+        "snapshot/4.md": "# Plan\n\nFrozen plan distractor.\n",
+    }
+    for relative_path, text in snapshot_text_by_path.items():
+        snapshot_file = snapshot_root / relative_path
+        snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_file.write_text(text, encoding="utf-8")
+    manifest: dict[str, object] = {
+        "dataset": "microrag-private-bootstrap",
+        "entries": [
+            {
+                "original_path": "AGENTS.md",
+                "snapshot_path": "snapshot/1.md",
+                "role": "authoritative",
+                "topic": "root",
+                "status": "active",
+                "sha256": _sha256_text(snapshot_text_by_path["snapshot/1.md"]),
+            },
+            {
+                "original_path": "tests/evals/CONTRACTS.md",
+                "snapshot_path": "snapshot/2.md",
+                "role": "authoritative",
+                "topic": "tests/evals",
+                "status": "active",
+                "sha256": _sha256_text(snapshot_text_by_path["snapshot/2.md"]),
+            },
+            {
+                "original_path": "docs/superpowers/specs/2026-05-18-example.md",
+                "snapshot_path": "snapshot/3.md",
+                "role": "distractor",
+                "topic": "2026-05-18-example",
+                "status": "historical",
+                "sha256": _sha256_text(snapshot_text_by_path["snapshot/3.md"]),
+            },
+            {
+                "original_path": "docs/superpowers/plans/2026-05-19-plan.md",
+                "snapshot_path": "snapshot/4.md",
+                "role": "distractor",
+                "topic": "2026-05-19-plan",
+                "status": "historical",
+                "sha256": _sha256_text(snapshot_text_by_path["snapshot/4.md"]),
+            },
+        ],
+    }
+    manifest_path = snapshot_root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    fixture_path = (
+        root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
+    )
+    fixture_path.write_text(
+        "# Existing Packed Fixture\n\nKeep this exact text.\n", encoding="utf-8"
+    )
+    draft = (
+        root / "tests" / "fixtures" / "evals" / "private_bootstrap_goldens.draft.json"
+    )
+    draft.parent.mkdir(parents=True)
+    draft.write_text(json.dumps(_private_bootstrap_payload()), encoding="utf-8")
+    return draft, fixture_path, manifest
 
 
 def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
@@ -387,21 +465,21 @@ def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
         _private_bootstrap_case(
             name=f"current-{index}", case_type="current_contract_qa"
         )
-        for index in range(8)
+        for index in range(EXPECTED_CASE_COUNTS["current_contract_qa"])
     )
     cases.extend(
         _private_bootstrap_case(name=f"multi-{index}", case_type="multi_doc_synthesis")
-        for index in range(4)
+        for index in range(EXPECTED_CASE_COUNTS["multi_doc_synthesis"])
     )
     cases.extend(
         _private_bootstrap_case(name=f"stale-{index}", case_type="stale_plan_trap")
-        for index in range(4)
+        for index in range(EXPECTED_CASE_COUNTS["stale_plan_trap"])
     )
     cases.extend(
         _private_bootstrap_case(
             name=f"negative-{index}", case_type="negative_missing_evidence"
         )
-        for index in range(2)
+        for index in range(EXPECTED_CASE_COUNTS["negative_missing_evidence"])
     )
     cases.extend(
         _private_bootstrap_case(
@@ -409,13 +487,21 @@ def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
             case_type="comparison",
             distractor_sources=["docs/superpowers/plans/2026-05-19-plan.md"],
         )
-        for index in range(2)
+        for index in range(EXPECTED_CASE_COUNTS["comparison"])
     )
     draft.write_text(json.dumps(cases), encoding="utf-8")
 
     from evals.build_private_bootstrap_goldens import main
 
-    main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+    main(
+        [
+            "--repo-root",
+            str(root),
+            "--draft-goldens",
+            str(draft),
+            "--rebuild-snapshot",
+        ]
+    )
 
     assert (
         root / "tests" / "fixtures" / "documents" / "microrag-private-bootstrap.md"
@@ -430,10 +516,103 @@ def test_private_bootstrap_cli_builds_snapshot_fixture_and_validates_draft(
     ).exists()
 
 
+def test_private_bootstrap_cli_default_validates_existing_frozen_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    draft, fixture_path, manifest = _write_frozen_snapshot_cli_fixture(root)
+
+    from evals.build_private_bootstrap_goldens import main
+
+    main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+
+    snapshot_root = (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+    )
+    manifest_path = snapshot_root / "manifest.json"
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == manifest
+    assert (snapshot_root / "snapshot" / "1.md").read_text(
+        encoding="utf-8"
+    ) == "# Root\n\nFrozen snapshot source.\n"
+    assert (
+        fixture_path.read_text(encoding="utf-8")
+        == "# Existing Packed Fixture\n\nKeep this exact text.\n"
+    )
+
+
+def test_private_bootstrap_cli_default_rejects_missing_snapshot_file(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    draft, _, _ = _write_frozen_snapshot_cli_fixture(root)
+    (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+        / "snapshot"
+        / "1.md"
+    ).unlink()
+
+    from evals.build_private_bootstrap_goldens import main
+
+    with pytest.raises(RuntimeError, match="missing.*snapshot"):
+        main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+
+
+def test_private_bootstrap_cli_default_rejects_snapshot_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    draft, _, _ = _write_frozen_snapshot_cli_fixture(root)
+    (
+        root
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / "microrag-private-bootstrap-snapshot"
+        / "snapshot"
+        / "1.md"
+    ).write_text("# Root\n\nCorrupt snapshot source.\n", encoding="utf-8")
+
+    from evals.build_private_bootstrap_goldens import main
+
+    with pytest.raises(RuntimeError, match="hash mismatch|corrupt"):
+        main(["--repo-root", str(root), "--draft-goldens", str(draft)])
+
+
 def test_private_bootstrap_validation_accepts_expected_case_distribution() -> None:
     from evals.private_bootstrap_goldens import validate_goldens_payload
 
     validate_goldens_payload(_private_bootstrap_payload())
+
+
+def test_private_bootstrap_checked_in_draft_has_expected_case_distribution() -> None:
+    draft_path = (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "fixtures"
+        / "evals"
+        / "private_bootstrap_goldens.draft.json"
+    )
+    payload = json.loads(draft_path.read_text(encoding="utf-8"))
+
+    from evals.private_bootstrap_goldens import validate_goldens_payload
+
+    validate_goldens_payload(payload)
+
+    counts = {case_type: 0 for case_type in EXPECTED_CASE_COUNTS}
+    for item in payload:
+        assert item["additionalMetadata"]["top_k"] == 6
+        counts[item["additionalMetadata"]["case_type"]] += 1
+
+    assert len(payload) == sum(EXPECTED_CASE_COUNTS.values())
+    assert counts == dict(EXPECTED_CASE_COUNTS)
 
 
 def test_private_bootstrap_validation_accepts_manifest_sources() -> None:
@@ -519,13 +698,7 @@ def test_private_bootstrap_validation_rejects_wrong_authority_rule() -> None:
 def test_private_bootstrap_validation_rejects_stale_plan_only_answer_source() -> None:
     from evals.private_bootstrap_goldens import validate_goldens_payload
 
-    payload = [
-        _private_bootstrap_case(
-            name=f"current-{index}",
-            case_type="current_contract_qa",
-        )
-        for index in range(20)
-    ]
+    payload = _private_bootstrap_payload()
     payload[0]["additionalMetadata"]["required_authoritative_sources"] = [
         "docs/superpowers/specs/2026-05-18-example.md"
     ]
@@ -617,7 +790,7 @@ def test_golden_to_payload_preserves_eval_fixture_metadata() -> None:
 def test_checked_in_goldens_artifact_loads_via_prompt_consumer() -> None:
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 20
+    assert len(goldens) == 60
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
@@ -637,19 +810,17 @@ def test_checked_in_goldens_artifact_mirrors_context_into_retrieval_context() ->
 
 def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
     payload = json.loads(DEFAULT_GOLDENS_PATH.read_text(encoding="utf-8"))
-
-    from evals.private_bootstrap_goldens import validate_goldens_payload
-
-    validate_goldens_payload(payload)
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 20
+    assert len(goldens) == 60
     assert {golden.source_file for golden in goldens} == {
         "microrag-private-bootstrap.md"
     }
+    assert {item["sourceFile"] for item in payload} == {"microrag-private-bootstrap.md"}
     assert {item["additionalMetadata"]["corpus_fixture"] for item in payload} == {
         PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
     }
+    assert all(item["additionalMetadata"]["top_k"] == 6 for item in payload)
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
@@ -657,18 +828,19 @@ def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
 
 
 def test_private_bootstrap_snapshot_matches_current_source_files() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
     snapshot_root = (
-        repo_root / "tests" / "fixtures" / "documents" / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "fixtures"
+        / "documents"
+        / PRIVATE_BOOTSTRAP_SNAPSHOT_DIR
     )
 
-    for entry in load_manifest(snapshot_root):
-        source_path = repo_root / entry.original_path
+    entries = validate_snapshot_manifest(snapshot_root)
+
+    for entry in entries:
         snapshot_path = snapshot_root / entry.snapshot_path
         assert snapshot_path.is_file()
-        assert snapshot_path.read_text(encoding="utf-8") == source_path.read_text(
-            encoding="utf-8"
-        )
         assert entry.sha256 == sha256_file(snapshot_path)
 
 
