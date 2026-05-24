@@ -17,14 +17,6 @@ try:
     from private_bootstrap_goldens import load_manifest  # noqa: E402
 except ModuleNotFoundError:
     from evals.private_bootstrap_goldens import load_manifest  # noqa: E402
-try:
-    from private_bootstrap_eval_corpus import (  # noqa: E402
-        validate_private_bootstrap_reuse_ready,
-    )
-except ModuleNotFoundError:
-    from evals.private_bootstrap_eval_corpus import (  # noqa: E402
-        validate_private_bootstrap_reuse_ready,
-    )
 from eval_support import (  # noqa: E402
     RAG_EVAL_CASES,
     EvalCaseRunResult,
@@ -273,6 +265,7 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
     client: Any,
     app_settings: Any,
     fixture_documents_dir: Path,
+    deepeval_reusable_manifest: dict[str, Any] | None,
     request: pytest.FixtureRequest,
 ) -> None:
     vector_index = client.app.state.services.ingestion_pipeline.vector_index
@@ -286,7 +279,8 @@ def test_single_turn_rag_eval_produces_quality_snapshot(
         cases=selected_cases,
     )
     if corpus_mode == "reuse":
-        reusable_manifest = validate_private_bootstrap_reuse_ready(app_settings)
+        reusable_manifest = deepeval_reusable_manifest
+        assert reusable_manifest is not None
         document_statuses: list[dict[str, Any]] = []
     else:
         reusable_manifest = None

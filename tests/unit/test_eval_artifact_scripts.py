@@ -58,7 +58,11 @@ from evals.private_bootstrap_goldens import (  # noqa: E402
     sha256_file,
     validate_snapshot_manifest,
 )
-from evals.summarize_results import _RUN_ID_RE, merge_result_summaries  # noqa: E402
+from evals.summarize_results import (  # noqa: E402
+    _RUN_ID_RE,
+    merge_result_summaries,
+    summarize_with_active_case_metadata,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -514,6 +518,24 @@ def test_merge_result_summaries_rejects_query_mode_mismatch() -> None:
             active_case_order=["case-1"],
             raw_inputs=["batch-a"],
         )
+
+
+def test_summarize_with_active_case_metadata_marks_single_batch_partial() -> None:
+    summary = summarize_with_active_case_metadata(
+        _summary_with_cases("case-2"),
+        query_mode="discorag",
+        active_case_order=["case-1", "case-2", "case-3"],
+        raw_input="batch-single",
+        run_id="20260523_121212.discorag",
+    )
+
+    assert [case["name"] for case in summary["cases"]] == ["case-2"]
+    assert summary["case_count"] == 3
+    assert summary["completed_case_count"] == 1
+    assert summary["missing_case_count"] == 2
+    assert summary["missing_cases"] == ["case-1", "case-3"]
+    assert summary["merged_raw_inputs"] == ["batch-single"]
+    assert summary["full_report_valid"] is False
 
 
 def test_summarize_results_direct_script_merges_multiple_inputs(

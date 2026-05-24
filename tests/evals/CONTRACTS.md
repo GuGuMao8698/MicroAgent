@@ -90,6 +90,7 @@ Placeholder detection uses `_PLACEHOLDER_ENV_VALUES = {"test-deepseek-api-key", 
 - Empty selected case sets are errors.
 - `summarize_results.py` accepts repeated `--results` inputs for batch merge.
 - Merged reports reject duplicate case names, report missing active cases, and order cases by `tests/fixtures/evals/synthetic_goldens.json`.
+- Single-input summaries also include active-suite completeness metadata so ranged batches cannot masquerade as complete latest reports.
 - A merged 60-case report is valid only when every active case is present exactly once.
 
 ## Default deepeval model

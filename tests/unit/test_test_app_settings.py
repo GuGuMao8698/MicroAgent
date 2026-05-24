@@ -21,6 +21,7 @@ class _FakeConfig:
 class _FakeRequest:
     def __init__(self, options: dict[str, object]) -> None:
         self.config = _FakeConfig(options)
+        self.node: object | None = None
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -95,6 +96,46 @@ def test_app_settings_use_test_scoped_tables_for_deepeval_fresh(
     assert settings.infinity_chunk_table.startswith("chunks_")
     assert settings.infinity_graph_entity_table.startswith("graph_entities_")
     assert settings.infinity_graph_relationship_table.startswith("graph_relationships_")
+
+
+def test_deepeval_reuse_manifest_validates_before_app_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    request = _FakeRequest(
+        {
+            "--run-deepeval": True,
+            "--deepeval-corpus-mode": "reuse",
+        }
+    )
+    calls: list[str] = []
+
+    class _FakeNode:
+        def get_closest_marker(self, name: str) -> object | None:
+            assert name == "deepeval"
+            return object()
+
+    request.node = _FakeNode()
+
+    def fake_validate(observed_settings: Settings) -> dict[str, object]:
+        assert observed_settings is settings
+        calls.append("validated")
+        return {"corpus": "private-bootstrap"}
+
+    monkeypatch.setattr(
+        conftest,
+        "validate_private_bootstrap_reuse_ready",
+        fake_validate,
+    )
+
+    manifest = conftest._validate_deepeval_reuse_corpus_for_settings(
+        settings,
+        request,
+    )
+
+    assert manifest == {"corpus": "private-bootstrap"}
+    assert calls == ["validated"]
 
 
 def test_build_test_scope_suffix_changes_when_only_parent_path_changes() -> None:

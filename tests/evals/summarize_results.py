@@ -430,6 +430,23 @@ def merge_result_summaries(
     }
 
 
+def summarize_with_active_case_metadata(
+    summary: dict[str, Any],
+    *,
+    query_mode: QueryMode,
+    active_case_order: list[str],
+    raw_input: str,
+    run_id: str,
+) -> dict[str, Any]:
+    return merge_result_summaries(
+        [summary],
+        query_mode=query_mode,
+        active_case_order=active_case_order,
+        raw_inputs=[raw_input],
+        run_id=run_id,
+    )
+
+
 def _normalize_metric_key(name: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
     return normalized.strip("_")
@@ -662,20 +679,27 @@ def main() -> None:
         )
         for path in summary_paths
     ]
+    from eval_support import RAG_EVAL_CASES
+
+    active_case_order = [case.name for case in RAG_EVAL_CASES]
     if len(summaries) == 1:
-        summary = summaries[0]
         default_run_id = apply_query_mode_to_run_id(
             infer_run_id(summary_paths[0]),
             args.query_mode,
         )
+        summary = summarize_with_active_case_metadata(
+            summaries[0],
+            query_mode=args.query_mode,
+            active_case_order=active_case_order,
+            raw_input=str(summary_paths[0]),
+            run_id=default_run_id,
+        )
     else:
-        from eval_support import RAG_EVAL_CASES
-
         merged_run_id = merged_run_id_from_inputs(summary_paths, args.query_mode)
         summary = merge_result_summaries(
             summaries,
             query_mode=args.query_mode,
-            active_case_order=[case.name for case in RAG_EVAL_CASES],
+            active_case_order=active_case_order,
             raw_inputs=[str(path) for path in summary_paths],
             run_id=merged_run_id,
         )

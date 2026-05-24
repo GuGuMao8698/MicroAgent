@@ -20,7 +20,10 @@ if str(EVALS_PATH) not in sys.path:
     sys.path.insert(0, str(EVALS_PATH))
 
 from eval_support import EVAL_QUERY_MODES, validate_deepeval_env
-from evals.private_bootstrap_eval_corpus import assign_private_bootstrap_eval_tables
+from evals.private_bootstrap_eval_corpus import (
+    assign_private_bootstrap_eval_tables,
+    validate_private_bootstrap_reuse_ready,
+)
 from helpers.local_env import load_export_env_file
 from infinity_test_support import (
     assign_isolated_infinity_tables,
@@ -37,6 +40,16 @@ class _PytestOptionConfig(Protocol):
 class _PytestOptionRequest(Protocol):
     @property
     def config(self) -> _PytestOptionConfig: ...
+
+
+def _validate_deepeval_reuse_corpus_for_settings(settings, request):
+    if request.node.get_closest_marker("deepeval") is None:
+        return None
+    if not request.config.getoption("--run-deepeval"):
+        return None
+    if request.config.getoption("--deepeval-corpus-mode") != "reuse":
+        return None
+    return validate_private_bootstrap_reuse_ready(settings)
 
 
 load_export_env_file(PROJECT_ROOT / "data" / "agent-runtime" / "local.env")
@@ -239,7 +252,12 @@ def _install_fake_query_support_clients(app) -> None:
 
 
 @pytest.fixture
-def app(app_settings):
+def deepeval_reusable_manifest(app_settings, request: pytest.FixtureRequest):
+    return _validate_deepeval_reuse_corpus_for_settings(app_settings, request)
+
+
+@pytest.fixture
+def app(app_settings, deepeval_reusable_manifest):
     from ragflow_lite.app import create_app
 
     return create_app(app_settings)
