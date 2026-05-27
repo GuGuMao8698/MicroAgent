@@ -8,6 +8,12 @@ from ragflow_lite.domain.errors import ProcessingError
 _DEFAULT_JSON_MAX_TOKENS = 262144
 _MAX_DEEPSEEK_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 0.5
+DEEPSEEK_DISABLED_THINKING_EXTRA_BODY: dict[str, Any] = {
+    "thinking": {"type": "disabled"},
+}
+DEEPSEEK_ENABLED_THINKING_EXTRA_BODY: dict[str, Any] = {
+    "thinking": {"type": "enabled"},
+}
 _DEEPSEEK_JSON_INSTRUCTION = (
     "Return only one JSON object. Do not include markdown or prose outside the JSON."
 )
@@ -62,6 +68,11 @@ def _should_retry_error(exc: Exception) -> bool:
     )
 
 
+def _is_disabled_thinking(extra_body: dict[str, Any]) -> bool:
+    thinking = extra_body.get("thinking")
+    return isinstance(thinking, dict) and thinking.get("type") == "disabled"
+
+
 class DeepSeekChatCompletionsClient:
     def __init__(
         self,
@@ -69,10 +80,16 @@ class DeepSeekChatCompletionsClient:
         base_url: str,
         model: str,
         reasoning_effort: str,
+        extra_body: dict[str, Any] | None = None,
         client: Any | None = None,
     ) -> None:
         self.model = model
         self.reasoning_effort = reasoning_effort
+        self.extra_body = (
+            dict(DEEPSEEK_ENABLED_THINKING_EXTRA_BODY)
+            if extra_body is None
+            else dict(extra_body)
+        )
         self.client = client or self._build_client(api_key, base_url)
 
     def complete(
@@ -156,9 +173,10 @@ class DeepSeekChatCompletionsClient:
         request: dict[str, Any] = {
             "model": self.model,
             "messages": validated,
-            "reasoning_effort": self.reasoning_effort,
-            "extra_body": {"thinking": {"type": "enabled"}},
+            "extra_body": self.extra_body,
         }
+        if not _is_disabled_thinking(self.extra_body):
+            request["reasoning_effort"] = self.reasoning_effort
         if response_format is not None:
             request["response_format"] = response_format
         if max_tokens is not None:

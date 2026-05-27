@@ -371,7 +371,7 @@ def _wait_for_document_terminal_state(
     client: Any,
     document_id: str,
     *,
-    timeout_seconds: float = 60.0,
+    timeout_seconds: float = 600.0,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_payload: dict[str, Any] | None = None

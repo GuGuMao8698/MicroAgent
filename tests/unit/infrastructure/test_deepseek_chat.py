@@ -90,6 +90,27 @@ def test_deepseek_chat_sends_high_thinking_request() -> None:
     assert "store" not in request
 
 
+def test_deepseek_chat_disabled_thinking_omits_reasoning_effort() -> None:
+    completions = _FakeCompletions("answer")
+    client = DeepSeekChatCompletionsClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        extra_body={"thinking": {"type": "disabled"}},
+        client=_FakeClient(completions),
+    )
+
+    client.complete(
+        instructions="System instructions.",
+        input_text="User input.",
+    )
+
+    request = completions.requests[0]
+    assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "reasoning_effort" not in request
+
+
 def test_deepseek_chat_sends_json_response_format() -> None:
     completions = _FakeCompletions('{"ok": true}')
     client = DeepSeekChatCompletionsClient(

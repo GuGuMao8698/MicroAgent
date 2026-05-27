@@ -179,6 +179,29 @@ def _extractor_for_chunk_output(
     )
 
 
+def test_build_client_disables_deepseek_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class _CapturedDeepSeekClient:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.llms.DeepSeekChatCompletionsClient",
+        _CapturedDeepSeekClient,
+    )
+    extractor = DeepSeekChatIntraChunkDiscourseExtractor(
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+    )
+
+    extractor._build_client("test-key", "https://api.deepseek.com")
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
 def test_deepseek_discourse_extractor_returns_validated_structures() -> None:
     client = _FakeDeepSeekClient(
         json.dumps(
