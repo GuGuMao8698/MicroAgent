@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
@@ -19,6 +20,10 @@ if str(EVALS_PATH) not in sys.path:
     sys.path.insert(0, str(EVALS_PATH))
 
 from eval_support import EVAL_QUERY_MODES, validate_deepeval_env
+from evals.private_bootstrap_eval_corpus import (
+    assign_private_bootstrap_eval_tables,
+    validate_private_bootstrap_reuse_ready,
+)
 from helpers.local_env import load_export_env_file
 from infinity_test_support import (
     assign_isolated_infinity_tables,
@@ -26,6 +31,26 @@ from infinity_test_support import (
     drop_registered_infinity_tables,
     register_infinity_table_cleanup,
 )
+
+
+class _PytestOptionConfig(Protocol):
+    def getoption(self, name: str) -> object: ...
+
+
+class _PytestOptionRequest(Protocol):
+    @property
+    def config(self) -> _PytestOptionConfig: ...
+
+
+def _validate_deepeval_reuse_corpus_for_settings(settings, request):
+    if request.node.get_closest_marker("deepeval") is None:
+        return None
+    if not request.config.getoption("--run-deepeval"):
+        return None
+    if request.config.getoption("--deepeval-corpus-mode") != "reuse":
+        return None
+    return validate_private_bootstrap_reuse_ready(settings)
+
 
 load_export_env_file(PROJECT_ROOT / "data" / "agent-runtime" / "local.env")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-api-key")
@@ -69,8 +94,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help=(
             "maximum concurrent golden cases for deepeval RAG evaluation runs; "
-            "defaults to RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY or 60"
+            "defaults to RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY or 4"
         ),
+    )
+    parser.addoption(
+        "--deepeval-corpus-mode",
+        choices=("fresh", "reuse"),
+        default="reuse",
+        help="deepeval corpus table mode; reuse uses private-bootstrap eval tables",
+    )
+    parser.addoption(
+        "--deepeval-case-range",
+        default=None,
+        help="1-based inclusive deepeval case range START:END",
     )
 
 
@@ -158,8 +194,23 @@ def pytest_sessionfinish(
 from helpers.agent_runtime import setup_test_agent_runtime
 
 
+def _configure_infinity_tables_for_test_settings(
+    settings,
+    tmp_path: Path,
+    request: _PytestOptionRequest,
+):
+    run_deepeval = request.config.getoption("--run-deepeval")
+    corpus_mode = request.config.getoption("--deepeval-corpus-mode")
+    if run_deepeval and corpus_mode == "reuse":
+        return assign_private_bootstrap_eval_tables(settings)
+
+    assign_isolated_infinity_tables(settings, tmp_path)
+    register_infinity_table_cleanup(settings)
+    return settings
+
+
 @pytest.fixture
-def app_settings(tmp_path: Path):
+def app_settings(tmp_path: Path, request: pytest.FixtureRequest):
     from ragflow_lite.config import Settings
 
     paths = setup_test_agent_runtime(tmp_path)
@@ -172,8 +223,7 @@ def app_settings(tmp_path: Path):
         agent_config_dir=str(paths.config_dir),
         microagent_dir=str(paths.microagent_dir),
     )
-    assign_isolated_infinity_tables(settings, tmp_path)
-    register_infinity_table_cleanup(settings)
+    _configure_infinity_tables_for_test_settings(settings, tmp_path, request)
     settings.ensure_directories()
     return settings
 
@@ -202,7 +252,12 @@ def _install_fake_query_support_clients(app) -> None:
 
 
 @pytest.fixture
-def app(app_settings):
+def deepeval_reusable_manifest(app_settings, request: pytest.FixtureRequest):
+    return _validate_deepeval_reuse_corpus_for_settings(app_settings, request)
+
+
+@pytest.fixture
+def app(app_settings, deepeval_reusable_manifest):
     from ragflow_lite.app import create_app
 
     return create_app(app_settings)

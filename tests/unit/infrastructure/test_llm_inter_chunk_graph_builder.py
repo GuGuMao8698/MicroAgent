@@ -817,6 +817,29 @@ def test_provenance_default_provider_is_deepseek() -> None:
     assert builder.provider == "deepseek"
 
 
+def test_build_client_disables_deepseek_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class _CapturedDeepSeekClient:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "ragflow_lite.infrastructure.llms.DeepSeekChatCompletionsClient",
+        _CapturedDeepSeekClient,
+    )
+    builder = LLMInterChunkDiscourseGraphBuilder(
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+    )
+
+    builder._build_client("test-key", "https://api.deepseek.com")
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
 def test_provenance_in_empty_graph_fallback() -> None:
     package = _intra_chunk_package()
 

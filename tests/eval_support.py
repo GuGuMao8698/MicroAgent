@@ -27,7 +27,7 @@ EVAL_QUERY_MODES: tuple[EvalQueryMode, ...] = ("standard", "discorag")
 EVAL_QUERY_MODE_ENV_VAR = "RAGFLOW_LITE_EVAL_QUERY_MODE"
 _DEFAULT_EVAL_QUERY_MODE: EvalQueryMode = "standard"
 DEEPEVAL_CASE_CONCURRENCY_ENV_VAR = "RAGFLOW_LITE_DEEPEVAL_CASE_CONCURRENCY"
-_DEFAULT_DEEPEVAL_CASE_CONCURRENCY = 60
+_DEFAULT_DEEPEVAL_CASE_CONCURRENCY = 4
 _LEADING_JSON_PREFIX_RE = re.compile(r"^\s*json\s*:\s*", re.IGNORECASE)
 _CITE_TOKEN_RE = re.compile(r"<cite:\d+>")
 _CITATION_BRACKETS_RE = re.compile(r"\[\d+\]")
@@ -274,6 +274,38 @@ def resolve_deepeval_case_concurrency(
         raw_value,
         setting_name=DEEPEVAL_CASE_CONCURRENCY_ENV_VAR,
     )
+
+
+def parse_deepeval_case_range(raw_range: str, *, case_count: int) -> tuple[int, int]:
+    if case_count < 0:
+        raise ValueError("case_count must be non-negative.")
+    text = raw_range.strip()
+    match = re.fullmatch(r"([1-9]\d*):([1-9]\d*)", text)
+    if match is None:
+        raise ValueError(
+            "deepeval case range must use 1-based inclusive START:END syntax."
+        )
+    start = int(match.group(1))
+    end = int(match.group(2))
+    if end < start or end > case_count:
+        raise ValueError(
+            "deepeval case range must satisfy 1 <= START <= END <= case count."
+        )
+    return start, end
+
+
+def select_deepeval_cases(
+    cases: Sequence[RagEvalCase],
+    *,
+    raw_range: str | None,
+) -> list[RagEvalCase]:
+    selected = list(cases)
+    if raw_range is not None:
+        start, end = parse_deepeval_case_range(raw_range, case_count=len(selected))
+        selected = selected[start - 1 : end]
+    if not selected:
+        raise ValueError("empty deepeval case selection is not allowed.")
+    return selected
 
 
 def _coerce_positive_int(value: int | str, *, setting_name: str) -> int:

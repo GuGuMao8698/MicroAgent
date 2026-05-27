@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TESTS_PATH = PROJECT_ROOT / "tests"
+if str(TESTS_PATH) not in sys.path:
+    sys.path.insert(0, str(TESTS_PATH))
 DEFAULT_DEEPEVAL_PATH = PROJECT_ROOT / "data" / "deepeval"
 DEFAULT_RESULTS_PATH = DEFAULT_DEEPEVAL_PATH / "raw"
 LEGACY_RESULTS_PATH = PROJECT_ROOT / "data"
@@ -328,6 +333,120 @@ def build_comparison_report(
     }
 
 
+def merge_result_summaries(
+    summaries: list[dict[str, Any]],
+    *,
+    query_mode: QueryMode,
+    active_case_order: list[str],
+    raw_inputs: list[str],
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    if not summaries:
+        raise RuntimeError("At least one deepeval summary is required.")
+
+    active_case_names = set(active_case_order)
+    cases_by_name: dict[str, dict[str, Any]] = {}
+    duplicate_names: set[str] = set()
+    unknown_names: set[str] = set()
+    selected_case_ranges: list[Any] = []
+    total_run_duration = 0.0
+    has_run_duration = False
+    total_evaluation_cost = 0.0
+    has_evaluation_cost = False
+    test_file = summaries[0].get("test_file")
+
+    for summary in summaries:
+        existing_mode = summary.get("query_mode")
+        if existing_mode is not None and existing_mode != query_mode:
+            raise RuntimeError(
+                f"Summary query_mode {existing_mode!r} does not match requested "
+                f"query_mode {query_mode!r}."
+            )
+
+        selected_range = summary.get("selected_case_range")
+        if selected_range is not None:
+            selected_case_ranges.append(selected_range)
+        selected_ranges = summary.get("selected_case_ranges")
+        if isinstance(selected_ranges, list):
+            selected_case_ranges.extend(selected_ranges)
+
+        duration = summary.get("run_duration")
+        if _is_number(duration):
+            total_run_duration += float(duration)
+            has_run_duration = True
+        cost = summary.get("evaluation_cost")
+        if _is_number(cost):
+            total_evaluation_cost += float(cost)
+            has_evaluation_cost = True
+
+        for case in _summary_cases(summary):
+            name = case.get("name")
+            if not isinstance(name, str) or not name:
+                raise RuntimeError("Merged deepeval case is missing a case name.")
+            if name not in active_case_names:
+                unknown_names.add(name)
+                continue
+            if name in cases_by_name:
+                duplicate_names.add(name)
+                continue
+            cases_by_name[name] = case
+
+    if duplicate_names:
+        names = ", ".join(sorted(duplicate_names))
+        raise RuntimeError(f"duplicate deepeval case names in merged inputs: {names}")
+    if unknown_names:
+        names = ", ".join(sorted(unknown_names))
+        raise RuntimeError(
+            "merged deepeval inputs contain cases outside active goldens: " + names
+        )
+
+    ordered_cases = [
+        cases_by_name[name] for name in active_case_order if name in cases_by_name
+    ]
+    missing_cases = [name for name in active_case_order if name not in cases_by_name]
+    passed_cases = sum(1 for case in ordered_cases if case.get("success"))
+    full_report_valid = not missing_cases and len(ordered_cases) == len(
+        active_case_order
+    )
+
+    return {
+        "run_id": run_id or apply_query_mode_to_run_id("merged", query_mode),
+        "query_mode": query_mode,
+        "test_file": test_file,
+        "run_duration": total_run_duration if has_run_duration else None,
+        "evaluation_cost": total_evaluation_cost if has_evaluation_cost else None,
+        "total_cases": len(ordered_cases),
+        "passed_cases": passed_cases,
+        "failed_cases": len(ordered_cases) - passed_cases,
+        "cases": ordered_cases,
+        "selected_case_ranges": selected_case_ranges,
+        "merged_raw_inputs": raw_inputs,
+        "case_count": len(active_case_order),
+        "completed_case_count": len(ordered_cases),
+        "missing_case_count": len(missing_cases),
+        "duplicate_case_count": 0,
+        "missing_cases": missing_cases,
+        "full_report_valid": full_report_valid,
+    }
+
+
+def summarize_with_active_case_metadata(
+    summary: dict[str, Any],
+    *,
+    query_mode: QueryMode,
+    active_case_order: list[str],
+    raw_input: str,
+    run_id: str,
+) -> dict[str, Any]:
+    return merge_result_summaries(
+        [summary],
+        query_mode=query_mode,
+        active_case_order=active_case_order,
+        raw_inputs=[raw_input],
+        run_id=run_id,
+    )
+
+
 def _normalize_metric_key(name: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
     return normalized.strip("_")
@@ -338,6 +457,36 @@ def infer_run_id(path: Path) -> str:
         if path.name.endswith(suffix):
             return path.name[: -len(suffix)]
     return path.name if _TIMESTAMPED_EXPORT_RE.fullmatch(path.name) else path.stem
+
+
+def _run_id_timestamp(run_id: str, query_mode: QueryMode) -> str | None:
+    if not _RUN_ID_RE.fullmatch(run_id):
+        return None
+    mode = query_mode_from_run_id(run_id)
+    if mode is not None and mode != query_mode:
+        raise RuntimeError(
+            f"Run id {run_id!r} already carries query mode {mode!r}, "
+            f"not {query_mode!r}."
+        )
+    timestamp = run_id.rsplit(".", maxsplit=1)[0] if mode is not None else run_id
+    return timestamp if _TIMESTAMPED_EXPORT_RE.fullmatch(timestamp) else None
+
+
+def merged_run_id_from_inputs(
+    summary_paths: list[Path],
+    query_mode: QueryMode,
+) -> str:
+    latest_timestamp = None
+    for path in summary_paths:
+        timestamp = _run_id_timestamp(infer_run_id(path.resolve()), query_mode)
+        if timestamp is not None and (
+            latest_timestamp is None or timestamp > latest_timestamp
+        ):
+            latest_timestamp = timestamp
+
+    if latest_timestamp is None:
+        latest_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return apply_query_mode_to_run_id(latest_timestamp, query_mode)
 
 
 def apply_query_mode_to_run_id(run_id: str, query_mode: QueryMode) -> str:
@@ -451,10 +600,12 @@ def main() -> None:
     parser.add_argument(
         "--results",
         type=Path,
-        default=DEFAULT_RESULTS_PATH,
+        action="append",
+        default=None,
         help=(
             "Path to a deepeval export file or a directory containing timestamped "
-            f"exports. Defaults to {DEFAULT_RESULTS_PATH}."
+            "exports. May be provided multiple times for batch merge. Defaults "
+            f"to {DEFAULT_RESULTS_PATH}."
         ),
     )
     parser.add_argument(
@@ -518,16 +669,42 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    summary_path = resolve_results_path(args.results)
-    summary = load_summary_document(
-        summary_path,
-        query_mode=args.query_mode,
-        source_results_path=summary_path,
-    )
-    run_id = str(
-        summary.get("run_id")
-        or apply_query_mode_to_run_id(infer_run_id(summary_path), args.query_mode)
-    )
+    result_inputs = args.results or [DEFAULT_RESULTS_PATH]
+    summary_paths = [resolve_results_path(path) for path in result_inputs]
+    summaries = [
+        load_summary_document(
+            path,
+            query_mode=args.query_mode,
+            source_results_path=path,
+        )
+        for path in summary_paths
+    ]
+    from eval_support import RAG_EVAL_CASES
+
+    active_case_order = [case.name for case in RAG_EVAL_CASES]
+    if len(summaries) == 1:
+        default_run_id = apply_query_mode_to_run_id(
+            infer_run_id(summary_paths[0]),
+            args.query_mode,
+        )
+        summary = summarize_with_active_case_metadata(
+            summaries[0],
+            query_mode=args.query_mode,
+            active_case_order=active_case_order,
+            raw_input=str(summary_paths[0]),
+            run_id=default_run_id,
+        )
+    else:
+        merged_run_id = merged_run_id_from_inputs(summary_paths, args.query_mode)
+        summary = merge_result_summaries(
+            summaries,
+            query_mode=args.query_mode,
+            active_case_order=active_case_order,
+            raw_inputs=[str(path) for path in summary_paths],
+            run_id=merged_run_id,
+        )
+        default_run_id = merged_run_id
+    run_id = str(summary.get("run_id") or default_run_id)
     failed_report = build_failed_results_report(summary)
     metrics_report = build_metric_averages_report(summary)
 

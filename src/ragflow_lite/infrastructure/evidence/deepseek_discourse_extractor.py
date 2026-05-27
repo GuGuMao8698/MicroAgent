@@ -520,7 +520,10 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
         )
 
     def _build_client(self, api_key: str | None, base_url: str | None) -> Any:
-        from ragflow_lite.infrastructure.llms import DeepSeekChatCompletionsClient
+        from ragflow_lite.infrastructure.llms import (
+            DEEPSEEK_DISABLED_THINKING_EXTRA_BODY,
+            DeepSeekChatCompletionsClient,
+        )
 
         if api_key is None or base_url is None:
             raise ProcessingError(
@@ -532,6 +535,7 @@ class DeepSeekChatIntraChunkDiscourseExtractor:
             base_url=base_url,
             model=self.model,
             reasoning_effort=self.reasoning_effort,
+            extra_body=DEEPSEEK_DISABLED_THINKING_EXTRA_BODY,
         )
 
 
