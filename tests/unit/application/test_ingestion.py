@@ -33,6 +33,7 @@ from ragflow_lite.domain.models import (
     GraphEvidenceWriteResult,
     IngestionTaskSnapshot,
     ParsedDocument,
+    ParsedPdfDocument,
     RelationEvidence,
 )
 from ragflow_lite.infrastructure.chunkers import (
@@ -1571,3 +1572,51 @@ def test_graph_evidence_infinity_failure_rolls_back_both_stores() -> None:
     assert failing_index.deletes, "Infinity candidate rollback should have been called"
     assert vector_index.delete_calls == 1
     assert document_store.delete_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Structured payload preservation and chunk cache fingerprint
+# ---------------------------------------------------------------------------
+
+
+def test_normalized_document_preserves_structured_payload() -> None:
+    pipeline = _build_pipeline()
+    payload = ParsedPdfDocument(
+        document_id="doc_pdf",
+        filename="paper.pdf",
+        parser_strategy="docling_academic_pdf",
+        title="Paper",
+    )
+    parsed = ParsedDocument(
+        document_id="doc_pdf",
+        file_type="pdf",
+        raw_text="body",
+        metadata={"parser_strategy": "docling_academic_pdf"},
+        structured_payload=payload,
+    )
+
+    normalized = pipeline._build_normalized_document(parsed, "paper.pdf")
+
+    assert normalized.structured_payload is payload
+
+
+def test_pdf_chunk_cache_key_includes_payload_fingerprint() -> None:
+    pipeline = _build_pipeline()
+    payload = ParsedPdfDocument(
+        document_id="doc_pdf",
+        filename="paper.pdf",
+        parser_strategy="docling_academic_pdf",
+        title="Paper",
+    )
+    document = ParsedDocument(
+        document_id="doc_pdf",
+        file_type="pdf",
+        raw_text="body",
+        metadata={"parser_strategy": "docling_academic_pdf"},
+        structured_payload=payload,
+    )
+
+    key = pipeline._chunk_cache_key(document)
+
+    assert "docling_academic_pdf" in key
+    assert "academic_schema_v1" in key

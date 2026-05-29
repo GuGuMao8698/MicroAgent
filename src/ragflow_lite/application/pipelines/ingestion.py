@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -111,6 +111,15 @@ def _log_ingest_event(
     )
 
 
+def _log_academic_pdf_summary(summary: object) -> None:
+    """记录 academic PDF ingestion 摘要事件。"""
+    from ragflow_lite.domain.models import AcademicPdfIngestionSummary
+
+    assert isinstance(summary, AcademicPdfIngestionSummary)
+    level = logging.INFO if summary.status != "failed" else logging.ERROR
+    log_event(logger, level, "academic_pdf_ingestion_summary", **asdict(summary))
+
+
 def _extract_doc_metadata(parser_metadata: dict[str, Any]) -> dict[str, Any]:
     """从 parser metadata 中提取文档级 extras，去掉顶层已有和 chunk/派生字段。"""
     return {
@@ -151,10 +160,33 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+ACADEMIC_PDF_CHUNK_SCHEMA_VERSION = "academic_schema_v1"
+
+
+def _structured_payload_fingerprint(payload: object | None) -> str:
+    if payload is None:
+        return ""
+    from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
+
+    if not isinstance(payload, _PPD):
+        return ""
+    raw = json.dumps(asdict(payload), sort_keys=True, ensure_ascii=False, default=str)
+    return _sha256_hex(raw.encode())
+
+
+def _reconstruct_structured_payload(serialized: str) -> object:
+    """从 JSON 字符串重建 structured_payload 数据类实例。"""
+    from ragflow_lite.domain.models import ParsedPdfDocument
+
+    data = json.loads(serialized)
+    return ParsedPdfDocument(**data)
+
+
 @dataclass(frozen=True, slots=True)
 class _ParsedDocumentCacheValue:
     raw_text: str
     metadata: dict[str, Any]
+    structured_payload_serialized: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +281,12 @@ class IngestionPipeline:
             )
             chunks = self.chunker.chunk(normalized_document)
             graph_evidence = self._extract_graph_evidence(chunks)
+            self._maybe_log_academic_summary(
+                parsed_document,
+                chunks,
+                document_id,
+                cache_key=None,
+            )
             embedded_chunks = self.embedder.embed_chunks(chunks)
             self.vector_index.index_document(asset, embedded_chunks)
             if graph_evidence is not None and self.graph_store is not None:
@@ -433,6 +471,13 @@ class IngestionPipeline:
             chunk_cache_key = self._chunk_cache_key(normalized_document)
             chunks = self._cached_chunk(chunk_cache_key, normalized_document)
 
+            self._maybe_log_academic_summary(
+                parsed_document,
+                chunks,
+                document_id,
+                cache_key=chunk_cache_key,
+            )
+
             # Step: graph evidence
             snapshot = self._update_step(snapshot, STEP_GRAPH_EVIDENCE)
             graph_evidence = self._extract_graph_evidence(chunks)
@@ -567,6 +612,41 @@ class IngestionPipeline:
             return None
         return self.evidence_extractor.extract(chunks)
 
+    def _maybe_log_academic_summary(
+        self,
+        parsed_document: ParsedDocument,
+        chunks: list[Chunk],
+        document_id: str,
+        *,
+        cache_key: str | None,
+    ) -> None:
+        """当文档包含 structured_payload 时记录 academic PDF 摘要。"""
+        from ragflow_lite.domain.models import (
+            AcademicPdfIngestionSummary,
+            ParsedPdfDocument,
+        )
+
+        payload = parsed_document.structured_payload
+        if not isinstance(payload, ParsedPdfDocument):
+            return
+        summary = AcademicPdfIngestionSummary(
+            document_id=document_id,
+            status="success",
+            parser_strategy=payload.parser_strategy,
+            parse_source="cold" if cache_key is None else "cached",
+            structured_payload_present=True,
+            structured_payload_fingerprint_present=True,
+            chunker_strategy="academic_pdf",
+            pdf_element_count=len(payload.elements),
+            table_chunk_count=sum(
+                1 for c in chunks if c.metadata.get("pdf_element_type") == "table"
+            ),
+            figure_chunk_count=sum(
+                1 for c in chunks if c.metadata.get("pdf_element_type") == "figure"
+            ),
+        )
+        _log_academic_pdf_summary(summary)
+
     def _update_step(
         self,
         snapshot: IngestionTaskSnapshot,
@@ -600,11 +680,19 @@ class IngestionPipeline:
             normalized_document.metadata.get("page_spans", []),
             sort_keys=True,
         )
-        return (
+        result = (
             f"chunk:{chunker_fingerprint}"
             f":{_sha256_hex(normalized_document.raw_text.encode())}"
             f":{_sha256_hex(relevant_metadata.encode())}"
         )
+        if normalized_document.structured_payload is not None:
+            payload_parts = [
+                str(normalized_document.metadata.get("parser_strategy", "")),
+                ACADEMIC_PDF_CHUNK_SCHEMA_VERSION,
+                _structured_payload_fingerprint(normalized_document.structured_payload),
+            ]
+            result += ":" + ":".join(payload_parts)
+        return result
 
     def _cached_parse(
         self,
@@ -621,11 +709,20 @@ class IngestionPipeline:
         parsed_document = self.parser.parse(asset, raw_bytes)
 
         if self.stage_cache is not None:
+            from ragflow_lite.domain.models import (
+                ParsedPdfDocument as _ParsedPdfDocument,
+            )
+
+            sp = parsed_document.structured_payload
+            serialized: str | None = None
+            if isinstance(sp, _ParsedPdfDocument):
+                serialized = json.dumps(asdict(sp), sort_keys=True, default=str)
             self.stage_cache.put(
                 cache_key,
                 _ParsedDocumentCacheValue(
                     raw_text=parsed_document.raw_text,
                     metadata=dict(parsed_document.metadata),
+                    structured_payload_serialized=serialized,
                 ),
             )
         record_ingest_stage_cache("miss")
@@ -683,6 +780,7 @@ class IngestionPipeline:
             file_type=parsed_document.file_type,
             raw_text=normalized_text,
             metadata=metadata,
+            structured_payload=parsed_document.structured_payload,
         )
 
     def _restore_cached_parse(
@@ -693,11 +791,16 @@ class IngestionPipeline:
         payload = _parsed_cache_fields(cached)
         if payload is not None:
             raw_text, metadata = payload
+            structured_payload = None
+            serialized = getattr(cached, "structured_payload_serialized", None)
+            if serialized is not None:
+                structured_payload = _reconstruct_structured_payload(serialized)
             return ParsedDocument(
                 document_id=asset.document_id,
                 file_type=asset.file_type,
                 raw_text=raw_text,
                 metadata=metadata,
+                structured_payload=structured_payload,
             )
         raise ProcessingError("Unexpected parse cache payload.")
 
