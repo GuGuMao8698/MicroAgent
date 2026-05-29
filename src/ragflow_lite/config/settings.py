@@ -219,6 +219,32 @@ class Settings:
     microagent_dir: str | None = field(
         default_factory=lambda: _read_optional_env("MICRORAG_MICROAGENT_DIR")
     )
+    # ── Figure VLM / Ark 配置 ──
+    figure_vlm_enabled: bool = field(
+        default_factory=lambda: _read_bool_env("MICRORAG_FIGURE_VLM_ENABLED", False)
+    )
+    ark_base_url: str = field(
+        default_factory=lambda: _read_string_env(
+            "ARK_BASE_URL",
+            "https://ark.cn-beijing.volces.com/api/v3",
+        )
+    )
+    ark_figure_model: str | None = field(
+        default_factory=lambda: _read_optional_env("ARK_FIGURE_MODEL")
+    )
+    figure_vlm_timeout_seconds: float = field(
+        default_factory=lambda: _read_float_env(
+            "MICRORAG_FIGURE_VLM_TIMEOUT_SECONDS", 60.0
+        )
+    )
+    figure_vlm_max_retries: int = field(
+        default_factory=lambda: _read_int_env("MICRORAG_FIGURE_VLM_MAX_RETRIES", 2)
+    )
+    figure_vlm_max_image_bytes: int = field(
+        default_factory=lambda: _read_int_env(
+            "MICRORAG_FIGURE_VLM_MAX_IMAGE_BYTES", 10485760
+        )
+    )
 
     def __post_init__(self) -> None:
         legacy_mode = os.getenv("RAGFLOW_LITE_RETRIEVAL_MODE")
@@ -229,6 +255,10 @@ class Settings:
                 "Please remove RAGFLOW_LITE_RETRIEVAL_MODE from your environment."
             )
         normalize_log_format(self.log_format)
+        if self.figure_vlm_enabled and not self.ark_figure_model:
+            raise RuntimeError(
+                "ARK_FIGURE_MODEL is required when MICRORAG_FIGURE_VLM_ENABLED=true."
+            )
 
     @classmethod
     def default(cls, project_root: Path | None = None) -> "Settings":

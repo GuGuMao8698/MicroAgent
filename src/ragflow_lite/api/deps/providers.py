@@ -53,6 +53,10 @@ from ragflow_lite.infrastructure.agent import (
     AcpRuntimeConfig,
     AgentSessionStore,
 )
+from ragflow_lite.infrastructure.chunkers import (
+    AcademicPdfChunker,
+    DocumentChunker,
+)
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
@@ -64,6 +68,7 @@ from ragflow_lite.infrastructure.evidence import (
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
 )
+from ragflow_lite.infrastructure.media import LocalPdfMediaAssetStore
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
     DeepSeekCoTGroundingRewriter,
@@ -177,9 +182,16 @@ def build_services(settings: Settings) -> AppServices:
         settings.local_index_dir / "agent_sessions.sqlite3"
     )
     parser = CompositeParser()
-    chunker = RecursiveCharacterChunker(
+    generic_chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
+    )
+    chunker = DocumentChunker(
+        generic_chunker=generic_chunker,
+        academic_pdf_chunker=AcademicPdfChunker(),
+    )
+    media_asset_store = LocalPdfMediaAssetStore(
+        settings.project_root / "data" / "media" / "pdf-assets",
     )
     embedder = ArkMultimodalTextEmbedder(
         api_key=ark_runtime_config.api_key,
@@ -313,6 +325,7 @@ def build_services(settings: Settings) -> AppServices:
         runner=runner,
         evidence_extractor=evidence_extractor,
         graph_store=graph_store,
+        media_asset_store=media_asset_store,
     )
 
     runner.set_handler(pipeline.process_task)
