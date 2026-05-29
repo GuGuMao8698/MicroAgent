@@ -90,7 +90,11 @@ def test_blueprint_payload_field_order_puts_ordered_ids_last() -> None:
 
 
 def test_standard_payload_omits_mode_metadata_and_blueprint() -> None:
-    contexts = [_chunk("c2", score=0.6), _chunk("c1", score=0.9), _chunk("c3", score=0.4)]
+    contexts = [
+        _chunk("c2", score=0.6),
+        _chunk("c1", score=0.9),
+        _chunk("c3", score=0.4),
+    ]
 
     payload = model_facing_retrieval_payload(
         query="MiniRAG 是什么？",
@@ -114,7 +118,11 @@ def test_standard_payload_omits_mode_metadata_and_blueprint() -> None:
 
 
 def test_discorag_payload_places_blueprint_after_contexts() -> None:
-    contexts = [_chunk("c2", score=0.6), _chunk("c1", score=0.9), _chunk("c3", score=0.4)]
+    contexts = [
+        _chunk("c2", score=0.6),
+        _chunk("c1", score=0.9),
+        _chunk("c3", score=0.4),
+    ]
 
     payload = model_facing_retrieval_payload(
         query="DiscoRAG 如何组织证据？",
@@ -134,7 +142,11 @@ def test_discorag_payload_places_blueprint_after_contexts() -> None:
 
 
 def test_model_facing_payload_preserves_explicit_standard_ordering() -> None:
-    contexts = [_chunk("c2", score=0.6), _chunk("c1", score=0.9), _chunk("c3", score=0.4)]
+    contexts = [
+        _chunk("c2", score=0.6),
+        _chunk("c1", score=0.9),
+        _chunk("c3", score=0.4),
+    ]
 
     ordered_contexts = order_standard_contexts_for_model(contexts)
     payload = model_facing_retrieval_payload(
@@ -172,3 +184,48 @@ def test_blueprint_payload_deep_copies_mutable_fields() -> None:
     assert blueprint.answer_constraints == ["只基于证据回答"]
     assert blueprint.plan_steps == ["先总结主结论", "再补充限制条件"]
     assert blueprint.ordered_chunk_ids == ["c1", "c3", "c2"]
+
+
+from ragflow_lite.application.services.metadata_sanitizer import (
+    INTERNAL_METADATA_KEYS,
+    sanitize_chunk_metadata,
+)
+
+
+def test_sanitize_chunk_metadata_strips_internal_pdf_fields() -> None:
+    metadata = {
+        "paper_title": "Paper",
+        "caption": "Figure caption",
+        "asset_id": "asset_1",
+        "storage_path": "/tmp/secret.png",
+        "raw_provider_payload": {"secret": True},
+        "raw_docling_object": object(),
+    }
+
+    sanitized, stats = sanitize_chunk_metadata(metadata)
+
+    assert sanitized == {
+        "paper_title": "Paper",
+        "caption": "Figure caption",
+        "asset_id": "asset_1",
+    }
+    assert set(stats["internal_fields_stripped"]) >= {
+        "storage_path",
+        "raw_provider_payload",
+        "raw_docling_object",
+    }
+    assert "storage_path" in INTERNAL_METADATA_KEYS
+
+
+def test_context_payload_uses_metadata_sanitizer() -> None:
+    chunk = RetrievedChunk(
+        chunk_id="chunk_1",
+        document_id="doc_1",
+        text="Body",
+        score=1.0,
+        metadata={"caption": "safe", "base64": "unsafe"},
+    )
+
+    payload = context_payload(chunk)
+
+    assert payload["metadata"] == {"caption": "safe"}
