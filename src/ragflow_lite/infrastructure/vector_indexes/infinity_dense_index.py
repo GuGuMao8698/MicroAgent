@@ -48,6 +48,14 @@ _REQUIRED_CHUNK_AUXILIARY_TEXT_COLUMNS = {
     "filename_tks",
     "content_tks",
     "content_sm_tks",
+    "paper_title_tks",
+    "academic_role_kwd",
+    "section_tks",
+    "caption_tks",
+    "media_context_tks",
+    "visual_description_tks",
+    "element_type_kwd",
+    "element_label_tks",
 }
 
 
@@ -308,7 +316,11 @@ class InfinityDenseVectorIndex:
             )
             chunks_by_id: dict[str, RetrievedChunk] = {}
             for row in rows:
-                metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+                metadata = self._parse_json(
+                    row.get("chunk_metadata_json", ""),
+                    row_id=row.get("chunk_id"),
+                    academic_pdf=row.get("file_type") == "pdf",
+                )
                 metadata["filename"] = row.get("filename")
                 metadata["file_type"] = row.get("file_type")
                 chunks_by_id[row["chunk_id"]] = RetrievedChunk(
@@ -370,6 +382,14 @@ class InfinityDenseVectorIndex:
             "filename_tks": {"type": "varchar"},
             "content_tks": {"type": "varchar"},
             "content_sm_tks": {"type": "varchar"},
+            "paper_title_tks": {"type": "varchar"},
+            "academic_role_kwd": {"type": "varchar"},
+            "section_tks": {"type": "varchar"},
+            "caption_tks": {"type": "varchar"},
+            "media_context_tks": {"type": "varchar"},
+            "visual_description_tks": {"type": "varchar"},
+            "element_type_kwd": {"type": "varchar"},
+            "element_label_tks": {"type": "varchar"},
         }
         self._retry_ddl(
             self._db.create_table,
@@ -454,6 +474,14 @@ class InfinityDenseVectorIndex:
                 f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
                 f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
                 f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
+                f"{self._chunk_table}_paper_title_tks_fulltext_idx": "paper_title_tks",
+                f"{self._chunk_table}_academic_role_kwd_fulltext_idx": "academic_role_kwd",
+                f"{self._chunk_table}_section_tks_fulltext_idx": "section_tks",
+                f"{self._chunk_table}_caption_tks_fulltext_idx": "caption_tks",
+                f"{self._chunk_table}_media_context_tks_fulltext_idx": "media_context_tks",
+                f"{self._chunk_table}_visual_description_tks_fulltext_idx": "visual_description_tks",
+                f"{self._chunk_table}_element_type_kwd_fulltext_idx": "element_type_kwd",
+                f"{self._chunk_table}_element_label_tks_fulltext_idx": "element_label_tks",
             }
             existing_indexes = self._list_index_names(chunk_table)
 
@@ -905,7 +933,11 @@ class InfinityDenseVectorIndex:
                 text=row["text"],
                 score=float(row["_score"]),
                 metadata={
-                    **self._parse_json(row.get("chunk_metadata_json", "")),
+                    **self._parse_json(
+                        row.get("chunk_metadata_json", ""),
+                        row_id=row.get("chunk_id"),
+                        academic_pdf=row.get("file_type") == "pdf",
+                    ),
                     "filename": row.get("filename"),
                     "file_type": row.get("file_type"),
                 },
@@ -921,7 +953,11 @@ class InfinityDenseVectorIndex:
             requested=score_field,
         )
         for row in df.iter_rows(named=True):
-            metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+            metadata = self._parse_json(
+                row.get("chunk_metadata_json", ""),
+                row_id=row.get("chunk_id"),
+                academic_pdf=row.get("file_type") == "pdf",
+            )
             metadata["filename"] = row.get("filename")
             metadata["file_type"] = row.get("file_type")
             if "chunk_index" in row:
@@ -1003,8 +1039,9 @@ class InfinityDenseVectorIndex:
         text_fields = chunk_text_fields.build_chunk_text_fields(
             filename=asset.filename,
             text=chunk.text,
+            metadata=chunk.metadata,
         )
-        return {
+        row: dict[str, Any] = {
             "chunk_id": chunk.chunk_id,
             "document_id": chunk.document_id,
             "chunk_index": chunk.index,
@@ -1021,6 +1058,9 @@ class InfinityDenseVectorIndex:
             "content_tks": text_fields["content_tks"],
             "content_sm_tks": text_fields["content_sm_tks"],
         }
+        for key in chunk_text_fields.ACADEMIC_CHUNK_TEXT_FIELDS:
+            row[key] = text_fields[key]
+        return row
 
     @staticmethod
     def _delete_document_rows(doc_table: Any, document_id: str) -> None:
@@ -1049,12 +1089,21 @@ class InfinityDenseVectorIndex:
         )
 
     @staticmethod
-    def _parse_json(raw: str) -> dict[str, Any]:
+    def _parse_json(
+        raw: str,
+        *,
+        row_id: str | None = None,
+        academic_pdf: bool = False,
+    ) -> dict[str, Any]:
         if not raw:
             return {}
         try:
             return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as exc:
+            if academic_pdf:
+                raise ProcessingError(
+                    f"Failed to parse academic PDF chunk metadata JSON for row '{row_id}'."
+                ) from exc
             return {}
 
 
