@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
-from ragflow_lite.domain.models import DocumentAsset
+from ragflow_lite.domain.models import DocumentAsset, ParsedPdfDocument
 from ragflow_lite.infrastructure.parsers import (
     BasicPdfParser,
     CompositeParser,
@@ -15,6 +15,7 @@ from ragflow_lite.infrastructure.parsers import (
     decode_text,
     flatten_markdown,
 )
+from ragflow_lite.infrastructure.parsers.docling_pdf_adapter import DoclingPdfBackend
 
 
 def make_asset(filename: str, file_type: str) -> DocumentAsset:
@@ -101,7 +102,7 @@ def test_basic_pdf_parser_extracts_text_from_native_pdf() -> None:
     assert parsed.metadata["format"] == "pdf"
     assert parsed.metadata["page_count"] == 1
     assert parsed.metadata["filename"] == "sample.pdf"
-    assert parsed.metadata["parser_strategy"] == "pdf_native_text"
+    assert parsed.metadata["parser_strategy"] == "docling_academic_pdf"
     page_texts = parsed.metadata["page_texts"]
     assert len(page_texts) == 1
     assert page_texts[0]["page_number"] == 1
@@ -144,10 +145,12 @@ def test_parser_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
         with pytest.raises(DocumentParsingError):
             parser.parse(asset, b"this is not pdf")
 
-    record = next(record for record in caplog.records if record.event == "parser_failed")
+    record = next(
+        record for record in caplog.records if record.event == "parser_failed"
+    )
     assert record.document_filename == "corrupted.pdf"
     assert record.file_type == "pdf"
-    assert record.parser_strategy == "pdf_native_text"
+    assert record.parser_strategy == "docling_academic_pdf"
     assert record.error_type
 
 
@@ -186,7 +189,19 @@ def test_basic_pdf_parser_raises_on_encrypted_pdf() -> None:
 
 
 def test_composite_parser_dispatches_by_file_type() -> None:
-    parser = CompositeParser()
+    class _StubBackend(DoclingPdfBackend):
+        def convert(self, raw_bytes: bytes, filename: str) -> ParsedPdfDocument:
+            return ParsedPdfDocument(
+                document_id="",
+                filename=filename,
+                parser_strategy="docling_academic_pdf",
+                title="",
+                elements=[],
+                media_assets=[],
+                warnings=[],
+            )
+
+    parser = CompositeParser(pdf_backend=_StubBackend())
 
     txt_asset = make_asset("test.txt", "txt")
     parsed = parser.parse(txt_asset, b"hello")
@@ -199,11 +214,23 @@ def test_composite_parser_dispatches_by_file_type() -> None:
     pdf_asset = make_asset("sample.pdf", "pdf")
     pdf_bytes = (FIXTURES_DIR / "sample.pdf").read_bytes()
     parsed = parser.parse(pdf_asset, pdf_bytes)
-    assert parsed.metadata["parser_strategy"] == "pdf_native_text"
+    assert parsed.metadata["parser_strategy"] == "docling_academic_pdf"
 
 
 def test_composite_parser_raises_on_unsupported_file_type() -> None:
-    parser = CompositeParser()
+    class _StubBackend(DoclingPdfBackend):
+        def convert(self, raw_bytes: bytes, filename: str) -> ParsedPdfDocument:
+            return ParsedPdfDocument(
+                document_id="",
+                filename=filename,
+                parser_strategy="docling_academic_pdf",
+                title="",
+                elements=[],
+                media_assets=[],
+                warnings=[],
+            )
+
+    parser = CompositeParser(pdf_backend=_StubBackend())
     asset = make_asset("test.xyz", "xyz")
 
     try:

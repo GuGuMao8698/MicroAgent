@@ -9,10 +9,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from io import BytesIO
+from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
-from pypdf import PdfReader
+from pypdf import PdfReader  # 保留：BasicPdfParser 仍依赖 pypdf
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
@@ -22,7 +23,7 @@ from ragflow_lite.shared.observability import log_event
 PARSER_STRATEGY_MAP: dict[str, str] = {
     "txt": "plain_text",
     "md": "markdown_flatten",
-    "pdf": "pdf_native_text",
+    "pdf": "docling_academic_pdf",
 }
 
 MARKDOWN_PARSER = MarkdownIt("commonmark").enable("strikethrough")
@@ -235,7 +236,10 @@ class MarkdownParser:
 
 
 class BasicPdfParser:
-    """解析数字原生 PDF，逐页抽取文本。"""
+    """解析数字原生 PDF，逐页抽取文本。
+
+    保留供参考和直接测试使用，不再注册到 CompositeParser。
+    """
 
     def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
         """逐页提取文本，页间以双换行拼接。
@@ -278,14 +282,23 @@ class BasicPdfParser:
 class CompositeParser:
     """按文件类型分派到具体解析器。"""
 
-    def __init__(self) -> None:
-        self._parsers: dict[str, PlainTextParser | MarkdownParser | BasicPdfParser] = {
-            file_type: parser_cls()
-            for file_type, parser_cls in {
-                "txt": PlainTextParser,
-                "md": MarkdownParser,
-                "pdf": BasicPdfParser,
-            }.items()
+    def __init__(self, *, pdf_backend: Any = None) -> None:
+        from ragflow_lite.infrastructure.parsers.docling_pdf_adapter import (
+            DoclingPdfBackend,
+            DoclingPdfParser,
+        )
+
+        pdf_parser = (
+            DoclingPdfParser(backend=pdf_backend)
+            if isinstance(pdf_backend, DoclingPdfBackend)
+            else DoclingPdfParser()
+        )
+        self._parsers: dict[
+            str, PlainTextParser | MarkdownParser | DoclingPdfParser
+        ] = {
+            "txt": PlainTextParser(),
+            "md": MarkdownParser(),
+            "pdf": pdf_parser,
         }
 
     def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
