@@ -34,6 +34,7 @@ from ragflow_lite.domain.models import (
     IngestionTaskSnapshot,
     ParsedDocument,
     ParsedPdfDocument,
+    PdfMediaAsset,
     RelationEvidence,
 )
 from ragflow_lite.infrastructure.chunkers import (
@@ -1620,3 +1621,188 @@ def test_pdf_chunk_cache_key_includes_payload_fingerprint() -> None:
 
     assert "docling_academic_pdf" in key
     assert "academic_schema_v1" in key
+
+
+# ---------------------------------------------------------------------------
+# Media asset lifecycle and academic chunker routing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeMediaAssetStore:
+    staged: bool = False
+    committed: bool = False
+    rolled_back: bool = False
+
+    def stage_assets(self, document_id: str, assets: list[Any]) -> Any:
+        self.staged = True
+        return type(
+            "Staged",
+            (),
+            {
+                "document_id": document_id,
+                "asset_paths": {"asset_1": Path("/tmp/asset.png")},
+                "stage_dir": Path("/tmp/staging"),
+            },
+        )()
+
+    def commit_assets(self, document_id: str, staged: Any) -> dict[str, Path]:
+        self.committed = True
+        return staged.asset_paths
+
+    def rollback_staged_assets(self, staged: Any) -> None:
+        self.rolled_back = True
+
+    def delete_document_assets(self, document_id: str) -> None:
+        return None
+
+
+@dataclass
+class _FakePdfParser:
+    """Parser that returns a ParsedDocument with ParsedPdfDocument structured_payload."""
+
+    def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
+        return ParsedDocument(
+            document_id=asset.document_id,
+            file_type=asset.file_type,
+            raw_text="parsed pdf text",
+            metadata={"parser_strategy": "docling_academic_pdf"},
+            structured_payload=ParsedPdfDocument(
+                document_id=asset.document_id,
+                filename=asset.filename,
+                parser_strategy="docling_academic_pdf",
+                title="Test Paper",
+                media_assets=[
+                    PdfMediaAsset(
+                        asset_id="asset_1",
+                        element_id="elem_1",
+                        media_type="image/png",
+                        extension=".png",
+                        size_bytes=100,
+                        data=b"\x89PNG",
+                    ),
+                ],
+            ),
+        )
+
+
+@dataclass
+class _AcademicPdfChunker:
+    """Chunker that marks chunks as academic_pdf."""
+
+    chunk_size: int = 512
+    chunk_overlap: int = 0
+
+    def chunk(self, document: ParsedDocument) -> list[Chunk]:
+        return [
+            Chunk(
+                chunk_id=f"chunk_{document.document_id}_0",
+                document_id=document.document_id,
+                text=document.raw_text,
+                index=0,
+                metadata={"chunker_strategy": "academic_pdf"},
+            )
+        ]
+
+
+@dataclass
+class _NonAcademicChunker:
+    """Chunker that does NOT mark chunks as academic_pdf."""
+
+    chunk_size: int = 512
+    chunk_overlap: int = 0
+
+    def chunk(self, document: ParsedDocument) -> list[Chunk]:
+        return [
+            Chunk(
+                chunk_id=f"chunk_{document.document_id}_0",
+                document_id=document.document_id,
+                text=document.raw_text,
+                index=0,
+                metadata={},
+            )
+        ]
+
+
+def _build_pdf_pipeline(
+    *,
+    vector_index: Any | None = None,
+    document_store: Any | None = None,
+    chunker: Any | None = None,
+    media_asset_store: Any | None = None,
+) -> IngestionPipeline:
+    return IngestionPipeline(
+        document_store=document_store or _FakeDocumentStore(),
+        parser=_FakePdfParser(),
+        chunker=chunker or _AcademicPdfChunker(),
+        embedder=_FakeEmbedder(),
+        vector_index=vector_index or _FakeVectorIndex(),
+        normalizer=lambda text, filename: text,
+        media_asset_store=media_asset_store,
+    )
+
+
+def test_ingestion_commits_pdf_media_assets_on_success() -> None:
+    media_store = _FakeMediaAssetStore()
+    pipeline = _build_pdf_pipeline(media_asset_store=media_store)
+
+    result = pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert result.status == "indexed"
+    assert media_store.staged is True
+    assert media_store.committed is True
+    assert media_store.rolled_back is False
+
+
+def test_ingestion_rolls_back_staged_pdf_assets_when_indexing_fails() -> None:
+    media_store = _FakeMediaAssetStore()
+
+    @dataclass
+    class _FailingVectorIndex:
+        delete_calls: int = 0
+
+        def index_document(
+            self, asset: DocumentAsset, chunks: list[EmbeddedChunk]
+        ) -> None:
+            raise RuntimeError("index failed")
+
+        def delete_document(self, document_id: str) -> None:
+            self.delete_calls += 1
+
+    pipeline = _build_pdf_pipeline(
+        vector_index=_FailingVectorIndex(),
+        media_asset_store=media_store,
+    )
+
+    with pytest.raises(ProcessingError):
+        pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert media_store.staged is True
+    assert media_store.committed is False
+    assert media_store.rolled_back is True
+
+
+def test_ingestion_skips_media_asset_staging_when_store_is_none() -> None:
+    pipeline = _build_pdf_pipeline(media_asset_store=None)
+
+    result = pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert result.status == "indexed"
+
+
+def test_academic_pdf_hard_fails_on_non_academic_chunks() -> None:
+    pipeline = _build_pdf_pipeline(chunker=_NonAcademicChunker())
+
+    with pytest.raises(
+        ProcessingError, match="Academic PDF reached non-academic chunking path"
+    ):
+        pipeline.ingest("paper.pdf", b"%PDF")
+
+
+def test_non_academic_pdf_allows_non_academic_chunks() -> None:
+    """plain_text parser_strategy should not trigger the academic routing check."""
+    pipeline = _build_pipeline(chunker=_NonAcademicChunker())
+
+    result = pipeline.ingest("test.txt", b"hello")
+
+    assert result.status == "indexed"

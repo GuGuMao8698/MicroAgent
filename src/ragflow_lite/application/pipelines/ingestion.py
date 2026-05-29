@@ -225,6 +225,7 @@ class IngestionPipeline:
         runner: IngestionTaskRunner | None = None,
         evidence_extractor: EvidenceExtractor | None = None,
         graph_store: GraphEvidenceStore | None = None,
+        media_asset_store: Any | None = None,
     ) -> None:
         self.document_store = document_store
         self.parser = parser
@@ -238,6 +239,7 @@ class IngestionPipeline:
         self.runner = runner
         self.evidence_extractor = evidence_extractor
         self.graph_store = graph_store
+        self.media_asset_store = media_asset_store
 
     # ------------------------------------------------------------------
     # Legacy synchronous interface
@@ -253,6 +255,7 @@ class IngestionPipeline:
         file_type = self._resolve_file_type(filename)
         document_id = f"doc_{uuid4().hex}"
         asset = None
+        staged_assets = None
 
         parser_strategy = ""
         _log_ingest_event(
@@ -274,12 +277,24 @@ class IngestionPipeline:
             raw_bytes = self.document_store.read_document(asset)
             parsed_document = self.parser.parse(asset, raw_bytes)
             parser_strategy = parsed_document.metadata.get("parser_strategy", "")
+
+            # 阶段性写入：PDF media assets 暂存到 staging 目录
+            staged_assets = self._stage_pdf_assets(
+                document_id,
+                parsed_document,
+                filename,
+            )
+
             asset.metadata = _extract_doc_metadata(parsed_document.metadata)
             normalized_document = self._build_normalized_document(
                 parsed_document,
                 asset.filename,
             )
             chunks = self.chunker.chunk(normalized_document)
+
+            # 学术 PDF 必须走学术分块路径，否则硬失败
+            self._enforce_academic_chunker_routing(parsed_document, chunks)
+
             graph_evidence = self._extract_graph_evidence(chunks)
             self._maybe_log_academic_summary(
                 parsed_document,
@@ -291,6 +306,11 @@ class IngestionPipeline:
             self.vector_index.index_document(asset, embedded_chunks)
             if graph_evidence is not None and self.graph_store is not None:
                 self.graph_store.upsert_document_evidence(graph_evidence)
+
+            # 下游写入全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
 
             # 在同一受控流程里完成 dataset 绑定
             if dataset_id is not None and self.dataset_store is not None:
@@ -321,6 +341,8 @@ class IngestionPipeline:
             record_ingest_outcome("succeeded", file_type)
             return result
         except RagflowLiteError as exc:
+            # 回滚暂存的 media assets
+            self._rollback_staged_assets(staged_assets, document_id, filename)
             # 只有文件已经落到受控存储后，才需要做文档级回滚。
             if asset is not None:
                 self._rollback(document_id)
@@ -336,6 +358,7 @@ class IngestionPipeline:
             record_ingest_outcome("failed", file_type)
             raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
+            self._rollback_staged_assets(staged_assets, document_id, filename)
             if asset is not None:
                 self._rollback(document_id)
             _log_ingest_event(
@@ -430,6 +453,7 @@ class IngestionPipeline:
 
         start_time = time.monotonic()
         file_type = snapshot.file_type
+        staged_assets = None
 
         try:
             snapshot = replace(
@@ -454,6 +478,13 @@ class IngestionPipeline:
                 raw_bytes,
             )
 
+            # 阶段性写入：PDF media assets 暂存到 staging 目录
+            staged_assets = self._stage_pdf_assets(
+                document_id,
+                parsed_document,
+                snapshot.filename,
+            )
+
             # Step: normalizing
             snapshot = self._update_step(snapshot, STEP_NORMALIZING)
             asset = replace(
@@ -470,6 +501,9 @@ class IngestionPipeline:
             snapshot = self._update_step(snapshot, STEP_CHUNKING)
             chunk_cache_key = self._chunk_cache_key(normalized_document)
             chunks = self._cached_chunk(chunk_cache_key, normalized_document)
+
+            # 学术 PDF 必须走学术分块路径，否则硬失败
+            self._enforce_academic_chunker_routing(parsed_document, chunks)
 
             self._maybe_log_academic_summary(
                 parsed_document,
@@ -491,6 +525,11 @@ class IngestionPipeline:
             self.vector_index.index_document(asset, embedded_chunks)
             if graph_evidence is not None and self.graph_store is not None:
                 self.graph_store.upsert_document_evidence(graph_evidence)
+
+            # 下游写入全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
 
             # Step: binding
             ds_id = snapshot.dataset_id
@@ -517,6 +556,13 @@ class IngestionPipeline:
         except Exception as exc:
             duration = time.monotonic() - start_time
             record_ingest_task_duration("failed", duration)
+
+            # 回滚暂存的 media assets
+            self._rollback_staged_assets(
+                staged_assets,
+                document_id,
+                snapshot.filename,
+            )
 
             if snapshot.attempt < MAX_ATTEMPTS:
                 if self.runner is None:
@@ -764,6 +810,58 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+
+    def _stage_pdf_assets(
+        self,
+        document_id: str,
+        parsed_document: ParsedDocument,
+        filename: str,
+    ) -> Any | None:
+        """暂存 PDF media assets 到 staging 目录，非 PDF 或无 assets 时返回 None。"""
+        from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
+
+        if (
+            self.media_asset_store is not None
+            and isinstance(parsed_document.structured_payload, _PPD)
+            and parsed_document.structured_payload.media_assets
+        ):
+            return self.media_asset_store.stage_assets(
+                document_id,
+                parsed_document.structured_payload.media_assets,
+            )
+        return None
+
+    def _enforce_academic_chunker_routing(
+        self,
+        parsed_document: ParsedDocument,
+        chunks: list[Chunk],
+    ) -> None:
+        """学术 PDF 必须全部走 academic_pdf chunker，否则硬失败。"""
+        if parsed_document.metadata.get(
+            "parser_strategy"
+        ) == "docling_academic_pdf" and any(
+            c.metadata.get("chunker_strategy") != "academic_pdf" for c in chunks
+        ):
+            raise ProcessingError("Academic PDF reached non-academic chunking path.")
+
+    def _rollback_staged_assets(
+        self,
+        staged_assets: Any | None,
+        document_id: str,
+        filename: str,
+    ) -> None:
+        """回滚暂存的 media assets，失败时只记录日志。"""
+        if staged_assets is not None and self.media_asset_store is not None:
+            try:
+                self.media_asset_store.rollback_staged_assets(staged_assets)
+            except Exception:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "pdf_media_asset_rollback_failed",
+                    document_id=document_id,
+                    document_filename=filename,
+                )
 
     def _build_normalized_document(
         self, parsed_document: ParsedDocument, filename: str
