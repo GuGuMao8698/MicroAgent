@@ -85,6 +85,7 @@ def _chunk(
     text: str,
     vector: list[float],
     index: int = 0,
+    metadata: dict[str, Any] | None = None,
 ) -> EmbeddedChunk:
     return EmbeddedChunk(
         chunk_id=chunk_id,
@@ -92,7 +93,7 @@ def _chunk(
         text=text,
         index=index,
         vector=vector,
-        metadata={"section": "live"},
+        metadata=metadata if metadata is not None else {"section": "live"},
     )
 
 
@@ -266,6 +267,76 @@ def test_live_graph_candidate_index_covers_table_lifecycle_query_and_delete(
             app_settings.infinity_database,
             [entity_table, relationship_table],
         )
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+
+def test_live_dense_index_writes_academic_sparse_fields(
+    app_settings: Settings,
+) -> None:
+    """Academic chunk metadata populates academic sparse columns."""
+    document_table = _unique_table("documents_acad")
+    chunk_table = _unique_table("chunks_acad")
+    client = _connect(app_settings)
+    index: InfinityDenseVectorIndex | None = None
+    table_names = [
+        document_table,
+        chunk_table,
+        f"{document_table}_datasets",
+        f"{document_table}_dataset_bindings",
+    ]
+
+    try:
+        index = InfinityDenseVectorIndex(
+            host=app_settings.infinity_host,
+            port=app_settings.infinity_port,
+            database=app_settings.infinity_database,
+            document_table=document_table,
+            chunk_table=chunk_table,
+            embedding_dimensions=_DIMS,
+            embedding_signature=_SIGNATURE,
+        )
+
+        asset = _asset("doc_pdf", "paper.pdf")
+        asset.file_type = "pdf"
+        chunk = _chunk(
+            document_id="doc_pdf",
+            chunk_id="chunk_pdf_0",
+            text="Paper: Test\nRole: table\nBody:\ndata",
+            vector=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            metadata={
+                "paper_title": "Test Paper",
+                "pdf_element_type": "table",
+                "academic_role": "table",
+                "caption": "Results comparison",
+                "section_path": ["Results"],
+                "chunker_strategy": "academic_pdf",
+            },
+        )
+        index.index_document(asset, [chunk])
+        rows = list(
+            index._db.get_table(index._chunk_table)
+            .output(["paper_title_tks", "caption_tks", "element_type_kwd"])
+            .to_arrow()
+            .to_pandas()
+            .itertuples(index=False)
+        )
+        assert any(row.paper_title_tks for row in rows), (
+            "paper_title_tks should be populated"
+        )
+        assert any(row.caption_tks for row in rows), "caption_tks should be populated"
+        assert any(row.element_type_kwd == "table" for row in rows), (
+            "element_type_kwd should be 'table'"
+        )
+    finally:
+        if index is not None:
+            try:
+                index.disconnect()
+            except Exception:
+                pass
+        _drop_tables(client, app_settings.infinity_database, table_names)
         try:
             client.disconnect()
         except Exception:
