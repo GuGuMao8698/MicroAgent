@@ -193,6 +193,18 @@ def build_services(settings: Settings) -> AppServices:
     media_asset_store = LocalPdfMediaAssetStore(
         settings.project_root / "data" / "media" / "pdf-assets",
     )
+    figure_describer = None
+    if settings.figure_vlm_enabled:
+        from openai import OpenAI
+
+        assert settings.ark_figure_model is not None
+        from ragflow_lite.infrastructure.vlm import ArkFigureDescriptionClient
+
+        figure_describer = ArkFigureDescriptionClient(
+            client=OpenAI(api_key=settings.ark_api_key, base_url=settings.ark_base_url),
+            model=settings.ark_figure_model,
+            max_image_bytes=settings.figure_vlm_max_image_bytes,
+        )
     embedder = ArkMultimodalTextEmbedder(
         api_key=ark_runtime_config.api_key,
         model=ark_runtime_config.model,
@@ -326,6 +338,7 @@ def build_services(settings: Settings) -> AppServices:
         evidence_extractor=evidence_extractor,
         graph_store=graph_store,
         media_asset_store=media_asset_store,
+        figure_describer=figure_describer,
     )
 
     runner.set_handler(pipeline.process_task)

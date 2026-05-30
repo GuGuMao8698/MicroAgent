@@ -226,6 +226,7 @@ class IngestionPipeline:
         evidence_extractor: EvidenceExtractor | None = None,
         graph_store: GraphEvidenceStore | None = None,
         media_asset_store: Any | None = None,
+        figure_describer: Any | None = None,
     ) -> None:
         self.document_store = document_store
         self.parser = parser
@@ -240,6 +241,7 @@ class IngestionPipeline:
         self.evidence_extractor = evidence_extractor
         self.graph_store = graph_store
         self.media_asset_store = media_asset_store
+        self.figure_describer = figure_describer
 
     # ------------------------------------------------------------------
     # Legacy synchronous interface
