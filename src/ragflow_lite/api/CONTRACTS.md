@@ -40,6 +40,18 @@ Response schemas:
   `DocumentDetailResponse`, `DocumentTaskResponse`
 - Unknown `document_id` returns `404`
 
+Retrieved context metadata sanitization:
+- `_retrieved_context_response` calls `sanitize_chunk_metadata` to strip internal keys
+  before returning metadata in query responses.
+- Only keys in `PUBLIC_METADATA_KEYS` pass through; all others are silently dropped.
+- Internal keys include `storage_path`, `local_path`, `temporary_path`, `media_root`,
+  `base64`, `raw_docling_object`, and provider payloads.
+- Academic metadata keys that are public: `paper_title`, `authors`, `academic_role`,
+  `section_path`, `caption`, `element_label`, `pdf_element_type`, `asset_id`,
+  `figure_description_status`.
+- Sanitization is applied per-context in `POST /queries` responses; it is not applied
+  to document metadata in `GET /documents` responses.
+
 ## Observability Contract
 
 - Route layer owns request context / trace header binding and write-back
