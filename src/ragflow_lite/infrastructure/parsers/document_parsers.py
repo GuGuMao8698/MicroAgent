@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from io import BytesIO
 from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
-from pypdf import PdfReader  # 保留：BasicPdfParser 仍依赖 pypdf
 
 from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedDocument
@@ -232,50 +230,6 @@ class MarkdownParser:
             file_type=asset.file_type,
             raw_text=text,
             metadata=_metadata_for(asset, format="markdown"),
-        )
-
-
-class BasicPdfParser:
-    """解析数字原生 PDF，逐页抽取文本。
-
-    保留供参考和直接测试使用，不再注册到 CompositeParser。
-    """
-
-    def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
-        """逐页提取文本，页间以双换行拼接。
-
-        非空页的抽取结果会以 ``page_texts`` 形式携带在 metadata 中，
-        供下游按页构造位置信息；空白页不进入该列表，但 ``page_count``
-        仍保留原始总页数。
-        """
-        try:
-            reader = PdfReader(BytesIO(raw_bytes))
-            page_count = len(reader.pages)
-            texts: list[str] = []
-            page_texts: list[dict[str, int | str]] = []
-            for i, page in enumerate(reader.pages, start=1):
-                page_text = page.extract_text()
-                if page_text and page_text.strip():
-                    texts.append(page_text)
-                    page_texts.append({"page_number": i, "text": page_text})
-        except Exception as exc:
-            _log_parser_failed(
-                asset,
-                parser_strategy=PARSER_STRATEGY_MAP[asset.file_type],
-                error_type=type(exc).__name__,
-            )
-            raise DocumentParsingError(asset.filename) from exc
-
-        return ParsedDocument(
-            document_id=asset.document_id,
-            file_type=asset.file_type,
-            raw_text="\n\n".join(texts),
-            metadata=_metadata_for(
-                asset,
-                format="pdf",
-                page_count=page_count,
-                page_texts=page_texts,
-            ),
         )
 
 

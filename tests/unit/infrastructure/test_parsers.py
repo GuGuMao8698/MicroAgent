@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
-import pytest
-
-from ragflow_lite.domain.errors import DocumentParsingError, UnsupportedFileTypeError
+from ragflow_lite.domain.errors import UnsupportedFileTypeError
 from ragflow_lite.domain.models import DocumentAsset, ParsedPdfDocument
 from ragflow_lite.infrastructure.parsers import (
-    BasicPdfParser,
     CompositeParser,
     MarkdownParser,
     PlainTextParser,
@@ -41,7 +37,7 @@ def test_plain_text_parser_supports_utf8_bom() -> None:
 
 def test_decode_text_falls_back_with_replacement() -> None:
     decoded = decode_text(b"hello\xffworld")
-    assert decoded == "hello\ufffdworld"
+    assert decoded == "hello�world"
 
 
 def test_markdown_parser_flattens_heading_list_link_and_code_fence() -> None:
@@ -88,104 +84,6 @@ def test_flatten_markdown_preserves_underscored_identifiers_and_code() -> None:
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "documents"
 PARSER_LOGGER = "ragflow_lite.infrastructure.parsers.document_parsers"
-
-
-def test_basic_pdf_parser_extracts_text_from_native_pdf() -> None:
-    parser = BasicPdfParser()
-    asset = make_asset("sample.pdf", "pdf")
-    raw_bytes = (FIXTURES_DIR / "sample.pdf").read_bytes()
-
-    parsed = parser.parse(asset, raw_bytes)
-
-    assert "Hello from PDF test page" in parsed.raw_text
-    assert parsed.file_type == "pdf"
-    assert parsed.metadata["format"] == "pdf"
-    assert parsed.metadata["page_count"] == 1
-    assert parsed.metadata["filename"] == "sample.pdf"
-    assert parsed.metadata["parser_strategy"] == "docling_academic_pdf"
-    page_texts = parsed.metadata["page_texts"]
-    assert len(page_texts) == 1
-    assert page_texts[0]["page_number"] == 1
-    assert "Hello from PDF test page" in page_texts[0]["text"]
-
-
-def test_basic_pdf_parser_returns_page_texts_for_two_page_pdf() -> None:
-    parser = BasicPdfParser()
-    asset = make_asset("two_pages.pdf", "pdf")
-    raw_bytes = (FIXTURES_DIR / "two_pages.pdf").read_bytes()
-
-    parsed = parser.parse(asset, raw_bytes)
-
-    assert parsed.metadata["page_count"] == 2
-    page_texts = parsed.metadata["page_texts"]
-    assert len(page_texts) == 2
-    assert page_texts[0]["page_number"] == 1
-    assert "alpha" in page_texts[0]["text"]
-    assert page_texts[1]["page_number"] == 2
-    assert "beta" in page_texts[1]["text"]
-
-
-def test_basic_pdf_parser_raises_on_corrupted_input() -> None:
-    parser = BasicPdfParser()
-    asset = make_asset("corrupted.pdf", "pdf")
-
-    try:
-        parser.parse(asset, b"This is not a valid PDF file content at all")
-    except DocumentParsingError:
-        pass
-    else:
-        raise AssertionError("Expected DocumentParsingError for corrupted PDF")
-
-
-def test_parser_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    parser = BasicPdfParser()
-    asset = make_asset("corrupted.pdf", "pdf")
-
-    with caplog.at_level(logging.ERROR, logger=PARSER_LOGGER):
-        with pytest.raises(DocumentParsingError):
-            parser.parse(asset, b"this is not pdf")
-
-    record = next(
-        record for record in caplog.records if record.event == "parser_failed"
-    )
-    assert record.document_filename == "corrupted.pdf"
-    assert record.file_type == "pdf"
-    assert record.parser_strategy == "docling_academic_pdf"
-    assert record.error_type
-
-
-def test_basic_pdf_parser_returns_empty_text_for_blank_pdf() -> None:
-    parser = BasicPdfParser()
-    asset = make_asset("empty.pdf", "pdf")
-    raw_bytes = (FIXTURES_DIR / "empty.pdf").read_bytes()
-
-    parsed = parser.parse(asset, raw_bytes)
-
-    assert parsed.raw_text == ""
-    assert parsed.metadata["page_count"] == 1
-
-
-def test_basic_pdf_parser_raises_on_encrypted_pdf() -> None:
-    from io import BytesIO
-
-    from pypdf import PdfWriter
-
-    writer = PdfWriter()
-    writer.add_blank_page(width=200, height=200)
-    writer.encrypt(user_password="secret")
-    buf = BytesIO()
-    writer.write(buf)
-    encrypted_bytes = buf.getvalue()
-
-    parser = BasicPdfParser()
-    asset = make_asset("encrypted.pdf", "pdf")
-
-    try:
-        parser.parse(asset, encrypted_bytes)
-    except DocumentParsingError:
-        pass
-    else:
-        raise AssertionError("Expected DocumentParsingError for encrypted PDF")
 
 
 def test_composite_parser_dispatches_by_file_type() -> None:

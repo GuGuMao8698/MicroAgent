@@ -794,16 +794,9 @@ def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> No
 
 @pytest.mark.live_infinity
 def test_upload_encrypted_pdf_returns_422(client) -> None:
-    from io import BytesIO
-
-    from pypdf import PdfWriter
-
-    writer = PdfWriter()
-    writer.add_blank_page(width=200, height=200)
-    writer.encrypt(user_password="secret")
-    buf = BytesIO()
-    writer.write(buf)
-    encrypted_bytes = buf.getvalue()
+    encrypted_bytes = (
+        Path(__file__).resolve().parents[2] / "fixtures" / "documents" / "encrypted.pdf"
+    ).read_bytes()
 
     _install_fake_ark_client(client, FakeArkClient())
     response = client.post(
