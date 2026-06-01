@@ -41,6 +41,7 @@ from ragflow_lite.application import (
     DocumentService,
     IngestionPipeline,
 )
+from ragflow_lite.application.services.metadata_sanitizer import sanitize_chunk_metadata
 from ragflow_lite.application.services.query_mode_router import QueryModeRouter
 from ragflow_lite.domain.errors import (
     DatasetAlreadyExistsError,
@@ -54,6 +55,7 @@ from ragflow_lite.domain.errors import (
     RagflowLiteError,
     UnsupportedFileTypeError,
 )
+from ragflow_lite.domain.models import RetrievedChunk
 from ragflow_lite.shared.observability import log_event
 
 logger = logging.getLogger(__name__)
@@ -389,19 +391,23 @@ async def query_documents(
         return QueryResponse(
             answer=result.answer,
             contexts=[
-                RetrievedContextResponse(
-                    chunk_id=context.chunk_id,
-                    document_id=context.document_id,
-                    text=context.text,
-                    score=context.score,
-                    metadata=context.metadata,
-                )
-                for context in result.contexts
+                _retrieved_context_response(context) for context in result.contexts
             ],
             metadata=result.metadata,
         )
     except RagflowLiteError as exc:
         raise _map_error(exc, request) from exc
+
+
+def _retrieved_context_response(context: RetrievedChunk) -> RetrievedContextResponse:
+    safe_metadata, _stats = sanitize_chunk_metadata(context.metadata)
+    return RetrievedContextResponse(
+        chunk_id=context.chunk_id,
+        document_id=context.document_id,
+        text=context.text,
+        score=context.score,
+        metadata=safe_metadata,
+    )
 
 
 # ---------------------------------------------------------------------------

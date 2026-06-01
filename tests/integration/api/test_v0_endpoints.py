@@ -794,16 +794,9 @@ def test_upload_empty_pdf_returns_422(client, fixture_documents_dir: Path) -> No
 
 @pytest.mark.live_infinity
 def test_upload_encrypted_pdf_returns_422(client) -> None:
-    from io import BytesIO
-
-    from pypdf import PdfWriter
-
-    writer = PdfWriter()
-    writer.add_blank_page(width=200, height=200)
-    writer.encrypt(user_password="secret")
-    buf = BytesIO()
-    writer.write(buf)
-    encrypted_bytes = buf.getvalue()
+    encrypted_bytes = (
+        Path(__file__).resolve().parents[2] / "fixtures" / "documents" / "encrypted.pdf"
+    ).read_bytes()
 
     _install_fake_ark_client(client, FakeArkClient())
     response = client.post(
@@ -1410,3 +1403,56 @@ def test_logs_do_not_include_raw_query_or_document_content(
         rendered = str(record.__dict__)
         assert secret_query not in rendered
         assert secret_document not in rendered
+
+
+@pytest.mark.live_infinity
+def test_academic_pdf_ingestion_produces_academic_chunks(
+    client,
+    fixture_documents_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Academic PDF ingestion produces chunks with academic sparse fields."""
+    _install_fake_ark_client(client, FakeArkClient())
+    _install_fake_openai_client(
+        client, FakeOpenAIClient(output_text="table answer<cite:1>.")
+    )
+    _patch_fake_evidence_extractor(client.app)
+    with caplog.at_level(logging.INFO):
+        upload_response = _upload_fixture_document(
+            client,
+            fixture_documents_dir,
+            "academic_pdf/sample_academic.pdf",
+            upload_name="sample_academic.pdf",
+            idempotency_key=_unique_key(),
+        )
+        assert upload_response.status_code == 202
+        document_id = upload_response.json()["document_id"]
+        final_payload = _wait_for_document_terminal_state(client, document_id)
+    assert final_payload["status"] == "indexed"
+    # Verify academic sparse fields are populated in Infinity
+    vector_index = client.app.state.services.ingestion_pipeline.vector_index
+    rows = _chunk_rows(
+        vector_index,
+        ["paper_title_tks", "caption_tks", "chunk_metadata_json"],
+    )
+    academic_rows = [r for r in rows if r.get("paper_title_tks")]
+    assert len(academic_rows) > 0, "Expected at least one chunk with paper_title_tks"
+    caption_rows = [r for r in rows if r.get("caption_tks")]
+    assert len(caption_rows) > 0, "Expected at least one chunk with caption_tks"
+
+
+def test_academic_pdf_gate_a_does_not_construct_vlm_client_when_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate A must not require VLM client when figure VLM is disabled."""
+    monkeypatch.setenv("MICRORAG_FIGURE_VLM_ENABLED", "false")
+    from ragflow_lite.config.settings import Settings
+
+    settings = Settings(
+        project_root=tmp_path,
+        uploads_dir=tmp_path / "uploads",
+        local_index_dir=tmp_path / "local_index",
+        temp_dir=tmp_path / "tmp",
+    )
+    assert settings.figure_vlm_enabled is False

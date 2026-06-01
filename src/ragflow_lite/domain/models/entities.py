@@ -43,6 +43,86 @@ class ParsedDocument:
     file_type: str
     raw_text: str
     metadata: Metadata = field(default_factory=dict)
+    structured_payload: object | None = None
+
+
+# --- Academic PDF structured payload models ---
+
+
+@dataclass(slots=True)
+class PdfPage:
+    page_number: int
+    width: float | None = None
+    height: float | None = None
+
+
+@dataclass(slots=True)
+class PdfMediaAsset:
+    asset_id: str
+    element_id: str
+    media_type: str
+    extension: str
+    size_bytes: int
+    data: bytes | None = None
+    staged_path: str | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PdfElement:
+    element_id: str
+    element_type: str
+    text: str
+    page_start: int | None
+    page_end: int | None
+    bbox: tuple[float, float, float, float] | None = None
+    section_path: list[str] = field(default_factory=list)
+    academic_role: str | None = None
+    element_label: str | None = None
+    caption: str | None = None
+    media_asset_id: str | None = None
+    context_before: str | None = None
+    context_after: str | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ParsedPdfDocument:
+    document_id: str
+    filename: str
+    parser_strategy: str
+    title: str
+    authors: list[str] = field(default_factory=list)
+    pages: list[PdfPage] = field(default_factory=list)
+    elements: list[PdfElement] = field(default_factory=list)
+    media_assets: list[PdfMediaAsset] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    degradation_flags: list[str] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AcademicPdfIngestionSummary:
+    document_id: str
+    status: str
+    parser_strategy: str
+    parse_source: str
+    structured_payload_present: bool
+    structured_payload_fingerprint_present: bool
+    chunker_strategy: str
+    trace_id: str | None = None
+    task_id: str | None = None
+    pdf_element_count: int = 0
+    pdf_element_counts_by_type: dict[str, int] = field(default_factory=dict)
+    academic_chunk_count: int = 0
+    generic_chunk_count: int = 0
+    table_chunk_count: int = 0
+    figure_chunk_count: int = 0
+    warning_codes: list[str] = field(default_factory=list)
+    failed_stage: str | None = None
+    last_successful_stage: str | None = None
+    degradation_flags: list[str] = field(default_factory=list)
+    counts: Metadata = field(default_factory=dict)
 
 
 @dataclass(slots=True)

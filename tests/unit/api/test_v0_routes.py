@@ -165,3 +165,37 @@ def test_query_request_does_not_expose_retrieval_rewrite_strategy() -> None:
     assert "rewrite_strategy" not in fields
     assert "retrieval_rewrite" not in fields
     assert "cot_grounding" not in fields
+
+
+# ---------------------------------------------------------------------------
+# Metadata sanitizer：_retrieved_context_response 剥离内部字段
+# ---------------------------------------------------------------------------
+
+
+def test_retrieved_context_response_strips_internal_pdf_metadata() -> None:
+    from ragflow_lite.api.routes.v0.endpoints import _retrieved_context_response
+    from ragflow_lite.domain.models import RetrievedChunk
+
+    response = _retrieved_context_response(
+        RetrievedChunk(
+            chunk_id="chunk_1",
+            document_id="doc_1",
+            text="Paper: Test\nBody:\ncontent",
+            score=0.8,
+            metadata={
+                "paper_title": "Test",
+                "caption": "safe caption",
+                "asset_id": "asset_1",
+                "storage_path": "/tmp/private.png",
+                "base64": "unsafe",
+                "raw_provider_payload": {"secret": True},
+            },
+        )
+    )
+
+    metadata = response.metadata
+    assert metadata["caption"] == "safe caption"
+    assert metadata["asset_id"] == "asset_1"
+    assert "storage_path" not in metadata
+    assert "base64" not in metadata
+    assert "raw_provider_payload" not in metadata

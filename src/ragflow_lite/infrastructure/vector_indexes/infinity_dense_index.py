@@ -33,6 +33,10 @@ from ragflow_lite.domain.models import (
     IndexedDocument,
     RetrievedChunk,
 )
+from ragflow_lite.domain.models.academic_pdf_fields import academic_fulltext_fields
+from ragflow_lite.domain.models.academic_pdf_fields import (
+    academic_sparse_field_names as _academic_sparse_field_names,
+)
 from ragflow_lite.infrastructure.vector_indexes import chunk_text_fields
 from ragflow_lite.infrastructure.vector_indexes.chunk_text_fields import (
     CHUNK_FIELD_MATCH_TEXT_FIELDS,
@@ -43,11 +47,14 @@ logger = logging.getLogger(__name__)
 EmbeddingSignature = dict[str, str | int | None]
 _DDL_RETRY_ATTEMPTS = 5
 _DDL_RETRY_DELAY_SECONDS = 0.05
+_ACADEMIC_FULLTEXT_FIELDS = academic_fulltext_fields()
+_ACADEMIC_SPARSE_FIELD_NAMES = _academic_sparse_field_names()
 _REQUIRED_CHUNK_AUXILIARY_TEXT_COLUMNS = {
     "filename_kwd",
     "filename_tks",
     "content_tks",
     "content_sm_tks",
+    *_ACADEMIC_SPARSE_FIELD_NAMES,
 }
 
 
@@ -308,7 +315,11 @@ class InfinityDenseVectorIndex:
             )
             chunks_by_id: dict[str, RetrievedChunk] = {}
             for row in rows:
-                metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+                metadata = self._parse_json(
+                    row.get("chunk_metadata_json", ""),
+                    row_id=row.get("chunk_id"),
+                    academic_pdf=row.get("file_type") == "pdf",
+                )
                 metadata["filename"] = row.get("filename")
                 metadata["file_type"] = row.get("file_type")
                 chunks_by_id[row["chunk_id"]] = RetrievedChunk(
@@ -370,6 +381,10 @@ class InfinityDenseVectorIndex:
             "filename_tks": {"type": "varchar"},
             "content_tks": {"type": "varchar"},
             "content_sm_tks": {"type": "varchar"},
+            **{
+                field_name: {"type": "varchar"}
+                for field_name in _ACADEMIC_SPARSE_FIELD_NAMES
+            },
         }
         self._retry_ddl(
             self._db.create_table,
@@ -454,6 +469,10 @@ class InfinityDenseVectorIndex:
                 f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
                 f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
                 f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
+                **{
+                    f"{self._chunk_table}_{field}_fulltext_idx": field
+                    for field in _ACADEMIC_FULLTEXT_FIELDS
+                },
             }
             existing_indexes = self._list_index_names(chunk_table)
 
@@ -905,7 +924,11 @@ class InfinityDenseVectorIndex:
                 text=row["text"],
                 score=float(row["_score"]),
                 metadata={
-                    **self._parse_json(row.get("chunk_metadata_json", "")),
+                    **self._parse_json(
+                        row.get("chunk_metadata_json", ""),
+                        row_id=row.get("chunk_id"),
+                        academic_pdf=row.get("file_type") == "pdf",
+                    ),
                     "filename": row.get("filename"),
                     "file_type": row.get("file_type"),
                 },
@@ -921,7 +944,11 @@ class InfinityDenseVectorIndex:
             requested=score_field,
         )
         for row in df.iter_rows(named=True):
-            metadata = self._parse_json(row.get("chunk_metadata_json", ""))
+            metadata = self._parse_json(
+                row.get("chunk_metadata_json", ""),
+                row_id=row.get("chunk_id"),
+                academic_pdf=row.get("file_type") == "pdf",
+            )
             metadata["filename"] = row.get("filename")
             metadata["file_type"] = row.get("file_type")
             if "chunk_index" in row:
@@ -1003,8 +1030,9 @@ class InfinityDenseVectorIndex:
         text_fields = chunk_text_fields.build_chunk_text_fields(
             filename=asset.filename,
             text=chunk.text,
+            metadata=chunk.metadata,
         )
-        return {
+        row: dict[str, Any] = {
             "chunk_id": chunk.chunk_id,
             "document_id": chunk.document_id,
             "chunk_index": chunk.index,
@@ -1021,6 +1049,9 @@ class InfinityDenseVectorIndex:
             "content_tks": text_fields["content_tks"],
             "content_sm_tks": text_fields["content_sm_tks"],
         }
+        for key in chunk_text_fields.ACADEMIC_CHUNK_TEXT_FIELDS:
+            row[key] = text_fields[key]
+        return row
 
     @staticmethod
     def _delete_document_rows(doc_table: Any, document_id: str) -> None:
@@ -1049,12 +1080,21 @@ class InfinityDenseVectorIndex:
         )
 
     @staticmethod
-    def _parse_json(raw: str) -> dict[str, Any]:
+    def _parse_json(
+        raw: str,
+        *,
+        row_id: str | None = None,
+        academic_pdf: bool = False,
+    ) -> dict[str, Any]:
         if not raw:
             return {}
         try:
             return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as exc:
+            if academic_pdf:
+                raise ProcessingError(
+                    f"Failed to parse academic PDF chunk metadata JSON for row '{row_id}'."
+                ) from exc
             return {}
 
 

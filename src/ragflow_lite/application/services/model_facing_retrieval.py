@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from ragflow_lite.application.services.metadata_sanitizer import sanitize_chunk_metadata
 from ragflow_lite.domain.models import AnswerBlueprint, RetrievedChunk
 
 
@@ -21,12 +22,13 @@ def order_discorag_contexts_for_model(
 
 
 def context_payload(context: RetrievedChunk) -> dict[str, object]:
+    metadata, _stats = sanitize_chunk_metadata(context.metadata)
     return {
         "chunk_id": context.chunk_id,
         "document_id": context.document_id,
         "text": context.text,
         "score": context.score,
-        "metadata": deepcopy(context.metadata),
+        "metadata": metadata,
     }
 
 

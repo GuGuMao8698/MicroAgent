@@ -448,6 +448,8 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "DeepSeekChatAnswerer",
         "DeepSeekChatEvidenceExtractor",
         "DeepSeekChatIntraChunkDiscourseExtractor",
+        "DocumentChunker",
+        "LocalPdfMediaAssetStore",
         "RecursiveCharacterChunker",
         "InfinityDenseVectorIndex",
         "InfinityHybridRetriever",
@@ -876,3 +878,55 @@ def test_build_services_does_not_require_agent_runtime_setup(
     services = build_services(settings)
 
     assert services.settings is settings
+
+
+def test_build_services_uses_document_chunker_for_academic_pdf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-embedding")
+    settings = _build_settings(tmp_path)
+    services = build_services(settings)
+
+    assert services.ingestion_pipeline.chunker.__class__.__name__ == "DocumentChunker"
+
+
+def test_vlm_disabled_does_not_require_ark_figure_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ARK_FIGURE_MODEL", raising=False)
+    monkeypatch.setenv("MICRORAG_FIGURE_VLM_ENABLED", "false")
+    settings = _build_settings(tmp_path)
+
+    assert settings.figure_vlm_enabled is False
+    assert settings.ark_figure_model is None
+
+
+def test_vlm_enabled_requires_figure_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MICRORAG_FIGURE_VLM_ENABLED", "true")
+    monkeypatch.delenv("ARK_FIGURE_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="ARK_FIGURE_MODEL"):
+        _build_settings(tmp_path)
+
+
+def test_vlm_disabled_does_not_construct_figure_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
+    monkeypatch.setenv("ARK_API_KEY", "test-ark-api-key")
+    monkeypatch.setenv("ARK_EMBEDDING_MODEL", "ep-test-embedding")
+    monkeypatch.setenv("MICRORAG_FIGURE_VLM_ENABLED", "false")
+    settings = _build_settings(tmp_path)
+    services = build_services(settings)
+
+    assert getattr(services.ingestion_pipeline, "figure_describer", None) is None

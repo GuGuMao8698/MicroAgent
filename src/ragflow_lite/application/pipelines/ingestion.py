@@ -12,10 +12,15 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 from uuid import uuid4
 
+from ragflow_lite.application.services.pdf_payload_codec import (
+    deserialize_parsed_pdf_document,
+    fingerprint_parsed_pdf_document,
+    serialize_parsed_pdf_document,
+)
 from ragflow_lite.application.services.text_normalization import (
     VISIBLE_TEXT_PATTERN,
     normalize_text_content,
@@ -111,6 +116,15 @@ def _log_ingest_event(
     )
 
 
+def _log_academic_pdf_summary(summary: object) -> None:
+    """记录 academic PDF ingestion 摘要事件。"""
+    from ragflow_lite.domain.models import AcademicPdfIngestionSummary
+
+    assert isinstance(summary, AcademicPdfIngestionSummary)
+    level = logging.INFO if summary.status != "failed" else logging.ERROR
+    log_event(logger, level, "academic_pdf_ingestion_summary", **asdict(summary))
+
+
 def _extract_doc_metadata(parser_metadata: dict[str, Any]) -> dict[str, Any]:
     """从 parser metadata 中提取文档级 extras，去掉顶层已有和 chunk/派生字段。"""
     return {
@@ -151,10 +165,27 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+ACADEMIC_PDF_CHUNK_SCHEMA_VERSION = "academic_schema_v1"
+
+
+def _structured_payload_fingerprint(payload: object | None) -> str:
+    from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
+
+    if not isinstance(payload, _PPD):
+        return ""
+    return fingerprint_parsed_pdf_document(payload)
+
+
+def _reconstruct_structured_payload(serialized: str) -> object:
+    """从 JSON 字符串重建 structured_payload 数据类实例。"""
+    return deserialize_parsed_pdf_document(serialized)
+
+
 @dataclass(frozen=True, slots=True)
 class _ParsedDocumentCacheValue:
     raw_text: str
     metadata: dict[str, Any]
+    structured_payload_serialized: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +224,8 @@ class IngestionPipeline:
         runner: IngestionTaskRunner | None = None,
         evidence_extractor: EvidenceExtractor | None = None,
         graph_store: GraphEvidenceStore | None = None,
+        media_asset_store: Any | None = None,
+        figure_describer: Any | None = None,
     ) -> None:
         self.document_store = document_store
         self.parser = parser
@@ -206,6 +239,8 @@ class IngestionPipeline:
         self.runner = runner
         self.evidence_extractor = evidence_extractor
         self.graph_store = graph_store
+        self.media_asset_store = media_asset_store
+        self.figure_describer = figure_describer
 
     # ------------------------------------------------------------------
     # Legacy synchronous interface
@@ -221,6 +256,7 @@ class IngestionPipeline:
         file_type = self._resolve_file_type(filename)
         document_id = f"doc_{uuid4().hex}"
         asset = None
+        staged_assets = None
 
         parser_strategy = ""
         _log_ingest_event(
@@ -242,13 +278,34 @@ class IngestionPipeline:
             raw_bytes = self.document_store.read_document(asset)
             parsed_document = self.parser.parse(asset, raw_bytes)
             parser_strategy = parsed_document.metadata.get("parser_strategy", "")
+
+            # 阶段性写入：PDF media assets 暂存到 staging 目录
+            staged_assets = self._stage_pdf_assets(
+                document_id,
+                parsed_document,
+                filename,
+            )
+
+            # Gate B: VLM figure description before chunking
+            self._apply_figure_descriptions(parsed_document, staged_assets)
+
             asset.metadata = _extract_doc_metadata(parsed_document.metadata)
             normalized_document = self._build_normalized_document(
                 parsed_document,
                 asset.filename,
             )
             chunks = self.chunker.chunk(normalized_document)
+
+            # 学术 PDF 必须走学术分块路径，否则硬失败
+            self._assert_academic_pdf_chunks(parsed_document, chunks)
+
             graph_evidence = self._extract_graph_evidence(chunks)
+            self._maybe_log_academic_summary(
+                parsed_document,
+                chunks,
+                document_id,
+                cache_key=None,
+            )
             embedded_chunks = self.embedder.embed_chunks(chunks)
             self.vector_index.index_document(asset, embedded_chunks)
             if graph_evidence is not None and self.graph_store is not None:
@@ -262,6 +319,11 @@ class IngestionPipeline:
                     # 绑定失败时清理 binding，但不覆盖原始异常
                     self._rollback_binding(document_id)
                     raise
+
+            # 下游写入（含 dataset binding）全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
 
             result = IngestionResult(
                 document_id=document_id,
@@ -283,6 +345,8 @@ class IngestionPipeline:
             record_ingest_outcome("succeeded", file_type)
             return result
         except RagflowLiteError as exc:
+            # 回滚暂存的 media assets
+            self._rollback_staged_assets(staged_assets, document_id, filename)
             # 只有文件已经落到受控存储后，才需要做文档级回滚。
             if asset is not None:
                 self._rollback(document_id)
@@ -298,6 +362,7 @@ class IngestionPipeline:
             record_ingest_outcome("failed", file_type)
             raise
         except Exception as exc:  # pragma: no cover - guarded by integration coverage
+            self._rollback_staged_assets(staged_assets, document_id, filename)
             if asset is not None:
                 self._rollback(document_id)
             _log_ingest_event(
@@ -392,6 +457,7 @@ class IngestionPipeline:
 
         start_time = time.monotonic()
         file_type = snapshot.file_type
+        staged_assets = None
 
         try:
             snapshot = replace(
@@ -416,6 +482,16 @@ class IngestionPipeline:
                 raw_bytes,
             )
 
+            # 阶段性写入：PDF media assets 暂存到 staging 目录
+            staged_assets = self._stage_pdf_assets(
+                document_id,
+                parsed_document,
+                snapshot.filename,
+            )
+
+            # Gate B: VLM figure description before chunking
+            self._apply_figure_descriptions(parsed_document, staged_assets)
+
             # Step: normalizing
             snapshot = self._update_step(snapshot, STEP_NORMALIZING)
             asset = replace(
@@ -432,6 +508,16 @@ class IngestionPipeline:
             snapshot = self._update_step(snapshot, STEP_CHUNKING)
             chunk_cache_key = self._chunk_cache_key(normalized_document)
             chunks = self._cached_chunk(chunk_cache_key, normalized_document)
+
+            # 学术 PDF 必须走学术分块路径，否则硬失败
+            self._assert_academic_pdf_chunks(parsed_document, chunks)
+
+            self._maybe_log_academic_summary(
+                parsed_document,
+                chunks,
+                document_id,
+                cache_key=chunk_cache_key,
+            )
 
             # Step: graph evidence
             snapshot = self._update_step(snapshot, STEP_GRAPH_EVIDENCE)
@@ -453,6 +539,11 @@ class IngestionPipeline:
                 snapshot = self._update_step(snapshot, STEP_BINDING)
                 self.dataset_store.bind_document(document_id, ds_id)
 
+            # 下游写入（含 dataset binding）全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
+
             # Success
             snapshot = replace(
                 snapshot,
@@ -472,6 +563,13 @@ class IngestionPipeline:
         except Exception as exc:
             duration = time.monotonic() - start_time
             record_ingest_task_duration("failed", duration)
+
+            # 回滚暂存的 media assets
+            self._rollback_staged_assets(
+                staged_assets,
+                document_id,
+                snapshot.filename,
+            )
 
             if snapshot.attempt < MAX_ATTEMPTS:
                 if self.runner is None:
@@ -567,6 +665,41 @@ class IngestionPipeline:
             return None
         return self.evidence_extractor.extract(chunks)
 
+    def _maybe_log_academic_summary(
+        self,
+        parsed_document: ParsedDocument,
+        chunks: list[Chunk],
+        document_id: str,
+        *,
+        cache_key: str | None,
+    ) -> None:
+        """当文档包含 structured_payload 时记录 academic PDF 摘要。"""
+        from ragflow_lite.domain.models import (
+            AcademicPdfIngestionSummary,
+            ParsedPdfDocument,
+        )
+
+        payload = parsed_document.structured_payload
+        if not isinstance(payload, ParsedPdfDocument):
+            return
+        summary = AcademicPdfIngestionSummary(
+            document_id=document_id,
+            status="success",
+            parser_strategy=payload.parser_strategy,
+            parse_source="cold" if cache_key is None else "cached",
+            structured_payload_present=True,
+            structured_payload_fingerprint_present=True,
+            chunker_strategy="academic_pdf",
+            pdf_element_count=len(payload.elements),
+            table_chunk_count=sum(
+                1 for c in chunks if c.metadata.get("pdf_element_type") == "table"
+            ),
+            figure_chunk_count=sum(
+                1 for c in chunks if c.metadata.get("pdf_element_type") == "figure"
+            ),
+        )
+        _log_academic_pdf_summary(summary)
+
     def _update_step(
         self,
         snapshot: IngestionTaskSnapshot,
@@ -600,11 +733,19 @@ class IngestionPipeline:
             normalized_document.metadata.get("page_spans", []),
             sort_keys=True,
         )
-        return (
+        result = (
             f"chunk:{chunker_fingerprint}"
             f":{_sha256_hex(normalized_document.raw_text.encode())}"
             f":{_sha256_hex(relevant_metadata.encode())}"
         )
+        if normalized_document.structured_payload is not None:
+            payload_parts = [
+                str(normalized_document.metadata.get("parser_strategy", "")),
+                ACADEMIC_PDF_CHUNK_SCHEMA_VERSION,
+                _structured_payload_fingerprint(normalized_document.structured_payload),
+            ]
+            result += ":" + ":".join(payload_parts)
+        return result
 
     def _cached_parse(
         self,
@@ -621,11 +762,20 @@ class IngestionPipeline:
         parsed_document = self.parser.parse(asset, raw_bytes)
 
         if self.stage_cache is not None:
+            from ragflow_lite.domain.models import (
+                ParsedPdfDocument as _ParsedPdfDocument,
+            )
+
+            sp = parsed_document.structured_payload
+            serialized: str | None = None
+            if isinstance(sp, _ParsedPdfDocument):
+                serialized = serialize_parsed_pdf_document(sp)
             self.stage_cache.put(
                 cache_key,
                 _ParsedDocumentCacheValue(
                     raw_text=parsed_document.raw_text,
                     metadata=dict(parsed_document.metadata),
+                    structured_payload_serialized=serialized,
                 ),
             )
         record_ingest_stage_cache("miss")
@@ -668,6 +818,104 @@ class IngestionPipeline:
     # Shared helpers
     # ------------------------------------------------------------------
 
+    def _stage_pdf_assets(
+        self,
+        document_id: str,
+        parsed_document: ParsedDocument,
+        filename: str,
+    ) -> Any | None:
+        """暂存 PDF media assets 到 staging 目录，非 PDF 或无 assets 时返回 None。"""
+        from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
+
+        if (
+            self.media_asset_store is not None
+            and isinstance(parsed_document.structured_payload, _PPD)
+            and parsed_document.structured_payload.media_assets
+        ):
+            return self.media_asset_store.stage_assets(
+                document_id,
+                parsed_document.structured_payload.media_assets,
+            )
+        return None
+
+    def _apply_figure_descriptions(
+        self,
+        parsed_document: ParsedDocument,
+        staged_assets: Any | None,
+    ) -> None:
+        from ragflow_lite.domain.models import ParsedPdfDocument
+
+        if self.figure_describer is None:
+            return
+        payload = parsed_document.structured_payload
+        if not isinstance(payload, ParsedPdfDocument):
+            return
+        asset_paths = (
+            getattr(staged_assets, "asset_paths", {})
+            if staged_assets is not None
+            else {}
+        )
+        for element in payload.elements:
+            if element.element_type != "figure" or not element.media_asset_id:
+                continue
+            image_path = asset_paths.get(element.media_asset_id)
+            if image_path is None:
+                element.metadata["figure_description_status"] = "skipped"
+                element.metadata["figure_description_error_type"] = "missing_asset"
+                continue
+            try:
+                result = self.figure_describer.describe(
+                    image_path=image_path,
+                    caption=element.caption,
+                    section_path=list(element.section_path),
+                    paper_title=payload.title,
+                )
+            except Exception as exc:
+                element.metadata["figure_description_status"] = "failed"
+                element.metadata["figure_description_error_type"] = type(exc).__name__
+                continue
+            element.metadata["figure_description_status"] = str(
+                getattr(result, "status", "failed")
+            )
+            if getattr(result, "description", None):
+                element.metadata["visual_description"] = str(result.description)
+            error_type = getattr(result, "error_type", None) or getattr(
+                result, "skipped_reason", None
+            )
+            if error_type:
+                element.metadata["figure_description_error_type"] = str(error_type)
+
+    def _assert_academic_pdf_chunks(
+        self,
+        parsed_document: ParsedDocument,
+        chunks: list[Chunk],
+    ) -> None:
+        from ragflow_lite.domain.models import ParsedPdfDocument
+
+        if not isinstance(parsed_document.structured_payload, ParsedPdfDocument):
+            return
+        if any(c.metadata.get("chunker_strategy") != "academic_pdf" for c in chunks):
+            raise ProcessingError("Academic PDF reached non-academic chunking path.")
+
+    def _rollback_staged_assets(
+        self,
+        staged_assets: Any | None,
+        document_id: str,
+        filename: str,
+    ) -> None:
+        """回滚暂存的 media assets，失败时只记录日志。"""
+        if staged_assets is not None and self.media_asset_store is not None:
+            try:
+                self.media_asset_store.rollback_staged_assets(staged_assets)
+            except Exception:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "pdf_media_asset_rollback_failed",
+                    document_id=document_id,
+                    document_filename=filename,
+                )
+
     def _build_normalized_document(
         self, parsed_document: ParsedDocument, filename: str
     ) -> ParsedDocument:
@@ -683,6 +931,7 @@ class IngestionPipeline:
             file_type=parsed_document.file_type,
             raw_text=normalized_text,
             metadata=metadata,
+            structured_payload=parsed_document.structured_payload,
         )
 
     def _restore_cached_parse(
@@ -693,11 +942,16 @@ class IngestionPipeline:
         payload = _parsed_cache_fields(cached)
         if payload is not None:
             raw_text, metadata = payload
+            structured_payload = None
+            serialized = getattr(cached, "structured_payload_serialized", None)
+            if serialized is not None:
+                structured_payload = _reconstruct_structured_payload(serialized)
             return ParsedDocument(
                 document_id=asset.document_id,
                 file_type=asset.file_type,
                 raw_text=raw_text,
                 metadata=metadata,
+                structured_payload=structured_payload,
             )
         raise ProcessingError("Unexpected parse cache payload.")
 

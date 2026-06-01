@@ -6,12 +6,11 @@
 Runtime contracts: [../CONTRACTS.md](../CONTRACTS.md)。本文件只负责导航和命令指引，不重复运行契约。
 
 ## 文件说明
-- Supported baseline: `txt`, `md`, native-text `pdf`
+- Supported baseline: `txt`, `md`, `pdf`
 - `CompositeParser` -- dispatches by file type, raises unsupported-type errors
 - Markdown uses CommonMark/markdown-it path
-- PDF uses digital-native text extraction with page metadata
+- PDF uses Docling-backed `DoclingPdfParser` (see [../CONTRACTS.md](../CONTRACTS.md) for academic PDF contract)
 
 ## Avoid Here
-- 不要添加 OCR、layout analysis、table extraction 或 DeepDoc-style parsing。
 - Parser code 不应该 chunk、normalize for indexing、embed、index 或 format citations。
 - 不要 log raw document contents。

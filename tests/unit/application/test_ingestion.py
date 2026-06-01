@@ -33,12 +33,16 @@ from ragflow_lite.domain.models import (
     GraphEvidenceWriteResult,
     IngestionTaskSnapshot,
     ParsedDocument,
+    ParsedPdfDocument,
+    PdfElement,
+    PdfMediaAsset,
     RelationEvidence,
 )
 from ragflow_lite.infrastructure.chunkers import (
     FixedWindowChunker,
     RecursiveCharacterChunker,
 )
+from ragflow_lite.infrastructure.chunkers.academic_pdf import AcademicPdfChunker
 from ragflow_lite.infrastructure.ingestion.memory import InMemoryTaskStore
 from ragflow_lite.shared.observability import (
     bind_request_context,
@@ -426,6 +430,13 @@ class _FakeDatasetStore:
 
     def unbind_document(self, document_id: str) -> None:
         pass
+
+
+@dataclass
+class _FailingDatasetStore(_FakeDatasetStore):
+    def bind_document(self, document_id: str, dataset_id: str) -> None:
+        super().bind_document(document_id, dataset_id)
+        raise RuntimeError("binding failed")
 
 
 def _build_async_pipeline(
@@ -1571,3 +1582,443 @@ def test_graph_evidence_infinity_failure_rolls_back_both_stores() -> None:
     assert failing_index.deletes, "Infinity candidate rollback should have been called"
     assert vector_index.delete_calls == 1
     assert document_store.delete_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Structured payload preservation and chunk cache fingerprint
+# ---------------------------------------------------------------------------
+
+
+def test_normalized_document_preserves_structured_payload() -> None:
+    pipeline = _build_pipeline()
+    payload = ParsedPdfDocument(
+        document_id="doc_pdf",
+        filename="paper.pdf",
+        parser_strategy="docling_academic_pdf",
+        title="Paper",
+    )
+    parsed = ParsedDocument(
+        document_id="doc_pdf",
+        file_type="pdf",
+        raw_text="body",
+        metadata={"parser_strategy": "docling_academic_pdf"},
+        structured_payload=payload,
+    )
+
+    normalized = pipeline._build_normalized_document(parsed, "paper.pdf")
+
+    assert normalized.structured_payload is payload
+
+
+def test_pdf_chunk_cache_key_includes_payload_fingerprint() -> None:
+    pipeline = _build_pipeline()
+    payload = ParsedPdfDocument(
+        document_id="doc_pdf",
+        filename="paper.pdf",
+        parser_strategy="docling_academic_pdf",
+        title="Paper",
+    )
+    document = ParsedDocument(
+        document_id="doc_pdf",
+        file_type="pdf",
+        raw_text="body",
+        metadata={"parser_strategy": "docling_academic_pdf"},
+        structured_payload=payload,
+    )
+
+    key = pipeline._chunk_cache_key(document)
+
+    assert "docling_academic_pdf" in key
+    assert "academic_schema_v1" in key
+
+
+# ---------------------------------------------------------------------------
+# Media asset lifecycle and academic chunker routing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeMediaAssetStore:
+    staged: bool = False
+    committed: bool = False
+    rolled_back: bool = False
+    deleted_document_ids: list[str] = field(default_factory=list)
+
+    def stage_assets(self, document_id: str, assets: list[Any]) -> Any:
+        self.staged = True
+        return type(
+            "Staged",
+            (),
+            {
+                "document_id": document_id,
+                "asset_paths": {"asset_1": Path("/tmp/asset.png")},
+                "stage_dir": Path("/tmp/staging"),
+            },
+        )()
+
+    def commit_assets(self, document_id: str, staged: Any) -> dict[str, Path]:
+        self.committed = True
+        return staged.asset_paths
+
+    def rollback_staged_assets(self, staged: Any) -> None:
+        self.rolled_back = True
+
+    def delete_document_assets(self, document_id: str) -> None:
+        self.deleted_document_ids.append(document_id)
+
+
+@dataclass
+class _FakePdfParser:
+    """Parser that returns a ParsedDocument with ParsedPdfDocument structured_payload."""
+
+    def parse(self, asset: DocumentAsset, raw_bytes: bytes) -> ParsedDocument:
+        return ParsedDocument(
+            document_id=asset.document_id,
+            file_type=asset.file_type,
+            raw_text="parsed pdf text",
+            metadata={"parser_strategy": "docling_academic_pdf"},
+            structured_payload=ParsedPdfDocument(
+                document_id=asset.document_id,
+                filename=asset.filename,
+                parser_strategy="docling_academic_pdf",
+                title="Test Paper",
+                elements=[
+                    PdfElement(
+                        element_id="fig_1",
+                        element_type="figure",
+                        text="",
+                        page_start=1,
+                        page_end=1,
+                        section_path=["Method"],
+                        academic_role="figure",
+                        element_label="Figure 1",
+                        caption="System overview.",
+                        media_asset_id="asset_1",
+                    )
+                ],
+                media_assets=[
+                    PdfMediaAsset(
+                        asset_id="asset_1",
+                        element_id="fig_1",
+                        media_type="image/png",
+                        extension=".png",
+                        size_bytes=100,
+                        data=b"\x89PNG",
+                    ),
+                ],
+            ),
+        )
+
+
+@dataclass
+class _AcademicPdfChunker:
+    """Chunker that marks chunks as academic_pdf."""
+
+    chunk_size: int = 512
+    chunk_overlap: int = 0
+
+    def chunk(self, document: ParsedDocument) -> list[Chunk]:
+        return [
+            Chunk(
+                chunk_id=f"chunk_{document.document_id}_0",
+                document_id=document.document_id,
+                text=document.raw_text,
+                index=0,
+                metadata={"chunker_strategy": "academic_pdf"},
+            )
+        ]
+
+
+@dataclass
+class _NonAcademicChunker:
+    """Chunker that does NOT mark chunks as academic_pdf."""
+
+    chunk_size: int = 512
+    chunk_overlap: int = 0
+
+    def chunk(self, document: ParsedDocument) -> list[Chunk]:
+        return [
+            Chunk(
+                chunk_id=f"chunk_{document.document_id}_0",
+                document_id=document.document_id,
+                text=document.raw_text,
+                index=0,
+                metadata={},
+            )
+        ]
+
+
+def _build_pdf_pipeline(
+    *,
+    vector_index: Any | None = None,
+    document_store: Any | None = None,
+    chunker: Any | None = None,
+    media_asset_store: Any | None = None,
+) -> IngestionPipeline:
+    return IngestionPipeline(
+        document_store=document_store or _FakeDocumentStore(),
+        parser=_FakePdfParser(),
+        chunker=chunker or _AcademicPdfChunker(),
+        embedder=_FakeEmbedder(),
+        vector_index=vector_index or _FakeVectorIndex(),
+        normalizer=lambda text, filename: text,
+        media_asset_store=media_asset_store,
+    )
+
+
+def test_ingestion_commits_pdf_media_assets_on_success() -> None:
+    media_store = _FakeMediaAssetStore()
+    pipeline = _build_pdf_pipeline(media_asset_store=media_store)
+
+    result = pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert result.status == "indexed"
+    assert media_store.staged is True
+    assert media_store.committed is True
+    assert media_store.rolled_back is False
+
+
+def test_ingestion_rolls_back_staged_pdf_assets_when_indexing_fails() -> None:
+    media_store = _FakeMediaAssetStore()
+
+    @dataclass
+    class _FailingVectorIndex:
+        delete_calls: int = 0
+
+        def index_document(
+            self, asset: DocumentAsset, chunks: list[EmbeddedChunk]
+        ) -> None:
+            raise RuntimeError("index failed")
+
+        def delete_document(self, document_id: str) -> None:
+            self.delete_calls += 1
+
+    pipeline = _build_pdf_pipeline(
+        vector_index=_FailingVectorIndex(),
+        media_asset_store=media_store,
+    )
+
+    with pytest.raises(ProcessingError):
+        pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert media_store.staged is True
+    assert media_store.committed is False
+    assert media_store.rolled_back is True
+
+
+def test_ingestion_does_not_commit_pdf_media_assets_when_dataset_binding_fails() -> (
+    None
+):
+    media_store = _FakeMediaAssetStore()
+    pipeline = IngestionPipeline(
+        document_store=_FakeDocumentStore(),
+        parser=_FakePdfParser(),
+        chunker=_AcademicPdfChunker(),
+        embedder=_FakeEmbedder(),
+        vector_index=_FakeVectorIndex(),
+        normalizer=lambda text, filename: text,
+        dataset_store=_FailingDatasetStore(),
+        media_asset_store=media_store,
+    )
+
+    with pytest.raises(ProcessingError):
+        pipeline.ingest("paper.pdf", b"%PDF", dataset_id="ds_1")
+
+    assert media_store.staged is True
+    assert media_store.committed is False
+    assert media_store.rolled_back is True
+
+
+def test_ingestion_skips_media_asset_staging_when_store_is_none() -> None:
+    pipeline = _build_pdf_pipeline(media_asset_store=None)
+
+    result = pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert result.status == "indexed"
+
+
+def test_academic_pdf_hard_fails_on_non_academic_chunks() -> None:
+    pipeline = _build_pdf_pipeline(chunker=_NonAcademicChunker())
+
+    with pytest.raises(
+        ProcessingError, match="Academic PDF reached non-academic chunking path"
+    ):
+        pipeline.ingest("paper.pdf", b"%PDF")
+
+
+def test_non_academic_pdf_allows_non_academic_chunks() -> None:
+    """plain_text parser_strategy should not trigger the academic routing check."""
+    pipeline = _build_pipeline(chunker=_NonAcademicChunker())
+
+    result = pipeline.ingest("test.txt", b"hello")
+
+    assert result.status == "indexed"
+
+
+def test_parse_cache_hit_restores_typed_academic_pdf_payload() -> None:
+    pipeline, _task_store, stage_cache, _runner = _build_async_pipeline(
+        parser=_FakePdfParser(),
+        chunker=_AcademicPdfChunker(),
+    )
+    asset = _make_asset(document_id="doc_pdf")
+    raw_bytes = b"%PDF academic"
+    cache_key = pipeline._parse_cache_key(raw_bytes, "pdf")
+
+    first = pipeline._cached_parse(cache_key, asset, raw_bytes)
+    second = pipeline._cached_parse(cache_key, asset, raw_bytes)
+
+    from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
+
+    assert first.structured_payload is not None
+    assert isinstance(second.structured_payload, _PPD)
+    assert isinstance(second.structured_payload.elements[0], PdfElement)
+    assert isinstance(second.structured_payload.media_assets[0], PdfMediaAsset)
+    assert second.structured_payload.media_assets[0].data == b"\x89PNG"
+
+
+# ---------------------------------------------------------------------------
+# Gate B: VLM figure describer integration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeFigureDescriber:
+    status: str = "succeeded"
+    description: str | None = "A staged figure description."
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def describe(
+        self,
+        *,
+        image_path: Path,
+        caption: str | None,
+        section_path: list[str],
+        paper_title: str,
+    ) -> Any:
+        self.calls.append(
+            {
+                "image_path": image_path,
+                "caption": caption,
+                "section_path": section_path,
+                "paper_title": paper_title,
+            }
+        )
+        return type(
+            "Result",
+            (),
+            {
+                "status": self.status,
+                "description": self.description,
+                "skipped_reason": None,
+                "error_type": "RuntimeError" if self.status == "failed" else None,
+            },
+        )()
+
+
+class _PassThroughPdfEmbedder:
+    def embed_chunks(self, chunks: list[Chunk]) -> list[EmbeddedChunk]:
+        return [
+            EmbeddedChunk(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                text=chunk.text,
+                index=chunk.index,
+                vector=[1.0],
+                metadata=dict(chunk.metadata),
+            )
+            for chunk in chunks
+        ]
+
+
+@dataclass
+class _CapturingEmbeddedVectorIndex:
+    indexed_chunks: list[EmbeddedChunk] = field(default_factory=list)
+
+    def index_document(
+        self,
+        asset: DocumentAsset,
+        chunks: list[EmbeddedChunk],
+    ) -> None:
+        self.indexed_chunks.extend(chunks)
+
+    def delete_document(self, document_id: str) -> None:
+        return None
+
+
+def test_ingestion_applies_vlm_description_before_academic_chunking() -> None:
+    media_store = _FakeMediaAssetStore()
+    describer = _FakeFigureDescriber()
+    vector_index = _CapturingEmbeddedVectorIndex()
+    pipeline = IngestionPipeline(
+        document_store=_FakeDocumentStore(),
+        parser=_FakePdfParser(),
+        chunker=AcademicPdfChunker(),
+        embedder=_PassThroughPdfEmbedder(),
+        vector_index=vector_index,
+        normalizer=lambda text, filename: text,
+        media_asset_store=media_store,
+    )
+    pipeline.figure_describer = describer
+
+    pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert describer.calls
+    indexed_text = "\n\n".join(chunk.text for chunk in vector_index.indexed_chunks)
+    assert "Visual description: A staged figure description." in indexed_text
+    indexed_metadata = [chunk.metadata for chunk in vector_index.indexed_chunks]
+    assert any(
+        metadata.get("visual_description") == "A staged figure description."
+        and metadata.get("figure_description_status") == "succeeded"
+        for metadata in indexed_metadata
+    )
+
+
+def test_academic_pdf_guard_accepts_academic_chunks_from_typed_payload() -> None:
+    pipeline = _build_pdf_pipeline()
+    parsed = _FakePdfParser().parse(_make_asset(document_id="doc_pdf"), b"%PDF")
+    chunks = _AcademicPdfChunker().chunk(parsed)
+
+    pipeline._assert_academic_pdf_chunks(parsed, chunks)
+
+
+def test_academic_pdf_guard_rejects_generic_chunks_for_typed_payload() -> None:
+    pipeline = _build_pdf_pipeline()
+    parsed = _FakePdfParser().parse(_make_asset(document_id="doc_pdf"), b"%PDF")
+    chunks = [
+        Chunk(
+            chunk_id="chunk_doc_pdf_0",
+            document_id="doc_pdf",
+            text="generic",
+            index=0,
+            metadata={"chunker_strategy": "recursive_character"},
+        )
+    ]
+
+    with pytest.raises(ProcessingError):
+        pipeline._assert_academic_pdf_chunks(parsed, chunks)
+
+
+def test_ingestion_records_failed_vlm_description_without_failing() -> None:
+    media_store = _FakeMediaAssetStore()
+    describer = _FakeFigureDescriber(status="failed", description=None)
+    vector_index = _CapturingEmbeddedVectorIndex()
+    pipeline = IngestionPipeline(
+        document_store=_FakeDocumentStore(),
+        parser=_FakePdfParser(),
+        chunker=AcademicPdfChunker(),
+        embedder=_PassThroughPdfEmbedder(),
+        vector_index=vector_index,
+        normalizer=lambda text, filename: text,
+        media_asset_store=media_store,
+    )
+    pipeline.figure_describer = describer
+
+    result = pipeline.ingest("paper.pdf", b"%PDF")
+
+    assert result.status == "indexed"
+    indexed_metadata = [chunk.metadata for chunk in vector_index.indexed_chunks]
+    assert any(
+        metadata.get("figure_description_status") == "failed"
+        and metadata.get("figure_description_error_type") == "RuntimeError"
+        for metadata in indexed_metadata
+    )

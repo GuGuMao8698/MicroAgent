@@ -4,6 +4,7 @@ from ragflow_lite.infrastructure.answerers.deepseek_chat import (
 from ragflow_lite.infrastructure.answerers.openai_responses import (
     OpenAIResponsesAnswerer,
 )
+from ragflow_lite.infrastructure.chunkers.document_chunker import DocumentChunker
 from ragflow_lite.infrastructure.chunkers.recursive_character import (
     RecursiveCharacterChunker,
 )
@@ -21,6 +22,9 @@ from ragflow_lite.infrastructure.ingestion.memory import (
     InlineTaskRunner,
     InMemoryStageCache,
     InMemoryTaskStore,
+)
+from ragflow_lite.infrastructure.media.pdf_asset_store import (
+    LocalPdfMediaAssetStore,
 )
 from ragflow_lite.infrastructure.parsers.document_parsers import CompositeParser
 from ragflow_lite.infrastructure.retrievers import (
@@ -41,6 +45,8 @@ __all__ = [
     "DeepSeekChatAnswerer",
     "DeepSeekChatEvidenceExtractor",
     "DeepSeekChatIntraChunkDiscourseExtractor",
+    "DocumentChunker",
+    "LocalPdfMediaAssetStore",
     "RecursiveCharacterChunker",
     "InfinityDenseVectorIndex",
     "InfinityHybridRetriever",

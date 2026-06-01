@@ -6,7 +6,6 @@ from ragflow_lite.application.services.retrieval_rewrite import (
     decide_grounding_gate,
     merge_retrieval_results,
 )
-
 from ragflow_lite.domain.models import (
     GraphFirstSource,
     GraphFirstSourceSelection,

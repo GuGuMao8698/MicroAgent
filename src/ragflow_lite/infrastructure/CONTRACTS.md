@@ -7,7 +7,8 @@ contracts.
 ## Scope
 
 Infrastructure adapters implementing `domain.ports`: providers, Infinity,
-JSON/file storage, parser, chunker, retriever, and answerer.
+JSON/file storage, parser, chunker, retriever, answerer, media assets,
+and optional VLM adapters.
 
 Leaf adapter folders that do NOT get their own CONTRACTS.md (too small,
 single-purpose):
@@ -18,11 +19,13 @@ single-purpose):
 - [ingestion/](ingestion/)
 - [llms/](llms/)
 - [loaders/](loaders/)
+- [media/](media/)
 - [nlp/](nlp/)
 - [parsers/](parsers/)
 - [retrievers/](retrievers/)
 - [storage/](storage/)
 - [vector_indexes/](vector_indexes/)
+- [vlm/](vlm/)
 
 ## Adapter Boundary Contract
 
@@ -63,16 +66,19 @@ Status: Active
 Owner: `InfinityDenseVectorIndex`, `chunk_text_fields.py`
 
 Source of truth:
-- Default chunk auxiliary `match_text` uses only tokenizer-derived fields:
-  `filename_kwd^30,filename_tks^20,content_tks^2,content_sm_tks`.
+- Default chunk auxiliary `match_text` uses tokenizer-derived fields plus
+  academic sparse fields:
+  `filename_kwd^30,paper_title_tks^24,filename_tks^20,academic_role_kwd^18,section_tks^12,caption_tks^10,media_context_tks^9,visual_description_tks^8,element_type_kwd^8,element_label_tks^6,content_tks^2,content_sm_tks`.
 - `filename` and `text` remain stored columns, but are not default
   `match_text` fallback fields.
-- Chunk tables missing `filename_kwd`, `filename_tks`, `content_tks`, or
-  `content_sm_tks` are incompatible and must fail during initialization
-  (`_validate_chunk_auxiliary_text_columns` raises `RuntimeError`).
+- Chunk tables missing `filename_kwd`, `filename_tks`, `content_tks`,
+  `content_sm_tks`, or any academic sparse field are incompatible and must
+  fail during initialization (`_validate_chunk_auxiliary_text_columns`
+  raises `RuntimeError`).
 
 Invariant:
 - `CHUNK_FIELD_MATCH_TEXT_FIELDS` must not include `filename` or `text`.
+- `ACADEMIC_CHUNK_TEXT_FIELDS` lists academic-specific sparse columns in the chunk schema.
 - Schema validation runs in `_ensure_tables` before any query path is active.
 
 Forbidden stale interpretations:
@@ -157,6 +163,56 @@ Verification:
 - [tests/unit/infrastructure/test_agent_session_store.py](../../../tests/unit/infrastructure/test_agent_session_store.py)
 - [tests/unit/api/test_acp_wiring.py](../../../tests/unit/api/test_acp_wiring.py)
 - [tests/unit/agent_runtime/test_setup.py](../../../tests/unit/agent_runtime/test_setup.py)
+
+## Academic PDF Ingestion
+
+Reviewed at: `2026-06-01T12:00:00+08:00`
+Status: Active
+Owner: `DoclingPdfParser`, `DocumentChunker`, `AcademicPdfChunker`, `LocalPdfMediaAssetStore`, `chunk_text_fields.py`, `metadata_sanitizer.py`
+
+Source files:
+- [parsers/docling_pdf_adapter.py](parsers/docling_pdf_adapter.py) -- Docling-backed PDF parser emitting `ParsedPdfDocument`
+- [chunkers/document_chunker.py](chunkers/document_chunker.py) -- dispatches to academic or generic chunker
+- [chunkers/academic_pdf.py](chunkers/academic_pdf.py) -- element-level chunker for academic PDFs
+- [media/pdf_asset_store.py](media/pdf_asset_store.py) -- local media asset staging/commit/rollback/delete
+- [vlm/ark_figure_describer.py](vlm/ark_figure_describer.py) -- optional Ark VLM figure description (Gate B)
+- [vector_indexes/chunk_text_fields.py](vector_indexes/chunk_text_fields.py) -- academic sparse text fields
+- [../application/services/metadata_sanitizer.py](../application/services/metadata_sanitizer.py) -- public metadata whitelist for API responses
+- [../domain/models/academic_pdf_fields.py](../domain/models/academic_pdf_fields.py) -- canonical `AcademicSparseFieldDescriptor` and `ACADEMIC_SPARSE_FIELD_DESCRIPTORS`
+
+Key invariants:
+- `.pdf` routes to `DoclingPdfParser` via `CompositeParser`.
+- `DoclingPdfParser` emits `ParsedDocument` with `structured_payload` of type `ParsedPdfDocument`.
+- `DocumentChunker` dispatches: `ParsedPdfDocument` payload routes to `AcademicPdfChunker`; all other payloads route to `RecursiveCharacterChunker`.
+- `AcademicPdfChunker` produces one chunk per element; chunk text includes paper title, section path, caption, media context, and VLM visual description as retrieval signals.
+- Media assets (`PdfMediaAsset`) are internal-only: `storage_path`, `local_path`, `temporary_path`, `media_root`, `base64`, and `raw_docling_object` are `INTERNAL_METADATA_KEYS` stripped by `sanitize_chunk_metadata` before API responses.
+- Media asset commit (`commit_assets`) runs after downstream persistence (embedding write, dataset binding) succeeds; on binding failure the staged assets are rolled back, not committed.
+- Academic sparse fields derive from a single canonical descriptor tuple `ACADEMIC_SPARSE_FIELD_DESCRIPTORS` in `academic_pdf_fields.py`: `paper_title_tks`, `academic_role_kwd`, `section_tks`, `caption_tks`, `media_context_tks`, `visual_description_tks`, `element_type_kwd`, `element_label_tks`. All downstream consumers (match-text weights, schema validation, public metadata keys) iterate this tuple; no sparse field may be added to the schema without a matching descriptor entry.
+- `CHUNK_FIELD_MATCH_TEXT_FIELDS` includes academic fields with boosted weights; legacy tables missing these fields fail fast during `_validate_chunk_auxiliary_text_columns`.
+- `LocalPdfMediaAssetStore` media root is `settings.project_root / "data" / "media" / "pdf-assets"`.
+- Media assets support only `image/png` with `.png` extension; max default `10 MiB`.
+- Optional Ark VLM figure description is gated by `MICRORAG_FIGURE_VLM_ENABLED` (default `false`) and requires `ARK_FIGURE_MODEL` when enabled.
+- VLM figure descriptions flow into chunk text (`visual_description` field) and sparse fields (`visual_description_tks`) when the VLM gate is enabled; when disabled, `visual_description` is empty and `visual_description_tks` is an empty string.
+
+Forbidden stale interpretations:
+- Do not treat `pypdf` or `pdf_native_text` as the active PDF runtime.
+- Do not revive `native-text pdf` or `digital-native text extraction` as the active PDF strategy.
+- Do not expose `storage_path`, `local_path`, `media_root`, or `base64` in API responses.
+- Do not add non-PNG media types without updating `LocalPdfMediaAssetStore._validate_asset`.
+- Do not add academic sparse fields to the schema, match-text weights, or public metadata keys without a matching `AcademicSparseFieldDescriptor` entry.
+
+Verification:
+- [tests/unit/infrastructure/test_docling_pdf_adapter.py](../../../tests/unit/infrastructure/test_docling_pdf_adapter.py)
+- [tests/unit/infrastructure/test_academic_pdf_chunker.py](../../../tests/unit/infrastructure/test_academic_pdf_chunker.py)
+- [tests/unit/infrastructure/test_parsers.py](../../../tests/unit/infrastructure/test_parsers.py)
+- [tests/unit/infrastructure/test_chunk_text_fields.py](../../../tests/unit/infrastructure/test_chunk_text_fields.py)
+- [tests/unit/infrastructure/test_ark_figure_describer.py](../../../tests/unit/infrastructure/test_ark_figure_describer.py)
+- [tests/unit/infrastructure/test_pdf_asset_store.py](../../../tests/unit/infrastructure/test_pdf_asset_store.py)
+- [tests/unit/api/test_providers.py](../../../tests/unit/api/test_providers.py)
+- [tests/unit/domain/test_academic_pdf_models.py](../../../tests/unit/domain/test_academic_pdf_models.py)
+- [tests/unit/domain/test_academic_pdf_fields.py](../../../tests/unit/domain/test_academic_pdf_fields.py)
+- [tests/unit/application/test_pdf_payload_codec.py](../../../tests/unit/application/test_pdf_payload_codec.py)
+- [tests/integration/infrastructure/test_live_infinity_core_paths.py](../../../tests/integration/infrastructure/test_live_infinity_core_paths.py)
 
 ## Known Submodule Contracts
 

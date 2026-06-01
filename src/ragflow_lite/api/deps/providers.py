@@ -53,6 +53,10 @@ from ragflow_lite.infrastructure.agent import (
     AcpRuntimeConfig,
     AgentSessionStore,
 )
+from ragflow_lite.infrastructure.chunkers import (
+    AcademicPdfChunker,
+    DocumentChunker,
+)
 from ragflow_lite.infrastructure.evidence import (
     GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
@@ -64,6 +68,7 @@ from ragflow_lite.infrastructure.evidence import (
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
 )
+from ragflow_lite.infrastructure.media import LocalPdfMediaAssetStore
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
     DeepSeekCoTGroundingRewriter,
@@ -177,10 +182,29 @@ def build_services(settings: Settings) -> AppServices:
         settings.local_index_dir / "agent_sessions.sqlite3"
     )
     parser = CompositeParser()
-    chunker = RecursiveCharacterChunker(
+    generic_chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )
+    chunker = DocumentChunker(
+        generic_chunker=generic_chunker,
+        academic_pdf_chunker=AcademicPdfChunker(),
+    )
+    media_asset_store = LocalPdfMediaAssetStore(
+        settings.project_root / "data" / "media" / "pdf-assets",
+    )
+    figure_describer = None
+    if settings.figure_vlm_enabled:
+        from openai import OpenAI
+
+        assert settings.ark_figure_model is not None
+        from ragflow_lite.infrastructure.vlm import ArkFigureDescriptionClient
+
+        figure_describer = ArkFigureDescriptionClient(
+            client=OpenAI(api_key=settings.ark_api_key, base_url=settings.ark_base_url),
+            model=settings.ark_figure_model,
+            max_image_bytes=settings.figure_vlm_max_image_bytes,
+        )
     embedder = ArkMultimodalTextEmbedder(
         api_key=ark_runtime_config.api_key,
         model=ark_runtime_config.model,
@@ -313,6 +337,8 @@ def build_services(settings: Settings) -> AppServices:
         runner=runner,
         evidence_extractor=evidence_extractor,
         graph_store=graph_store,
+        media_asset_store=media_asset_store,
+        figure_describer=figure_describer,
     )
 
     runner.set_handler(pipeline.process_task)

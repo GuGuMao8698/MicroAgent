@@ -17,17 +17,19 @@ rtk cx overview src/ragflow_lite/infrastructure/vector_indexes --full
 ```text
 infrastructure/
 ├── answerers/       # answerer adapters and prompt templates
-├── chunkers/        # fixed/recursive chunking implementations
+├── chunkers/        # fixed/recursive/academic chunking implementations
 ├── embedders/       # text embedding adapter
 ├── evidence/        # graph evidence extraction/store/index/discourse
 ├── ingestion/       # in-process task store/cache/runners
 ├── llms/            # chat completion client wrapper
 ├── loaders/         # currently empty compatibility package
+├── media/           # local PDF media asset staging/commit/rollback/delete
 ├── nlp/             # RAGFlow tokenizer wrapper
-├── parsers/         # txt/md/native-pdf parsers
+├── parsers/         # txt/md/pdf (Docling-backed) parsers
 ├── retrievers/      # query grounding and auxiliary hybrid retrieval
 ├── storage/         # local document byte storage
-└── vector_indexes/  # Infinity and local JSON vector indexes
+├── vector_indexes/  # Infinity and local JSON vector indexes
+└── vlm/             # optional VLM figure description adapters
 ```
 
 ## 关键约定

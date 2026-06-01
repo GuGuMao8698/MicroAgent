@@ -28,6 +28,8 @@ Mode routing and provider wiring:
 - Retrieval mode is fixed to hybrid; `RAGFLOW_LITE_RETRIEVAL_MODE` is rejected at startup if set.
 - All runtime provider config comes from host environment (`DEEPSEEK_API_KEY`, `ARK_API_KEY`, `ARK_EMBEDDING_MODEL`); no secrets are read from or committed in the source tree.
 - `Settings.require_runtime_provider_configs()` validates required env vars at startup and raises if missing.
+- Optional Ark VLM figure description is gated by `MICRORAG_FIGURE_VLM_ENABLED` (default `false`) and requires `ARK_FIGURE_MODEL` when enabled. Wiring details are in [infrastructure/CONTRACTS.md](infrastructure/CONTRACTS.md).
+- Media asset store root is `data/media/pdf-assets` under the project root.
 
 Layering:
 - HTTP surface is only in `api`.

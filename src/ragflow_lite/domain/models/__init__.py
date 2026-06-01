@@ -1,3 +1,11 @@
+from ragflow_lite.domain.models.academic_pdf_fields import (
+    ACADEMIC_SPARSE_FIELD_DESCRIPTORS,
+    AcademicSparseFieldDescriptor,
+    academic_fulltext_fields,
+    academic_public_metadata_keys,
+    academic_sparse_field_names,
+    academic_weighted_match_fields,
+)
 from ragflow_lite.domain.models.entities import (
     MAX_ATTEMPTS,
     STEP_BINDING,
@@ -12,6 +20,7 @@ from ragflow_lite.domain.models.entities import (
     TASK_INDEXED,
     TASK_PROCESSING,
     TASK_QUEUED,
+    AcademicPdfIngestionSummary,
     AnswerBlueprint,
     AnswerRequest,
     AnswerResult,
@@ -44,6 +53,10 @@ from ragflow_lite.domain.models.entities import (
     MiniEntityCandidate,
     MiniRelationshipCandidate,
     ParsedDocument,
+    ParsedPdfDocument,
+    PdfElement,
+    PdfMediaAsset,
+    PdfPage,
     PostRewriteAssessment,
     RelationEvidence,
     RetrievedChunk,
@@ -54,7 +67,14 @@ from ragflow_lite.domain.models.entities import (
 )
 
 __all__ = [
+    "ACADEMIC_SPARSE_FIELD_DESCRIPTORS",
     "MAX_ATTEMPTS",
+    "AcademicPdfIngestionSummary",
+    "AcademicSparseFieldDescriptor",
+    "academic_fulltext_fields",
+    "academic_public_metadata_keys",
+    "academic_sparse_field_names",
+    "academic_weighted_match_fields",
     "AnswerBlueprint",
     "AnswerRequest",
     "AnswerResult",
@@ -87,6 +107,10 @@ __all__ = [
     "MiniEntityCandidate",
     "MiniRelationshipCandidate",
     "ParsedDocument",
+    "ParsedPdfDocument",
+    "PdfElement",
+    "PdfMediaAsset",
+    "PdfPage",
     "PostRewriteAssessment",
     "RelationEvidence",
     "RetrievedChunk",
