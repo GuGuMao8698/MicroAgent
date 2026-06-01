@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from ragflow_lite.domain.models import ParsedDocument, ParsedPdfDocument, PdfElement
 from ragflow_lite.infrastructure.chunkers.academic_pdf import AcademicPdfChunker
 from ragflow_lite.infrastructure.chunkers.document_chunker import DocumentChunker
-
-from ragflow_lite.domain.models import ParsedDocument, ParsedPdfDocument, PdfElement
 from ragflow_lite.infrastructure.chunkers.recursive_character import (
     RecursiveCharacterChunker,
 )
@@ -50,6 +49,10 @@ def _payload() -> ParsedPdfDocument:
                 caption="System overview.",
                 media_asset_id="asset_fig_1",
                 context_after="The figure shows retrieval and graph construction.",
+                metadata={
+                    "visual_description": "A pipeline diagram.",
+                    "figure_description_status": "succeeded",
+                },
             ),
         ],
     )
@@ -79,6 +82,9 @@ def test_academic_chunker_uses_stable_template_for_table_and_figure() -> None:
 
     figure = next(c for c in chunks if c.metadata.get("pdf_element_type") == "figure")
     assert "Caption: System overview." in figure.text
+    assert "Visual description: A pipeline diagram." in figure.text
+    assert figure.metadata["visual_description"] == "A pipeline diagram."
+    assert figure.metadata["figure_description_status"] == "succeeded"
     assert figure.metadata["asset_id"] == "asset_fig_1"
 
 

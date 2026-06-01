@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ragflow_lite.infrastructure.media.pdf_asset_store import LocalPdfMediaAssetStore
-
 from ragflow_lite.domain.models import PdfMediaAsset
+from ragflow_lite.infrastructure.media.pdf_asset_store import LocalPdfMediaAssetStore
 
 
 def _asset(asset_id: str = "asset_1") -> PdfMediaAsset:

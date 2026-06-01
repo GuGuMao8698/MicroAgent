@@ -4,11 +4,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from ragflow_lite.application.services.mini_graph_first_retriever import (
-    MiniGraphFirstRetriever,
-)
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
+)
+from ragflow_lite.application.services.mini_graph_first_retriever import (
+    MiniGraphFirstRetriever,
 )
 from ragflow_lite.domain.models import (
     CoTGroundingResult,
@@ -1911,23 +1911,28 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
     assert result.source_selection.sources[2].rank == 2
     assert result.source_selection.sources[2].selected_for_answer is False
     assert result.source_selection.sources[2].selected_for_discourse is True
-    assert "chunk_supplemental_stale" not in result.metadata["source_selection"][
-        "selected_discourse_chunk_ids"
-    ]
-    assert "chunk_initial_supplemental" not in result.metadata["source_selection"][
-        "selected_discourse_chunk_ids"
-    ]
+    assert (
+        "chunk_supplemental_stale"
+        not in result.metadata["source_selection"]["selected_discourse_chunk_ids"]
+    )
+    assert (
+        "chunk_initial_supplemental"
+        not in result.metadata["source_selection"]["selected_discourse_chunk_ids"]
+    )
     assert "chunk_supplemental_stale" not in supplemental
     assert "chunk_initial_supplemental" not in supplemental
-    assert supplemental["chunk_supplemental_valid"].metadata[
-        "selected_for_answer"
-    ] is False
-    assert supplemental["chunk_supplemental_valid"].metadata[
-        "selected_for_discourse"
-    ] is True
-    assert supplemental["chunk_supplemental_valid"].metadata[
-        "supplemental_discourse"
-    ] is True
+    assert (
+        supplemental["chunk_supplemental_valid"].metadata["selected_for_answer"]
+        is False
+    )
+    assert (
+        supplemental["chunk_supplemental_valid"].metadata["selected_for_discourse"]
+        is True
+    )
+    assert (
+        supplemental["chunk_supplemental_valid"].metadata["supplemental_discourse"]
+        is True
+    )
     assert result.chunks[0].metadata["retrieval_rewrite_sources"] == ["initial"]
     assert result.chunks[1].metadata["retrieval_rewrite_sources"] == ["enriched"]
 

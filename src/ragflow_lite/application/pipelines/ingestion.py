@@ -16,6 +16,11 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any
 from uuid import uuid4
 
+from ragflow_lite.application.services.pdf_payload_codec import (
+    deserialize_parsed_pdf_document,
+    fingerprint_parsed_pdf_document,
+    serialize_parsed_pdf_document,
+)
 from ragflow_lite.application.services.text_normalization import (
     VISIBLE_TEXT_PATTERN,
     normalize_text_content,
@@ -164,22 +169,16 @@ ACADEMIC_PDF_CHUNK_SCHEMA_VERSION = "academic_schema_v1"
 
 
 def _structured_payload_fingerprint(payload: object | None) -> str:
-    if payload is None:
-        return ""
     from ragflow_lite.domain.models import ParsedPdfDocument as _PPD
 
     if not isinstance(payload, _PPD):
         return ""
-    raw = json.dumps(asdict(payload), sort_keys=True, ensure_ascii=False, default=str)
-    return _sha256_hex(raw.encode())
+    return fingerprint_parsed_pdf_document(payload)
 
 
 def _reconstruct_structured_payload(serialized: str) -> object:
     """从 JSON 字符串重建 structured_payload 数据类实例。"""
-    from ragflow_lite.domain.models import ParsedPdfDocument
-
-    data = json.loads(serialized)
-    return ParsedPdfDocument(**data)
+    return deserialize_parsed_pdf_document(serialized)
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +286,9 @@ class IngestionPipeline:
                 filename,
             )
 
+            # Gate B: VLM figure description before chunking
+            self._apply_figure_descriptions(parsed_document, staged_assets)
+
             asset.metadata = _extract_doc_metadata(parsed_document.metadata)
             normalized_document = self._build_normalized_document(
                 parsed_document,
@@ -295,7 +297,7 @@ class IngestionPipeline:
             chunks = self.chunker.chunk(normalized_document)
 
             # 学术 PDF 必须走学术分块路径，否则硬失败
-            self._enforce_academic_chunker_routing(parsed_document, chunks)
+            self._assert_academic_pdf_chunks(parsed_document, chunks)
 
             graph_evidence = self._extract_graph_evidence(chunks)
             self._maybe_log_academic_summary(
@@ -309,11 +311,6 @@ class IngestionPipeline:
             if graph_evidence is not None and self.graph_store is not None:
                 self.graph_store.upsert_document_evidence(graph_evidence)
 
-            # 下游写入全部成功，提交暂存的 media assets
-            if staged_assets is not None and self.media_asset_store is not None:
-                self.media_asset_store.commit_assets(document_id, staged_assets)
-                staged_assets = None
-
             # 在同一受控流程里完成 dataset 绑定
             if dataset_id is not None and self.dataset_store is not None:
                 try:
@@ -322,6 +319,11 @@ class IngestionPipeline:
                     # 绑定失败时清理 binding，但不覆盖原始异常
                     self._rollback_binding(document_id)
                     raise
+
+            # 下游写入（含 dataset binding）全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
 
             result = IngestionResult(
                 document_id=document_id,
@@ -487,6 +489,9 @@ class IngestionPipeline:
                 snapshot.filename,
             )
 
+            # Gate B: VLM figure description before chunking
+            self._apply_figure_descriptions(parsed_document, staged_assets)
+
             # Step: normalizing
             snapshot = self._update_step(snapshot, STEP_NORMALIZING)
             asset = replace(
@@ -505,7 +510,7 @@ class IngestionPipeline:
             chunks = self._cached_chunk(chunk_cache_key, normalized_document)
 
             # 学术 PDF 必须走学术分块路径，否则硬失败
-            self._enforce_academic_chunker_routing(parsed_document, chunks)
+            self._assert_academic_pdf_chunks(parsed_document, chunks)
 
             self._maybe_log_academic_summary(
                 parsed_document,
@@ -528,16 +533,16 @@ class IngestionPipeline:
             if graph_evidence is not None and self.graph_store is not None:
                 self.graph_store.upsert_document_evidence(graph_evidence)
 
-            # 下游写入全部成功，提交暂存的 media assets
-            if staged_assets is not None and self.media_asset_store is not None:
-                self.media_asset_store.commit_assets(document_id, staged_assets)
-                staged_assets = None
-
             # Step: binding
             ds_id = snapshot.dataset_id
             if ds_id is not None and self.dataset_store is not None:
                 snapshot = self._update_step(snapshot, STEP_BINDING)
                 self.dataset_store.bind_document(document_id, ds_id)
+
+            # 下游写入（含 dataset binding）全部成功，提交暂存的 media assets
+            if staged_assets is not None and self.media_asset_store is not None:
+                self.media_asset_store.commit_assets(document_id, staged_assets)
+                staged_assets = None
 
             # Success
             snapshot = replace(
@@ -764,7 +769,7 @@ class IngestionPipeline:
             sp = parsed_document.structured_payload
             serialized: str | None = None
             if isinstance(sp, _ParsedPdfDocument):
-                serialized = json.dumps(asdict(sp), sort_keys=True, default=str)
+                serialized = serialize_parsed_pdf_document(sp)
             self.stage_cache.put(
                 cache_key,
                 _ParsedDocumentCacheValue(
@@ -833,17 +838,63 @@ class IngestionPipeline:
             )
         return None
 
-    def _enforce_academic_chunker_routing(
+    def _apply_figure_descriptions(
+        self,
+        parsed_document: ParsedDocument,
+        staged_assets: Any | None,
+    ) -> None:
+        from ragflow_lite.domain.models import ParsedPdfDocument
+
+        if self.figure_describer is None:
+            return
+        payload = parsed_document.structured_payload
+        if not isinstance(payload, ParsedPdfDocument):
+            return
+        asset_paths = (
+            getattr(staged_assets, "asset_paths", {})
+            if staged_assets is not None
+            else {}
+        )
+        for element in payload.elements:
+            if element.element_type != "figure" or not element.media_asset_id:
+                continue
+            image_path = asset_paths.get(element.media_asset_id)
+            if image_path is None:
+                element.metadata["figure_description_status"] = "skipped"
+                element.metadata["figure_description_error_type"] = "missing_asset"
+                continue
+            try:
+                result = self.figure_describer.describe(
+                    image_path=image_path,
+                    caption=element.caption,
+                    section_path=list(element.section_path),
+                    paper_title=payload.title,
+                )
+            except Exception as exc:
+                element.metadata["figure_description_status"] = "failed"
+                element.metadata["figure_description_error_type"] = type(exc).__name__
+                continue
+            element.metadata["figure_description_status"] = str(
+                getattr(result, "status", "failed")
+            )
+            if getattr(result, "description", None):
+                element.metadata["visual_description"] = str(result.description)
+            error_type = getattr(result, "error_type", None) or getattr(
+                result, "skipped_reason", None
+            )
+            if error_type:
+                element.metadata["figure_description_error_type"] = str(error_type)
+
+    def _assert_academic_pdf_chunks(
         self,
         parsed_document: ParsedDocument,
         chunks: list[Chunk],
     ) -> None:
-        """学术 PDF 必须全部走 academic_pdf chunker，否则硬失败。"""
-        if parsed_document.metadata.get(
-            "parser_strategy"
-        ) == "docling_academic_pdf" and any(
-            c.metadata.get("chunker_strategy") != "academic_pdf" for c in chunks
-        ):
+        from ragflow_lite.domain.models import ParsedPdfDocument
+
+        if not isinstance(parsed_document.structured_payload, ParsedPdfDocument):
+            return
+        if any(c.metadata.get("chunker_strategy") != "academic_pdf" for c in chunks):
             raise ProcessingError("Academic PDF reached non-academic chunking path.")
 
     def _rollback_staged_assets(

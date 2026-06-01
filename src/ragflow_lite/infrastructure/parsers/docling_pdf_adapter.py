@@ -130,14 +130,11 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
             elif hasattr(table_item, "data") and hasattr(table_item.data, "grid"):
                 md_text = self._table_grid_to_markdown(table_item.data.grid)
 
-            prov = getattr(table_item, "prov", [])
-            page_no = prov[0].page_no if prov else None
-            caption = ""
-            if hasattr(table_item, "caption_text"):
-                try:
-                    caption = table_item.caption_text(doc)
-                except Exception:
-                    pass
+            prov = self._first_provenance(table_item)
+            page_no = self._page_no(prov)
+            caption = self._safe_caption(
+                table_item, doc, warnings, "table_caption_extraction_failed"
+            )
 
             element = PdfElement(
                 element_id=f"tbl_{i}",
@@ -145,7 +142,7 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
                 text=md_text,
                 page_start=page_no,
                 page_end=page_no,
-                bbox=self._extract_bbox(prov[0] if prov else None),
+                bbox=self._extract_bbox(prov),
                 section_path=list(section_stack),
                 academic_role="table",
                 element_label=f"Table {i + 1}",
@@ -157,14 +154,11 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
 
         # Process pictures
         for i, pic_item in enumerate(getattr(doc, "pictures", [])):
-            prov = getattr(pic_item, "prov", [])
-            page_no = prov[0].page_no if prov else None
-            caption = ""
-            if hasattr(pic_item, "caption_text"):
-                try:
-                    caption = pic_item.caption_text(doc)
-                except Exception:
-                    pass
+            prov = self._first_provenance(pic_item)
+            page_no = self._page_no(prov)
+            caption = self._safe_caption(
+                pic_item, doc, warnings, "figure_caption_extraction_failed"
+            )
 
             media_asset_id = f"pic_{i}"
             img_data = None
@@ -177,7 +171,7 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
                     img_ref.save(buf, format="PNG")
                     img_data = buf.getvalue()
                 except Exception:
-                    pass
+                    warnings.append("figure_image_extraction_failed")
 
             if img_data:
                 media_asset = PdfMediaAsset(
@@ -196,7 +190,7 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
                 text="",
                 page_start=page_no,
                 page_end=page_no,
-                bbox=self._extract_bbox(prov[0] if prov else None),
+                bbox=self._extract_bbox(prov),
                 section_path=list(section_stack),
                 academic_role="figure",
                 element_label=f"Figure {i + 1}",
@@ -259,6 +253,32 @@ class RealDoclingPdfBackend(DoclingPdfBackend):
             "list_item": "body",
         }
         return mapping.get(label, "body")
+
+    @staticmethod
+    def _first_provenance(item: object) -> object | None:
+        prov = getattr(item, "provenance", [])
+        if not prov:
+            prov = getattr(item, "prov", [])
+        return prov[0] if prov else None
+
+    @staticmethod
+    def _page_no(prov: object | None) -> int | None:
+        return getattr(prov, "page_no", None) if prov is not None else None
+
+    @staticmethod
+    def _safe_caption(
+        item: object,
+        doc: object,
+        warnings: list[str],
+        warning_code: str,
+    ) -> str:
+        if not hasattr(item, "caption_text"):
+            return ""
+        try:
+            return str(item.caption_text(doc) or "").strip()
+        except Exception:
+            warnings.append(warning_code)
+            return ""
 
     @staticmethod
     def _extract_bbox(prov: object | None) -> tuple[float, float, float, float] | None:

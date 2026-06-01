@@ -9,8 +9,8 @@ from prometheus_client import CONTENT_TYPE_LATEST
 from starlette.routing import Match
 
 from ragflow_lite.shared.observability import (
-    bind_request_context,
     bind_metrics_state,
+    bind_request_context,
     clear_metrics_state,
     clear_request_context,
     current_trace_id,
@@ -62,9 +62,7 @@ async def observability_middleware(request: Request, call_next):  # type: ignore
     request.state.trace_id = context.trace_id
     request.state.route_label = resolve_route_label(request)
 
-    track_http_metrics = (
-        metrics_enabled() and request.state.route_label != "/metrics"
-    )
+    track_http_metrics = metrics_enabled() and request.state.route_label != "/metrics"
     started_at = time.perf_counter()
     request.state.request_started_at = started_at
     if track_http_metrics:

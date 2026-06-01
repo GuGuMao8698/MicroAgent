@@ -1,14 +1,29 @@
 # Academic PDF Fixtures
 
-Deterministic academic PDF fixtures for Docling probe testing.
+Deterministic academic PDF fixtures for Docling probe testing and integration regression.
+
+## Fixture Classification
+
+| File | Purpose | Used by | Expected signal | Not an eval |
+|---|---|---|---|---|
+| `sample_academic.pdf` | Automated regression + probe | `test_v0_endpoints.py` (Gate A integration), `scripts/probe_docling_pdf.py` | Academic sparse fields (`paper_title_tks`, `caption_tks`) populated after full ingestion; title, abstract, sections, table/figure with captions, references | Yes -- fixtures verify signal presence, not retrieval quality |
+| `two_column_academic.pdf` | Probe | `scripts/probe_docling_pdf.py --input <path>` | Left-column-before-right reading order, table in column flow, section headings across columns | Yes |
+| `ambiguous_caption.pdf` | Probe | `scripts/probe_docling_pdf.py --input <path>` | Parallel caption structure with reversed ordering; table/figure pairs with similar captions | Yes |
+
+Supporting artifacts:
+
+| File | Purpose |
+|---|---|
+| `_probe_fig_*.png` | Deterministic PNG images embedded in PDFs by `generate_fixtures.py` |
+| `generate_fixtures.py` | ReportLab-based generator; single source of truth for fixture content |
 
 ## Fixtures
 
-| File | Purpose | Key Signals |
-|---|---|---|
-| `sample_academic.pdf` | Standard single-column academic paper | Title, abstract, sections, table with caption, figure with caption, references |
-| `two_column_academic.pdf` | Two-column layout paper | Reading order preservation, table in column layout, section headings across columns |
-| `ambiguous_caption.pdf` | Caption binding ambiguity test | Table and figure pairs with parallel caption structure, reversed ordering case |
+| File | Key Signals |
+|---|---|
+| `sample_academic.pdf` | Title, abstract, sections, table with caption, figure with caption, references |
+| `two_column_academic.pdf` | Reading order preservation, table in column layout, section headings across columns |
+| `ambiguous_caption.pdf` | Table and figure pairs with parallel caption structure, reversed ordering case |
 
 ## Generation
 

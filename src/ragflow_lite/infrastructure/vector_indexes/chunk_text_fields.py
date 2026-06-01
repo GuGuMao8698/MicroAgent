@@ -2,33 +2,46 @@
 
 from __future__ import annotations
 
+from ragflow_lite.domain.models.academic_pdf_fields import (
+    ACADEMIC_SPARSE_FIELD_DESCRIPTORS,
+    academic_weighted_match_fields,
+)
 from ragflow_lite.infrastructure.nlp import fine_grained_tokenize, tokenize
 
-ACADEMIC_CHUNK_TEXT_FIELDS = (
-    "paper_title_tks",
-    "academic_role_kwd",
-    "section_tks",
-    "caption_tks",
-    "media_context_tks",
-    "visual_description_tks",
-    "element_type_kwd",
-    "element_label_tks",
+ACADEMIC_CHUNK_TEXT_FIELDS = tuple(
+    field.sparse_field for field in ACADEMIC_SPARSE_FIELD_DESCRIPTORS
 )
 
-CHUNK_FIELD_MATCH_TEXT_FIELDS = (
-    "filename_kwd^30,"
-    "paper_title_tks^24,"
-    "filename_tks^20,"
-    "academic_role_kwd^18,"
-    "section_tks^12,"
-    "caption_tks^10,"
-    "media_context_tks^9,"
-    "visual_description_tks^8,"
-    "element_type_kwd^8,"
-    "element_label_tks^6,"
-    "content_tks^2,"
-    "content_sm_tks"
-)
+
+def _build_match_text_fields() -> str:
+    """Build the ordered match-text-fields string from canonical descriptors.
+
+    The interleaving order is:
+      filename_kwd^30, paper_title_tks^24, filename_tks^20,
+      academic_role_kwd^18, section_tks^12, caption_tks^10,
+      media_context_tks^9, visual_description_tks^8,
+      element_type_kwd^8, element_label_tks^6,
+      content_tks^2, content_sm_tks
+    """
+    academic_weighted = academic_weighted_match_fields()
+    parts = [
+        "filename_kwd^30",
+        academic_weighted[0],  # paper_title_tks^24
+        "filename_tks^20",
+        academic_weighted[1],  # academic_role_kwd^18
+        academic_weighted[2],  # section_tks^12
+        academic_weighted[3],  # caption_tks^10
+        academic_weighted[4],  # media_context_tks^9
+        academic_weighted[5],  # visual_description_tks^8
+        academic_weighted[6],  # element_type_kwd^8
+        academic_weighted[7],  # element_label_tks^6
+        "content_tks^2",
+        "content_sm_tks",
+    ]
+    return ",".join(parts)
+
+
+CHUNK_FIELD_MATCH_TEXT_FIELDS = _build_match_text_fields()
 
 
 def _metadata_text(metadata: dict[str, object], key: str) -> str:
@@ -55,27 +68,22 @@ def build_chunk_text_fields(
     metadata = metadata or {}
     filename_tks = tokenize(filename)
     content_tks = tokenize(text)
-    paper_title = _metadata_text(metadata, "paper_title")
-    section = _metadata_text(metadata, "section_path")
-    caption = _metadata_text(metadata, "caption")
-    media_context = _metadata_text(metadata, "media_context")
-    visual_description = _metadata_text(metadata, "visual_description")
-    element_label = _metadata_text(metadata, "element_label")
-    academic_role = _metadata_text(metadata, "academic_role")
-    element_type = _metadata_text(metadata, "pdf_element_type")
     return {
         "filename_kwd": filename,
         "filename_tks": filename_tks,
         "content_tks": content_tks,
         "content_sm_tks": fine_grained_tokenize(content_tks),
-        "paper_title_tks": tokenize(paper_title) if paper_title else "",
-        "academic_role_kwd": academic_role,
-        "section_tks": tokenize(section) if section else "",
-        "caption_tks": tokenize(caption) if caption else "",
-        "media_context_tks": tokenize(media_context) if media_context else "",
-        "visual_description_tks": tokenize(visual_description)
-        if visual_description
-        else "",
-        "element_type_kwd": element_type,
-        "element_label_tks": tokenize(element_label) if element_label else "",
+        **_build_academic_fields(metadata),
     }
+
+
+def _build_academic_fields(metadata: dict[str, object]) -> dict[str, str]:
+    """Derive all academic sparse fields from metadata using the descriptor."""
+    fields: dict[str, str] = {}
+    for descriptor in ACADEMIC_SPARSE_FIELD_DESCRIPTORS:
+        raw = _metadata_text(metadata, descriptor.metadata_key)
+        if descriptor.tokenizer_mode == "ragflow" and raw:
+            fields[descriptor.sparse_field] = tokenize(raw)
+        else:
+            fields[descriptor.sparse_field] = raw
+    return fields

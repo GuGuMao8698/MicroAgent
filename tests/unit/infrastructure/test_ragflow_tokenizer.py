@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from ragflow_lite.infrastructure.nlp.ragflow_tokenizer import (
     RAGFlowTokenizerUnavailableError,
     fine_grained_tokenize,

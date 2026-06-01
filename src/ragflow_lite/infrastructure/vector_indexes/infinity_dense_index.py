@@ -33,6 +33,10 @@ from ragflow_lite.domain.models import (
     IndexedDocument,
     RetrievedChunk,
 )
+from ragflow_lite.domain.models.academic_pdf_fields import academic_fulltext_fields
+from ragflow_lite.domain.models.academic_pdf_fields import (
+    academic_sparse_field_names as _academic_sparse_field_names,
+)
 from ragflow_lite.infrastructure.vector_indexes import chunk_text_fields
 from ragflow_lite.infrastructure.vector_indexes.chunk_text_fields import (
     CHUNK_FIELD_MATCH_TEXT_FIELDS,
@@ -43,19 +47,14 @@ logger = logging.getLogger(__name__)
 EmbeddingSignature = dict[str, str | int | None]
 _DDL_RETRY_ATTEMPTS = 5
 _DDL_RETRY_DELAY_SECONDS = 0.05
+_ACADEMIC_FULLTEXT_FIELDS = academic_fulltext_fields()
+_ACADEMIC_SPARSE_FIELD_NAMES = _academic_sparse_field_names()
 _REQUIRED_CHUNK_AUXILIARY_TEXT_COLUMNS = {
     "filename_kwd",
     "filename_tks",
     "content_tks",
     "content_sm_tks",
-    "paper_title_tks",
-    "academic_role_kwd",
-    "section_tks",
-    "caption_tks",
-    "media_context_tks",
-    "visual_description_tks",
-    "element_type_kwd",
-    "element_label_tks",
+    *_ACADEMIC_SPARSE_FIELD_NAMES,
 }
 
 
@@ -382,14 +381,10 @@ class InfinityDenseVectorIndex:
             "filename_tks": {"type": "varchar"},
             "content_tks": {"type": "varchar"},
             "content_sm_tks": {"type": "varchar"},
-            "paper_title_tks": {"type": "varchar"},
-            "academic_role_kwd": {"type": "varchar"},
-            "section_tks": {"type": "varchar"},
-            "caption_tks": {"type": "varchar"},
-            "media_context_tks": {"type": "varchar"},
-            "visual_description_tks": {"type": "varchar"},
-            "element_type_kwd": {"type": "varchar"},
-            "element_label_tks": {"type": "varchar"},
+            **{
+                field_name: {"type": "varchar"}
+                for field_name in _ACADEMIC_SPARSE_FIELD_NAMES
+            },
         }
         self._retry_ddl(
             self._db.create_table,
@@ -474,14 +469,10 @@ class InfinityDenseVectorIndex:
                 f"{self._chunk_table}_filename_tks_fulltext_idx": "filename_tks",
                 f"{self._chunk_table}_content_tks_fulltext_idx": "content_tks",
                 f"{self._chunk_table}_content_sm_tks_fulltext_idx": "content_sm_tks",
-                f"{self._chunk_table}_paper_title_tks_fulltext_idx": "paper_title_tks",
-                f"{self._chunk_table}_academic_role_kwd_fulltext_idx": "academic_role_kwd",
-                f"{self._chunk_table}_section_tks_fulltext_idx": "section_tks",
-                f"{self._chunk_table}_caption_tks_fulltext_idx": "caption_tks",
-                f"{self._chunk_table}_media_context_tks_fulltext_idx": "media_context_tks",
-                f"{self._chunk_table}_visual_description_tks_fulltext_idx": "visual_description_tks",
-                f"{self._chunk_table}_element_type_kwd_fulltext_idx": "element_type_kwd",
-                f"{self._chunk_table}_element_label_tks_fulltext_idx": "element_label_tks",
+                **{
+                    f"{self._chunk_table}_{field}_fulltext_idx": field
+                    for field in _ACADEMIC_FULLTEXT_FIELDS
+                },
             }
             existing_indexes = self._list_index_names(chunk_table)
 

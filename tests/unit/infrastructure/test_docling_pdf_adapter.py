@@ -7,6 +7,7 @@ from ragflow_lite.domain.models import DocumentAsset, ParsedPdfDocument
 from ragflow_lite.infrastructure.parsers.docling_pdf_adapter import (
     DoclingPdfBackend,
     DoclingPdfParser,
+    RealDoclingPdfBackend,
 )
 
 
@@ -65,3 +66,50 @@ def test_docling_pdf_parser_raises_on_failure() -> None:
         pass
     else:
         raise AssertionError("Expected DocumentParsingError")
+
+
+class _FakeProv:
+    page_no = 1
+    bbox = type("Bbox", (), {"l": 1, "t": 2, "r": 3, "b": 4})()
+
+
+class _CaptionFailingItem:
+    prov = [_FakeProv()]
+    image = None
+
+    def caption_text(self, doc: object) -> str:
+        raise RuntimeError("caption failed")
+
+
+def test_docling_backend_records_warning_when_table_caption_fails() -> None:
+    backend = RealDoclingPdfBackend.__new__(RealDoclingPdfBackend)
+    doc = type(
+        "Doc",
+        (),
+        {
+            "texts": [],
+            "tables": [_CaptionFailingItem()],
+            "pictures": [],
+        },
+    )()
+
+    payload = backend._map_to_parsed_pdf(doc, "paper.pdf")
+
+    assert "table_caption_extraction_failed" in payload.warnings
+
+
+def test_docling_backend_records_warning_when_picture_caption_fails() -> None:
+    backend = RealDoclingPdfBackend.__new__(RealDoclingPdfBackend)
+    doc = type(
+        "Doc",
+        (),
+        {
+            "texts": [],
+            "tables": [],
+            "pictures": [_CaptionFailingItem()],
+        },
+    )()
+
+    payload = backend._map_to_parsed_pdf(doc, "paper.pdf")
+
+    assert "figure_caption_extraction_failed" in payload.warnings

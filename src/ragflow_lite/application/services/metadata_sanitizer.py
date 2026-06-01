@@ -3,15 +3,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-PUBLIC_METADATA_KEYS = frozenset(
+from ragflow_lite.domain.models.academic_pdf_fields import (
+    academic_public_metadata_keys as _academic_public_metadata_keys,
+)
+
+PUBLIC_METADATA_KEYS = _academic_public_metadata_keys() | frozenset(
     {
-        "paper_title",
         "authors",
-        "pdf_element_type",
-        "academic_role",
-        "element_label",
-        "caption",
-        "section_path",
         "page_start",
         "page_end",
         "asset_id",
