@@ -70,6 +70,23 @@ MicroAgent facts from the current source tree:
   lifecycle, not generic conversation goal state.
 - `src/ragflow_lite/microagent/src/state/AppStateStore.ts` is runtime state, not
   the durable resume store.
+- Slash commands are registered through `src/ragflow_lite/microagent/src/commands.ts`.
+  That registry feeds command recognition, help, and typeahead.
+- Slash command input is parsed by the existing slash-command path. The parser
+  already preserves free-form text after the command name, so `/goal <objective>`
+  does not need a new generic parser.
+
+Codex `/goal` facts from the reference project:
+
+- `Goal` is a first-class slash command.
+- Bare `/goal` opens the current goal summary/action UI, or a usage hint when
+  no goal exists.
+- `/goal <objective>` sets the goal objective inline.
+- `/goal edit`, `/goal pause`, `/goal resume`, and `/goal clear` are the
+  user-facing control actions.
+- `/goal` itself does not directly start a turn. It updates goal state; the
+  runtime starts continuation later only if the goal is active and the runtime
+  is idle.
 
 ## Goals
 
@@ -78,20 +95,21 @@ MicroAgent facts from the current source tree:
 3. Persist goal state across turns and restore it on resume.
 4. Automatically continue an active goal while the current process is alive and
    the conversation runtime is idle.
-5. Keep user input, slash commands, queued commands, abort, and interrupt above
+5. Expose the feature through a first-class REPL slash command named `/goal`.
+6. Keep user input, slash commands, queued commands, abort, and interrupt above
    continuation in priority.
-6. Preserve Codex's full goal status set.
-7. Preserve Codex's token budget semantics:
+7. Preserve Codex's full goal status set.
+8. Preserve Codex's token budget semantics:
    - no default token budget;
    - null or omitted means no budget;
    - explicit budget must be greater than zero;
    - token accounting can move an active goal to `budgetLimited`;
    - elapsed time does not trigger `budgetLimited`.
-8. Prevent model-side privilege escalation. The model may only mark goals
+9. Prevent model-side privilege escalation. The model may only mark goals
    `complete` or `blocked`.
-9. Keep the generic conversation goal separate from existing autonomy flow goal
+10. Keep the generic conversation goal separate from existing autonomy flow goal
    semantics.
-10. Make failures bounded so continuation cannot hot-loop.
+11. Make failures bounded so continuation cannot hot-loop.
 
 ## Non-Goals
 
@@ -106,8 +124,12 @@ MicroAgent facts from the current source tree:
   Codex documentation as an example, not as a protocol default.
 - Do not add `timeBudget` or use elapsed time to trigger `budgetLimited`.
 - Do not allow `budgetLimited` goals to start new idle continuation turns.
-- Do not add product telemetry, app-server notifications, or UI surfaces unless
-  required by a later implementation plan.
+- Do not add product telemetry, app-server notifications, shell CLI mirrors, or
+  UI surfaces beyond the required `/goal` REPL slash-command surface unless a
+  later design explicitly adds them.
+- Do not add a shell CLI mirror such as `microagent goal ...` or
+  `claude goal ...` in the first implementation. The required user-facing
+  surface is the interactive REPL slash command `/goal`.
 
 ## Data Model
 
@@ -213,14 +235,17 @@ Persistence requirements:
 MicroAgent's session storage intentionally avoids metadata-only transcript
 files. Goal persistence must respect that contract.
 
-Creating a goal before any transcript materialization must start a real first
-turn that carries the goal objective, causing normal session materialization.
-The implementation must not create a transcript that contains only goal metadata.
+Creating a goal before any transcript materialization must schedule a real first
+goal-driven turn through the normal post-command runtime path, causing normal
+session materialization. The slash-command handler itself must not directly run
+that turn. The implementation must not create a transcript that contains only
+goal metadata.
 
 Requirements:
 
 - A goal create operation must either attach to an already materialized
-  conversation transcript or immediately start the first goal-driven turn.
+  conversation transcript or schedule the first goal-driven turn through the
+  normal post-command runtime path.
 - Goal metadata is written as part of that real turn's session persistence path.
 - If session persistence is disabled, goal persistence and resume are
   unavailable for that session and the UI/CLI must report that limitation.
@@ -262,6 +287,8 @@ State ownership:
 | active | blocked | model | only via controlled goal update tool/API |
 | active | paused | user/runtime | explicit pause |
 | paused | active | user/runtime | explicit resume |
+| blocked | active | user/runtime | explicit resume after user decides to retry |
+| usageLimited | active | user/runtime | explicit resume after the limiting condition is cleared |
 | active | usageLimited | runtime | usage or repeated runtime failure limit |
 | active | budgetLimited | runtime | token budget reached |
 | active | active | runtime | accounting or continuation metadata update |
@@ -414,14 +441,92 @@ the model should not mark it `complete`.
 
 ## User And Model Interfaces
 
-The exact CLI, slash command, or tool names can be decided in the implementation
-plan, but the design requires these operations:
+The interactive REPL slash command `/goal` is part of the required feature
+surface. A runtime-only goal implementation without `/goal` is incomplete.
+
+The model-facing tool/API names can be decided in the implementation plan, but
+the REPL command name and its minimum behavior are fixed by this design.
+
+### REPL Slash Command
+
+`/goal` must be a first-class built-in slash command.
+
+Registration requirements:
+
+- Register `/goal` in the built-in command registry so it is recognized by slash
+  dispatch.
+- Make `/goal` visible in command help.
+- Make `/goal` visible in command typeahead/autocomplete.
+- Keep `/goal` available while work is in progress, subject to the same
+  command-system safety gates as other built-in commands.
+- Use the existing slash-command parser for free-form args; do not invent a
+  parallel command parser for the command name.
+
+Required command forms:
+
+- `/goal`
+  - Shows the current goal summary/action view.
+  - If no current goal exists, shows a usage hint.
+  - It must not silently no-op.
+- `/goal <objective>`
+  - Treats all non-reserved trailing text as the objective.
+  - Creates a goal if none exists.
+  - Replaces the current goal if one exists.
+  - Replacement must generate a new `goalId` and reset accounting.
+  - The first implementation does not parse token budget from `/goal`
+    objective text. Goals created through `/goal <objective>` use no token
+    budget unless a later design adds an explicit structured budget UI.
+  - It updates goal state; it must not directly run a turn from the slash
+    handler.
+- `/goal edit`
+  - Opens or invokes the goal-edit flow for the current goal.
+  - It must fail with a clear message if no current goal exists.
+  - Submitting an edited objective must route through the same replacement
+    semantics as `/goal <objective>`: new `goalId`, reset accounting, clear
+    continuation owner, and invalidate stale continuations.
+- `/goal pause`
+  - Moves an `active` goal to `paused`.
+  - It must not be model-callable.
+- `/goal resume`
+  - Moves a `paused`, `blocked`, or `usageLimited` goal back to `active` only
+    when user/runtime policy allows it.
+  - Resuming to `active` may trigger foreground continuation later through the
+    continuation controller if the runtime is idle.
+  - It must not directly run a turn from the slash handler.
+- `/goal clear`
+  - Clears the current goal and writes the clear tombstone.
+  - It must invalidate stale continuations and release any foreground owner
+    lease.
+
+Reserved words:
+
+- `edit`
+- `pause`
+- `resume`
+- `clear`
+
+Any other non-empty argument string is an objective. The objective parser should
+preserve free-form text after `/goal`, including spaces. It should support the
+same multiline objective shape as the command input path can safely represent.
+Empty objectives and oversized objectives must produce goal-specific validation
+errors.
+
+The first implementation must not add separate slash subcommands such as
+`/goal budget` or `/goal status`. Bare `/goal` is the status/summary surface,
+and token budget remains a structured field on goal creation/replacement.
+Because `/goal <objective>` treats all non-reserved trailing text as objective
+text, the first implementation must not invent hidden inline budget syntax such
+as `/goal --budget 1000 do work`; that would make objective parsing ambiguous.
+
+### Required Operations
+
+The design requires these underlying operations:
 
 - create goal with objective and optional token budget;
 - get current goal;
 - replace current goal;
 - pause current goal;
-- resume paused goal;
+- resume a user-resumable paused, blocked, or usage-limited goal;
 - clear current goal;
 - model-visible update path for `complete` and `blocked` only.
 
@@ -429,14 +534,19 @@ Validation:
 
 - objective must be non-empty after trimming;
 - token budget, when present, must be an integer greater than zero;
-- create should fail if a current goal exists unless the command explicitly
-  requests replacement;
+- lower-level create should fail if a current goal exists unless the caller
+  explicitly requests replacement;
+- `/goal <objective>` is an explicit create-or-replace user action;
+- `/goal <objective>` creates or replaces with `tokenBudget` unset; explicit
+  budget entry is only available through a structured lower-level API/tool until
+  a later design adds a visible `/goal` budget UI;
 - replacing must generate a new `goalId`;
 - model-side update must reject every status except `complete` and `blocked`;
-- resume can only move `paused` back to `active`;
+- resume can move `paused`, `blocked`, or `usageLimited` back to `active` when
+  invoked by user/runtime policy;
 - `budgetLimited` and `usageLimited` cannot be resumed by the model.
-- creating a goal as the first action must start a real goal-driven turn instead
-  of writing metadata only.
+- creating a goal as the first action must schedule a real goal-driven turn
+  through the normal post-command runtime path instead of writing metadata only.
 
 ## Autonomy Boundary
 
@@ -514,7 +624,27 @@ State machine:
 - model update rejects `paused`, `usageLimited`, `budgetLimited`, and `active`;
 - only `active` goals are continuation candidates;
 - `budgetLimited` stops continuation;
-- paused goals can be resumed only by user/runtime.
+- paused, blocked, and usage-limited goals can be resumed only by user/runtime
+  policy.
+
+Slash command surface:
+
+- `/goal` is registered as a built-in slash command;
+- `/goal` appears in help and typeahead/autocomplete;
+- `/goal` with no args shows the current goal summary/action view;
+- `/goal` with no current goal shows a clear usage hint;
+- `/goal <objective>` preserves free-form objective text and creates or
+  replaces the current goal;
+- `/goal edit` opens or invokes edit behavior and fails clearly when no goal
+  exists;
+- `/goal pause` moves an active goal to `paused`;
+- `/goal resume` can reactivate user-resumable paused, blocked, or usage-limited
+  goals;
+- `/goal clear` writes the clear tombstone and invalidates stale continuation;
+- reserved words `edit`, `pause`, `resume`, and `clear` are not treated as
+  objectives;
+- empty and oversized objectives produce goal-specific validation errors;
+- slash handler state changes do not directly start a turn.
 
 Continuation:
 
@@ -560,32 +690,41 @@ The feature is complete only when all of the following are true:
 4. Goal state persists across turns.
 5. Resume restores goal state.
 6. Active goals auto-continue in the foreground process after idle.
-7. User input and queued commands preempt continuation.
-8. Slash commands preempt continuation.
-9. Abort and interrupt prevent continuation.
-10. The model can only mark goals `complete` or `blocked`.
-11. Runtime/user owns pause, resume, clear, replacement, usage limit, and budget
+7. `/goal` is a first-class built-in REPL slash command.
+8. `/goal` is visible in help and typeahead/autocomplete.
+9. Bare `/goal` shows current goal summary/actions or a usage hint when no goal
+   exists.
+10. `/goal <objective>` creates or replaces the current goal while preserving
+    free-form objective text.
+11. `/goal edit`, `/goal pause`, `/goal resume`, and `/goal clear` perform the
+    corresponding user/runtime goal operations.
+12. Slash-command handlers update goal state and return control to the runtime;
+    they do not directly start continuation turns.
+13. User input and queued commands preempt continuation.
+14. Slash commands preempt continuation.
+15. Abort and interrupt prevent continuation.
+16. The model can only mark goals `complete` or `blocked`.
+17. Runtime/user owns pause, resume, clear, replacement, usage limit, and budget
     limit.
-12. `tokenBudget` defaults to null or omitted.
-13. Explicit `tokenBudget` must be greater than zero.
-14. Token budget crossing sets `budgetLimited`.
-15. `budgetLimited` prevents further idle continuation.
-16. `timeUsedSeconds` does not trigger `budgetLimited`.
-17. Continuation failures are bounded by retry/backoff and retry exhaustion maps
+18. `tokenBudget` defaults to null or omitted.
+19. Explicit `tokenBudget` must be greater than zero.
+20. Token budget crossing sets `budgetLimited`.
+21. `budgetLimited` prevents further idle continuation.
+22. `timeUsedSeconds` does not trigger `budgetLimited`.
+23. Continuation failures are bounded by retry/backoff and retry exhaustion maps
     to `usageLimited`.
-18. Goal creation as the first action creates a real transcript turn, not a
+24. Goal creation as the first action creates a real transcript turn, not a
     metadata-only transcript.
-19. Concurrent foreground processes cannot both auto-continue the same active
+25. Concurrent foreground processes cannot both auto-continue the same active
     goal.
-20. Generic conversation goals remain separate from autonomy flow goals.
-21. No daemon/background continuation is required after process exit.
+26. Generic conversation goals remain separate from autonomy flow goals.
+27. No daemon/background continuation is required after process exit.
 
 ## Open Implementation Questions
 
 These questions should be answered in the implementation plan, not by changing
 the design boundary:
 
-- Exact CLI or slash-command names for goal create/get/pause/resume/clear.
 - Exact storage entry type names if existing transcript type conventions require
   different naming.
 - Exact retry/backoff thresholds.
