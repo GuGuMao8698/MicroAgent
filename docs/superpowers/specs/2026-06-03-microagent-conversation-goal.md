@@ -110,6 +110,10 @@ Codex `/goal` facts from the reference project:
 10. Keep the generic conversation goal separate from existing autonomy flow goal
    semantics.
 11. Make failures bounded so continuation cannot hot-loop.
+12. Make goal lifecycle state visible to the user at the CLI surface. A user
+    must be able to tell when a goal was created, when goal-driven continuation
+    is running, and when the goal stopped because it completed, blocked, paused,
+    or hit a runtime limit.
 
 ## Non-Goals
 
@@ -125,11 +129,16 @@ Codex `/goal` facts from the reference project:
 - Do not add `timeBudget` or use elapsed time to trigger `budgetLimited`.
 - Do not allow `budgetLimited` goals to start new idle continuation turns.
 - Do not add product telemetry, app-server notifications, shell CLI mirrors, or
-  UI surfaces beyond the required `/goal` REPL slash-command surface unless a
-  later design explicitly adds them.
+  UI surfaces beyond the required `/goal` REPL slash-command surface, lifecycle
+  notifications, and running indicator unless a later design explicitly adds
+  them.
 - Do not add a shell CLI mirror such as `microagent goal ...` or
   `claude goal ...` in the first implementation. The required user-facing
   surface is the interactive REPL slash command `/goal`.
+- Do not add a full user-facing event trace, lease/debug panel, token accounting
+  dashboard, or step-by-step internal runtime log in the first implementation.
+  The required visibility is high-level lifecycle and running-state feedback,
+  not full observability.
 
 ## Data Model
 
@@ -408,15 +417,25 @@ Turn finish requirements:
 - Clear per-turn accounting state.
 - If the model used the controlled update path to mark `complete` or `blocked`,
   persist that terminal state.
+- Emit the required user-visible lifecycle notification when finalization moves
+  the goal to `complete`, `blocked`, `usageLimited`, `budgetLimited`, or
+  `paused`.
+- Re-read or revalidate the finalized goal state before any next continuation
+  decision. A stale cached `active` state must not schedule another continuation
+  after the goal reached a terminal, paused, or limited state.
 - Only after finalization may the controller consider another continuation.
 
 Abort or interrupt requirements:
 
 - Account for usage best effort.
-- Do not start continuation after abort.
+- Do not start continuation after abort or interrupt.
 - Reset abort controller before any future user-requested or continuation turn.
-- Keep the goal state accurate. If abort is user-driven pause, set `paused`; if
-  it is runtime failure, apply the configured failure/backoff behavior.
+- A user interrupt during a goal-driven turn pauses the current goal by default
+  and emits a visible lifecycle notification. A later design may add a
+  different interrupt policy, but the first implementation must not silently
+  keep the goal `active` and immediately continue after the user interrupts it.
+- Keep the goal state accurate. If the stop is runtime failure rather than
+  user-driven interrupt, apply the configured failure/backoff behavior.
 
 ## Continuation Prompt
 
@@ -466,6 +485,9 @@ Required command forms:
 
 - `/goal`
   - Shows the current goal summary/action view.
+  - Shows the latest effective goal state, including terminal states. A
+    completed, blocked, usage-limited, or budget-limited goal must not disappear
+    from the summary as if no goal ever existed.
   - If no current goal exists, shows a usage hint.
   - It must not silently no-op.
 - `/goal <objective>`
@@ -473,6 +495,8 @@ Required command forms:
   - Creates a goal if none exists.
   - Replaces the current goal if one exists.
   - Replacement must generate a new `goalId` and reset accounting.
+  - Emits an immediate user-visible lifecycle confirmation such as
+    `Goal started` or `Goal replaced`.
   - The first implementation does not parse token budget from `/goal`
     objective text. Goals created through `/goal <objective>` use no token
     budget unless a later design adds an explicit structured budget UI.
@@ -486,17 +510,22 @@ Required command forms:
     continuation owner, and invalidate stale continuations.
 - `/goal pause`
   - Moves an `active` goal to `paused`.
+  - Emits a visible `Goal paused` lifecycle notification.
   - It must not be model-callable.
 - `/goal resume`
   - Moves a `paused`, `blocked`, or `usageLimited` goal back to `active` only
     when user/runtime policy allows it.
   - Resuming to `active` may trigger foreground continuation later through the
     continuation controller if the runtime is idle.
+  - Emits a visible `Goal resumed` lifecycle notification. The notification
+    must make clear that the user/runtime resumed the goal; the model cannot
+    resume itself from `blocked`, `paused`, or `usageLimited`.
   - It must not directly run a turn from the slash handler.
 - `/goal clear`
   - Clears the current goal and writes the clear tombstone.
   - It must invalidate stale continuations and release any foreground owner
     lease.
+  - Emits a visible `Goal cleared` lifecycle notification.
 
 Reserved words:
 
@@ -517,6 +546,59 @@ and token budget remains a structured field on goal creation/replacement.
 Because `/goal <objective>` treats all non-reserved trailing text as objective
 text, the first implementation must not invent hidden inline budget syntax such
 as `/goal --budget 1000 do work`; that would make objective parsing ambiguous.
+
+### Goal Visibility And Lifecycle Notifications
+
+The goal feature must be visibly operating in the CLI. A state-only
+implementation that silently drives continuation is incomplete even if the
+runtime state machine is correct.
+
+Required lifecycle notifications:
+
+- Goal creation emits a user-visible `Goal started` notification with a shortened
+  objective or equivalent goal label.
+- Goal replacement emits a user-visible `Goal replaced` notification and uses
+  the new `goalId`; old accounting and old failure state must not be presented
+  as if they belong to the replacement goal.
+- Goal pause, resume, and clear emit visible lifecycle notifications.
+- Goal completion emits a user-visible `Goal complete` notification after turn
+  finalization persists `status = "complete"`.
+- Goal blocked emits a user-visible `Goal blocked` notification with the blocked
+  reason if the controlled model update path supplies one.
+- `budgetLimited` emits a user-visible notification that makes token budget
+  exhaustion explicit and does not imply the goal completed successfully.
+- `usageLimited` emits a user-visible notification that makes runtime
+  retry/usage exhaustion explicit and points users toward `/goal resume`,
+  `/goal clear`, or replacing the goal when policy allows.
+
+Running indicator requirements:
+
+- While a goal-driven continuation turn is running, the main CLI surface must
+  display a visible running indicator that distinguishes goal continuation from a
+  normal user-requested turn.
+- The running indicator must include a shortened objective or stable goal label.
+- The running indicator must not require the user to open bare `/goal`.
+- The running indicator is display-only and should not create transcript noise.
+- If a foreground process sees an active goal but fails to acquire the
+  continuation lease, it must not show itself as running that goal. It may show
+  that another foreground owner is active if the UI can do so without adding a
+  new observability surface.
+
+Process visibility boundary:
+
+- The default UI shows high-level lifecycle and running state only.
+- Bare `/goal` is the summary/action surface for current and latest terminal
+  goal state.
+- Full internal prompt contents, lease acquire/release details, CAS revisions,
+  token deltas, and controller debug events are not part of the default
+  user-facing workflow in the first implementation.
+- Lifecycle notifications and ephemeral running indicators have different
+  persistence rules. Goal state and lifecycle outcomes must be recoverable
+  through session metadata and bare `/goal`; spinner/status indicators are
+  transient display state.
+- If session persistence is disabled or unavailable, goal creation must not
+  claim durability. The CLI must either reject durable goal creation or clearly
+  report that resume persistence is unavailable for that session.
 
 ### Required Operations
 
@@ -633,8 +715,12 @@ Slash command surface:
 - `/goal` appears in help and typeahead/autocomplete;
 - `/goal` with no args shows the current goal summary/action view;
 - `/goal` with no current goal shows a clear usage hint;
+- bare `/goal` shows the latest effective terminal state instead of collapsing a
+  completed, blocked, usage-limited, or budget-limited goal into "no goal";
 - `/goal <objective>` preserves free-form objective text and creates or
   replaces the current goal;
+- `/goal <objective>` emits visible `Goal started` or `Goal replaced`
+  lifecycle feedback without directly starting a turn from the slash handler;
 - `/goal edit` opens or invokes edit behavior and fails clearly when no goal
   exists;
 - `/goal pause` moves an active goal to `paused`;
@@ -650,14 +736,31 @@ Continuation:
 
 - active goal starts a continuation turn after the runtime becomes idle;
 - no continuation starts while an active turn is running;
+- goal-driven continuation shows a visible running indicator that is distinct
+  from a normal user-requested turn;
 - user input preempts continuation;
 - slash commands preempt continuation;
 - queued higher-priority command preempts continuation;
-- abort prevents continuation;
+- abort or interrupt prevents continuation;
+- user interrupt during a goal-driven turn pauses the goal by default and emits
+  visible pause feedback;
 - goal replacement invalidates stale continuation;
+- completion, blocking, budget limit, usage limit, pause, replacement, and clear
+  invalidate stale continuation decisions that captured an older active state;
 - concurrent foreground processes cannot both continue the same active goal;
 - repeated failures back off and eventually stop;
 - exiting the current process does not require daemon continuation.
+
+Visibility:
+
+- create, replace, pause, resume, clear, complete, blocked, budget-limited, and
+  usage-limited transitions emit visible lifecycle notifications;
+- lifecycle notifications are driven by persisted runtime status, not by
+  free-form model prose;
+- running indicators are ephemeral display state and do not create transcript
+  noise;
+- session-persistence-unavailable cases cannot claim that a goal is durably
+  resumable.
 
 Accounting:
 
@@ -719,6 +822,23 @@ The feature is complete only when all of the following are true:
     goal.
 26. Generic conversation goals remain separate from autonomy flow goals.
 27. No daemon/background continuation is required after process exit.
+28. `/goal <objective>` emits immediate visible lifecycle feedback for create
+    and replacement while still returning control to the normal runtime path.
+29. Goal-driven continuation turns show a visible running indicator that
+    distinguishes automatic goal continuation from normal user-requested turns.
+30. Goal completion emits a runtime-owned visible `Goal complete` notification
+    after the completed status is persisted and before any next continuation
+    decision.
+31. `blocked`, `budgetLimited`, and `usageLimited` states emit visible stopped or
+    limited notifications with status-specific wording.
+32. Bare `/goal` shows the latest effective goal state, including terminal
+    states, instead of hiding completed or stopped goals as "no goal".
+33. User interrupt during a goal-driven turn pauses the goal by default and does
+    not allow immediate automatic re-continuation.
+34. A foreground process that fails to acquire the goal continuation lease does
+    not display itself as running that goal.
+35. Lifecycle outcomes are recoverable through goal state and bare `/goal`;
+    spinner/status running indicators remain transient display state.
 
 ## Open Implementation Questions
 
