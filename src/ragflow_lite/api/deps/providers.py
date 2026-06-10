@@ -58,12 +58,13 @@ from ragflow_lite.infrastructure.chunkers import (
     DocumentChunker,
 )
 from ragflow_lite.infrastructure.evidence import (
-    GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
     LLMDiscoRAGAnswerBlueprintBuilder,
     LLMInterChunkDiscourseGraphBuilder,
-    LocalJsonGraphEvidenceIndex,
-    LocalJsonGraphEvidenceStore,
+    SqliteArtifactRegistry,
+    SqliteGraphEvidenceIndex,
+    SqliteGraphEvidenceStore,
+    SqliteGraphProjectionStore,
 )
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
@@ -219,7 +220,6 @@ def build_services(settings: Settings) -> AppServices:
         instructions_path=deepseek_runtime_config.prompt_path,
         render_citations=deepseek_runtime_config.render_citations,
     )
-    graph_evidence_dir = settings.local_index_dir / "graph_evidence"
     # Infinity 图候选索引：entity/relationship 混合检索（文本 + 稠密向量融合）
     graph_candidate_index = InfinityGraphCandidateIndex(
         client=vector_index.client,
@@ -237,11 +237,20 @@ def build_services(settings: Settings) -> AppServices:
             fusion_normalize=settings.graph_candidate_fusion_normalize,
         ),
     )
-    # 图证据存储：同时写 JSON + Infinity candidates
-    base_graph_store = LocalJsonGraphEvidenceStore(graph_evidence_dir)
-    graph_store = GraphEvidenceInfinityStore(
+    artifact_db_path = settings.local_index_dir / "artifacts" / "artifacts.sqlite3"
+    artifact_registry = SqliteArtifactRegistry(artifact_db_path)
+    base_graph_store = SqliteGraphEvidenceStore(
+        artifact_db_path,
+        registry=artifact_registry,
+    )
+    graph_store = SqliteGraphProjectionStore(
         graph_store=base_graph_store,
         candidate_index=graph_candidate_index,
+        registry=artifact_registry,
+        target_table=(
+            f"{graph_candidate_index.entity_table_name}:"
+            f"{graph_candidate_index.relationship_table_name}"
+        ),
     )
     evidence_extractor = DeepSeekChatEvidenceExtractor(
         api_key=deepseek_runtime_config.api_key,
@@ -271,10 +280,8 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
-    # 本地 JSON 图证据索引：仅用于拓扑路径扩展
-    local_graph_evidence_index = LocalJsonGraphEvidenceIndex(
-        evidence_dir=graph_evidence_dir,
-        reload_on_query=True,
+    graph_path_expander = SqliteGraphEvidenceIndex(
+        artifact_db_path,
         canonicalize_cross_document=True,
     )
     # 图优先检索器：先做 query grounding，再查图索引、扩展路径，最后评分与合并 chunk
@@ -282,7 +289,7 @@ def build_services(settings: Settings) -> AppServices:
         query_grounder=query_grounder,
         entity_index=graph_candidate_index,
         relationship_index=graph_candidate_index,
-        path_expander=local_graph_evidence_index,
+        path_expander=graph_path_expander,
         chunk_lookup=vector_index,
         chunk_auxiliary_retriever=chunk_auxiliary_retriever,
         cot_grounding_rewriter=cot_grounding_rewriter,

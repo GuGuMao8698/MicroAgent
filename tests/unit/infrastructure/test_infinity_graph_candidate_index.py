@@ -51,6 +51,17 @@ def test_graph_candidate_config_accepts_custom_values() -> None:
     assert config.dense_weight == 0.9
 
 
+def test_graph_candidate_index_exposes_configured_table_names() -> None:
+    index = object.__new__(InfinityGraphCandidateIndex)
+    index._config = GraphCandidateInfinityConfig(
+        entity_table="entity_projection",
+        relationship_table="relationship_projection",
+    )
+
+    assert index.entity_table_name == "entity_projection"
+    assert index.relationship_table_name == "relationship_projection"
+
+
 def test_relationship_output_fields_preserve_candidate_contract() -> None:
     from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
         RELATIONSHIP_OUTPUT_FIELDS,
@@ -153,14 +164,10 @@ class _FakeQuery:
             raise AssertionError(f"unexpected filter expression: {expression}")
         raw_values = expression.split("(", 1)[1].rsplit(")", 1)[0]
         allowed = {
-            value.strip().strip("'")
-            for value in raw_values.split(",")
-            if value.strip()
+            value.strip().strip("'") for value in raw_values.split(",") if value.strip()
         }
         self._rows = [
-            row
-            for row in self._rows
-            if str(row.get("projection_build_id")) in allowed
+            row for row in self._rows if str(row.get("projection_build_id")) in allowed
         ]
         return self
 
@@ -475,7 +482,9 @@ def test_query_entities_can_filter_inactive_build_rows() -> None:
         },
     ]
 
-    filtered = index.query_entities(["python"], top_k=5, allowed_build_ids=["build-new"])
+    filtered = index.query_entities(
+        ["python"], top_k=5, allowed_build_ids=["build-new"]
+    )
     unfiltered = index.query_entities(["python"], top_k=5)
 
     assert [candidate.metadata["projection_build_id"] for candidate in filtered] == [

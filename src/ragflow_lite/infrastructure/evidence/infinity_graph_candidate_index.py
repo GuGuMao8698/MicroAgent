@@ -271,6 +271,14 @@ class InfinityGraphCandidateIndex:
         self._config = config or GraphCandidateInfinityConfig()
         self._ensure_tables()
 
+    @property
+    def entity_table_name(self) -> str:
+        return self._config.entity_table
+
+    @property
+    def relationship_table_name(self) -> str:
+        return self._config.relationship_table
+
     # ------------------------------------------------------------------
     # 表管理
     # ------------------------------------------------------------------
