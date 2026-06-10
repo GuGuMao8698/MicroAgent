@@ -118,7 +118,10 @@ class SqliteGraphEvidenceIndex:
         self,
         entity_texts: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniEntityCandidate]:
+        if allowed_build_ids is not None:
+            return []
         terms = [_normalize(t) for t in entity_texts]
         entities = self._get_entities()
 
@@ -154,7 +157,10 @@ class SqliteGraphEvidenceIndex:
         query: str,
         answer_type_keywords: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniRelationshipCandidate]:
+        if allowed_build_ids is not None:
+            return []
         query_terms = [_normalize(w) for w in query.split() if w.strip()]
         keyword_terms = [_normalize(k) for k in answer_type_keywords]
         all_terms = query_terms + keyword_terms

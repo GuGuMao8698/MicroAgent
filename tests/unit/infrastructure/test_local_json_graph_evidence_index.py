@@ -86,6 +86,34 @@ def test_local_json_graph_index_queries_entities_relationships_and_paths(
     assert paths[0].metadata["hop_count"] == 1
 
 
+def test_local_json_index_explicit_build_allowlist_is_conservative(tmp_path) -> None:
+    _write_batch(tmp_path)
+    index = LocalJsonGraphEvidenceIndex(tmp_path)
+
+    assert index.query_entities(["MiniRAG"], top_k=3, allowed_build_ids=[]) == []
+    assert (
+        index.query_entities(["MiniRAG"], top_k=3, allowed_build_ids=["build-1"]) == []
+    )
+    assert (
+        index.query_relationships(
+            "How does MiniRAG recover sources?",
+            ["mechanism"],
+            top_k=3,
+            allowed_build_ids=[],
+        )
+        == []
+    )
+    assert (
+        index.query_relationships(
+            "How does MiniRAG recover sources?",
+            ["mechanism"],
+            top_k=3,
+            allowed_build_ids=["build-1"],
+        )
+        == []
+    )
+
+
 # ---------------------------------------------------------------------------
 # 跨文档 canonical 合并测试
 # ---------------------------------------------------------------------------

@@ -74,6 +74,7 @@ def build_relationship_embedding_text(relation: RelationEvidence) -> str:
 def build_entity_candidate_row(
     entity: EntityEvidence,
     *,
+    projection_build_id: str,
     vector: list[float],
     tokenize: Callable[[str], str] = ragflow_tokenize,
 ) -> dict[str, Any]:
@@ -84,10 +85,14 @@ def build_entity_candidate_row(
     """
     # canonical_id 优先取 metadata 中的跨文档合并 ID
     canonical_id = str(entity.metadata.get("canonical_id") or entity.entity_id)
+    metadata = dict(entity.metadata)
+    metadata["raw_candidate_id"] = entity.entity_id
+    metadata["projection_build_id"] = projection_build_id
     return {
-        "candidate_id": entity.entity_id,
+        "candidate_id": f"{projection_build_id}:{entity.entity_id}",
         "canonical_id": canonical_id,
         "document_id": entity.document_id,
+        "projection_build_id": projection_build_id,
         "candidate_kind": "entity",
         "entity_name_kwd": entity.name,
         "entity_name_tks": tokenize(entity.name),
@@ -99,27 +104,32 @@ def build_entity_candidate_row(
         "source_chunk_ids": json.dumps(
             list(entity.source_chunk_ids), ensure_ascii=False
         ),
-        "metadata": json.dumps(dict(entity.metadata), ensure_ascii=False),
+        "metadata": json.dumps(metadata, ensure_ascii=False),
     }
 
 
 def build_relationship_candidate_row(
     relation: RelationEvidence,
     *,
+    projection_build_id: str,
     vector: list[float],
     tokenize: Callable[[str], str] = ragflow_tokenize,
 ) -> dict[str, Any]:
     """将 RelationEvidence 转换为 Infinity relationship 候选行。"""
     # canonical_id 优先取 metadata 中的跨文档合并 ID
     canonical_id = str(relation.metadata.get("canonical_id") or relation.relation_id)
+    metadata = dict(relation.metadata)
+    metadata["raw_candidate_id"] = relation.relation_id
+    metadata["projection_build_id"] = projection_build_id
     endpoint_text = (
         f"{relation.source_entity_name} {relation.target_entity_name}".strip()
     )
     keyword_text = " ".join(relation.keywords)
     return {
-        "candidate_id": relation.relation_id,
+        "candidate_id": f"{projection_build_id}:{relation.relation_id}",
         "canonical_id": canonical_id,
         "document_id": relation.document_id,
+        "projection_build_id": projection_build_id,
         "candidate_kind": "relationship",
         "source_entity_id": relation.source_entity_id,
         "target_entity_id": relation.target_entity_id,
@@ -136,5 +146,5 @@ def build_relationship_candidate_row(
         "source_chunk_ids": json.dumps(
             list(relation.source_chunk_ids), ensure_ascii=False
         ),
-        "metadata": json.dumps(dict(relation.metadata), ensure_ascii=False),
+        "metadata": json.dumps(metadata, ensure_ascii=False),
     }

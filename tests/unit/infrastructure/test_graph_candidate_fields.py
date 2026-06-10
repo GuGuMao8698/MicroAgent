@@ -66,6 +66,7 @@ def _make_relation(**overrides) -> RelationEvidence:
 
 
 _VEC = [0.1, 0.2, 0.3]
+_BUILD_ID = "build-1"
 
 
 # ===========================================================================
@@ -79,17 +80,28 @@ class TestEntityCandidateRow:
     def test_entity_row_contains_required_fields(self):
         """行必须包含 candidate_id, canonical_id, document_id, candidate_kind 等基础字段。"""
         entity = _make_entity()
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
-        assert row["candidate_id"] == "ent-001"
+        assert row["candidate_id"] == "build-1:ent-001"
         assert row["canonical_id"] == "ent-001"
         assert row["document_id"] == "doc-A"
         assert row["candidate_kind"] == "entity"
+        assert row["projection_build_id"] == _BUILD_ID
 
     def test_entity_row_name_fields_use_name_only(self):
         """name_kwd 保存原始 name；name_tks 保存分词结果。"""
         entity = _make_entity(name="Python")
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["entity_name_kwd"] == "Python"
         assert row["entity_name_tks"] == "tok::python"
@@ -97,14 +109,24 @@ class TestEntityCandidateRow:
     def test_entity_row_type_tks_is_tokenized(self):
         """entity_type_tks 保存 entity_type 的分词结果。"""
         entity = _make_entity(entity_type="Programming Language")
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["entity_type_tks"] == "tok::programming language"
 
     def test_entity_row_description_tks_present_in_row(self):
         """entity_description_tks 在行中存在（可被索引），但不在 ENTITY_MATCH_TEXT_FIELDS 中。"""
         entity = _make_entity(description="A high-level programming language.")
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert (
             row["entity_description_tks"] == "tok::a high-level programming language."
@@ -126,14 +148,24 @@ class TestEntityCandidateRow:
     def test_entity_embedding_text_is_name_only(self):
         """embedding_text 应只包含实体名称，不含 description。"""
         entity = _make_entity(name="Python", description="A high-level language.")
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["embedding_text"] == "Python"
 
     def test_entity_vec_and_source_chunk_ids(self):
         """vec 透传，source_chunk_ids 按 live Infinity varchar 契约写为 JSON。"""
         entity = _make_entity()
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["vec"] == [0.1, 0.2, 0.3]
         assert json.loads(row["source_chunk_ids"]) == ["chk-1", "chk-2"]
@@ -141,22 +173,41 @@ class TestEntityCandidateRow:
     def test_entity_metadata_copied(self):
         """metadata 按 live Infinity varchar 契约写为 JSON。"""
         entity = _make_entity(metadata={"canonical_id": "c-xyz"})
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
-        assert json.loads(row["metadata"]) == {"canonical_id": "c-xyz"}
+        assert json.loads(row["metadata"]) == {
+            "canonical_id": "c-xyz",
+            "raw_candidate_id": "ent-001",
+            "projection_build_id": _BUILD_ID,
+        }
         assert row["metadata"] != entity.metadata
 
     def test_entity_canonical_id_from_metadata(self):
         """canonical_id 应优先取 metadata.canonical_id。"""
         entity = _make_entity(metadata={"canonical_id": "canonical-python"})
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["canonical_id"] == "canonical-python"
 
     def test_entity_canonical_id_falls_back_to_entity_id(self):
         """metadata 无 canonical_id 时，回退到 entity_id。"""
         entity = _make_entity(metadata={})
-        row = build_entity_candidate_row(entity, vector=_VEC, tokenize=_tokenize)
+        row = build_entity_candidate_row(
+            entity,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["canonical_id"] == "ent-001"
 
@@ -172,17 +223,28 @@ class TestRelationshipCandidateRow:
     def test_relationship_row_contains_required_fields(self):
         """行必须包含 candidate_id, canonical_id, document_id, candidate_kind 等。"""
         rel = _make_relation()
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
-        assert row["candidate_id"] == "rel-001"
+        assert row["candidate_id"] == "build-1:rel-001"
         assert row["canonical_id"] == "rel-001"
         assert row["document_id"] == "doc-A"
         assert row["candidate_kind"] == "relationship"
+        assert row["projection_build_id"] == _BUILD_ID
 
     def test_relationship_row_entity_ids_and_names(self):
         """source/target entity id 和 name 正确透传。"""
         rel = _make_relation()
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["source_entity_id"] == "ent-001"
         assert row["target_entity_id"] == "ent-002"
@@ -192,7 +254,12 @@ class TestRelationshipCandidateRow:
     def test_relationship_endpoint_fields(self):
         """endpoint_kwd = 'source_name target_name'；endpoint_tks 为其分词结果。"""
         rel = _make_relation()
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["relationship_endpoint_kwd"] == "Python Django"
         assert row["relationship_endpoint_tks"] == "tok::python django"
@@ -200,14 +267,24 @@ class TestRelationshipCandidateRow:
     def test_relationship_keyword_tks(self):
         """keyword_tks 为 keywords 空格拼接后的分词结果。"""
         rel = _make_relation(keywords=["framework", "web"])
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["relationship_keyword_tks"] == "tok::framework web"
 
     def test_relationship_description_tks(self):
         """description_tks 为 description 的分词结果。"""
         rel = _make_relation(description="Python is the foundation of Django.")
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert (
             row["relationship_description_tks"]
@@ -231,7 +308,12 @@ class TestRelationshipCandidateRow:
             keywords=["framework", "web"],
             description="Python is the foundation of Django.",
         )
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         expected = (
             "source: Python\n"
@@ -246,7 +328,12 @@ class TestRelationshipCandidateRow:
         rel = _make_relation(
             weight=0.85, keywords=["a", "b"], source_chunk_ids=["chk-3"]
         )
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["vec"] == [0.1, 0.2, 0.3]
         assert row["weight"] == 0.85
@@ -256,21 +343,40 @@ class TestRelationshipCandidateRow:
     def test_relationship_metadata_copied(self):
         """metadata 按 live Infinity varchar 契约写为 JSON。"""
         rel = _make_relation(metadata={"canonical_id": "c-rel"})
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
-        assert json.loads(row["metadata"]) == {"canonical_id": "c-rel"}
+        assert json.loads(row["metadata"]) == {
+            "canonical_id": "c-rel",
+            "raw_candidate_id": "rel-001",
+            "projection_build_id": _BUILD_ID,
+        }
         assert row["metadata"] != rel.metadata
 
     def test_relationship_canonical_id_from_metadata(self):
         """canonical_id 应优先取 metadata.canonical_id。"""
         rel = _make_relation(metadata={"canonical_id": "canonical-rel"})
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["canonical_id"] == "canonical-rel"
 
     def test_relationship_canonical_id_falls_back_to_relation_id(self):
         """metadata 无 canonical_id 时，回退到 relation_id。"""
         rel = _make_relation(metadata={})
-        row = build_relationship_candidate_row(rel, vector=_VEC, tokenize=_tokenize)
+        row = build_relationship_candidate_row(
+            rel,
+            projection_build_id=_BUILD_ID,
+            vector=_VEC,
+            tokenize=_tokenize,
+        )
 
         assert row["canonical_id"] == "rel-001"

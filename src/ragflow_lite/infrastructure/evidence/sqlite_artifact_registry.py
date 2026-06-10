@@ -236,8 +236,9 @@ class SqliteArtifactRegistry:
                 ("projected", now, projection_id),
             )
 
-    def activate_build(self, build_id: str) -> None:
+    def activate_build(self, build_id: str) -> list[str]:
         now = _now_iso()
+        superseded_build_ids: list[str] = []
         with self.connect() as conn:
             build_row = self._fetch_build_context(conn, build_id)
             document_id = str(build_row["document_id"])
@@ -257,6 +258,7 @@ class SqliteArtifactRegistry:
                 (artifact_type, document_id),
             ).fetchone()
             if previous is not None and str(previous["active_build_id"]) != build_id:
+                superseded_build_ids.append(str(previous["active_build_id"]))
                 conn.execute(
                     """
                     UPDATE artifact_builds
@@ -297,6 +299,7 @@ class SqliteArtifactRegistry:
                 "build_id": build_id,
             },
         )
+        return superseded_build_ids
 
     def record_active_pointer_inconsistent(
         self,
@@ -479,6 +482,163 @@ class SqliteArtifactRegistry:
                     "document_id": document_id,
                     "artifact_type": str(row["artifact_type"]),
                 },
+            )
+
+    def mark_graph_projection_deleting(self, document_id: str) -> None:
+        now = _now_iso()
+        with self.connect() as conn:
+            self._ensure_document(conn, document_id)
+            conn.execute(
+                """
+                UPDATE artifact_documents
+                SET status = ?, updated_at = ?
+                WHERE document_id = ?
+                """,
+                ("deleting", now, document_id),
+            )
+            conn.execute(
+                """
+                UPDATE artifact_builds
+                SET status = ?
+                WHERE document_id = ? AND artifact_type = ? AND deleted_at IS NULL
+                  AND status != ?
+                """,
+                ("deleting", document_id, "graph_evidence", "deleted"),
+            )
+            conn.execute(
+                """
+                UPDATE artifact_projections
+                SET status = ?
+                WHERE projection_id IN (
+                    SELECT p.projection_id
+                    FROM artifact_projections p
+                    JOIN artifact_builds b ON b.build_id = p.build_id
+                    WHERE b.document_id = ? AND b.artifact_type = ?
+                      AND p.target = ? AND p.deleted_at IS NULL
+                ) AND status != ?
+                """,
+                (
+                    "deleting",
+                    document_id,
+                    "graph_evidence",
+                    "infinity_graph_candidate",
+                    "deleted",
+                ),
+            )
+        self._record_event(
+            "artifact_delete_started",
+            {
+                "document_id": document_id,
+                "artifact_type": "graph_evidence",
+            },
+        )
+
+    def mark_projection_delete_failed_for_document(
+        self,
+        document_id: str,
+        *,
+        target: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        error_message: str,
+    ) -> None:
+        for projection_id in self._projection_ids_for_document(document_id, target=target):
+            self.mark_projection_delete_failed(
+                projection_id,
+                failure_code=failure_code,
+                failure_stage=failure_stage,
+                retryable=retryable,
+                error_message=error_message,
+            )
+
+    def mark_projection_delete_failed_for_build(
+        self,
+        build_id: str,
+        *,
+        target: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        error_message: str,
+    ) -> None:
+        for projection_id in self._projection_ids_for_build(build_id, target=target):
+            self.mark_projection_delete_failed(
+                projection_id,
+                failure_code=failure_code,
+                failure_stage=failure_stage,
+                retryable=retryable,
+                error_message=error_message,
+            )
+
+    def mark_projection_deleted_for_document(self, document_id: str, *, target: str) -> None:
+        now = _now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE artifact_projections
+                SET status = ?, deleted_at = ?, failure_code = NULL,
+                    failure_stage = NULL, failure_retryable = NULL,
+                    error_message = NULL, failed_at = NULL
+                WHERE projection_id IN (
+                    SELECT p.projection_id
+                    FROM artifact_projections p
+                    JOIN artifact_builds b ON b.build_id = p.build_id
+                    WHERE b.document_id = ? AND p.target = ? AND p.deleted_at IS NULL
+                )
+                """,
+                ("deleted", now, document_id, target),
+            )
+
+    def mark_builds_deleted_for_document(
+        self, document_id: str, *, artifact_type: str
+    ) -> None:
+        self._validate_artifact_type(artifact_type)
+        now = _now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM active_artifacts
+                WHERE artifact_type = ? AND document_id = ?
+                """,
+                (artifact_type, document_id),
+            )
+            conn.execute(
+                """
+                UPDATE artifact_builds
+                SET status = ?, deleted_at = ?, failure_code = NULL,
+                    failure_stage = NULL, failure_retryable = NULL,
+                    error_message = NULL, failed_at = NULL
+                WHERE document_id = ? AND artifact_type = ? AND deleted_at IS NULL
+                """,
+                ("deleted", now, document_id, artifact_type),
+            )
+
+    def mark_projection_repair_required(
+        self,
+        projection_id: str,
+        *,
+        failure_code: str,
+        failure_stage: str,
+        error_message: str,
+    ) -> None:
+        now = _now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE artifact_projections
+                SET status = ?, repair_required_at = ?, failure_code = ?,
+                    failure_stage = ?, error_message = ?
+                WHERE projection_id = ?
+                """,
+                (
+                    "repair_pending",
+                    now,
+                    failure_code,
+                    failure_stage,
+                    error_message,
+                    projection_id,
+                ),
             )
 
     def get_document(self, document_id: str) -> ArtifactDocumentRecord | None:
@@ -724,6 +884,31 @@ class SqliteArtifactRegistry:
 
     def _record_event(self, name: str, payload: dict[str, object]) -> None:
         self._recorder.record(ArtifactEvent(name=name, payload=payload))
+
+    def _projection_ids_for_document(self, document_id: str, *, target: str) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.projection_id
+                FROM artifact_projections p
+                JOIN artifact_builds b ON b.build_id = p.build_id
+                WHERE b.document_id = ? AND p.target = ? AND p.deleted_at IS NULL
+                """,
+                (document_id, target),
+            ).fetchall()
+        return [str(row["projection_id"]) for row in rows]
+
+    def _projection_ids_for_build(self, build_id: str, *, target: str) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT projection_id
+                FROM artifact_projections
+                WHERE build_id = ? AND target = ? AND deleted_at IS NULL
+                """,
+                (build_id, target),
+            ).fetchall()
+        return [str(row["projection_id"]) for row in rows]
 
 
 def _now_iso() -> str:

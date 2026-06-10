@@ -32,6 +32,9 @@ from ragflow_lite.infrastructure.evidence.local_json_store import (
 from ragflow_lite.infrastructure.evidence.openai_extractor import (
     OpenAIResponsesEvidenceExtractor,
 )
+from ragflow_lite.infrastructure.evidence.sqlite_graph_projection_store import (
+    SqliteGraphProjectionStore,
+)
 
 __all__ = [
     "ENTITY_MATCH_TEXT_FIELDS",
@@ -46,6 +49,7 @@ __all__ = [
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",
+    "SqliteGraphProjectionStore",
     "build_entity_candidate_row",
     "build_relationship_candidate_row",
 ]

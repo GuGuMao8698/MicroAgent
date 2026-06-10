@@ -238,6 +238,34 @@ def test_query_relationships_matches_keywords_and_answer_type_terms(tmp_path) ->
     assert candidates[0].matched_terms == ["beta", "depends"]
 
 
+def test_sqlite_index_explicit_build_allowlist_is_conservative(tmp_path) -> None:
+    db_path = tmp_path / "artifacts.sqlite3"
+    store = SqliteGraphEvidenceStore(db_path)
+    _write_batch(store, db_path, _fixture_batch())
+    index = SqliteGraphEvidenceIndex(db_path)
+
+    assert index.query_entities(["Alpha"], top_k=5, allowed_build_ids=[]) == []
+    assert index.query_entities(["Alpha"], top_k=5, allowed_build_ids=["build-1"]) == []
+    assert (
+        index.query_relationships(
+            "unrelated beta",
+            ["depends"],
+            top_k=5,
+            allowed_build_ids=[],
+        )
+        == []
+    )
+    assert (
+        index.query_relationships(
+            "unrelated beta",
+            ["depends"],
+            top_k=5,
+            allowed_build_ids=["build-1"],
+        )
+        == []
+    )
+
+
 def test_same_index_instance_refreshes_after_active_build_switch(tmp_path) -> None:
     db_path = tmp_path / "artifacts.sqlite3"
     store = SqliteGraphEvidenceStore(db_path)

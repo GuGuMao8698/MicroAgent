@@ -97,6 +97,37 @@ class RecordingRelationshipIndex:
 
 
 @dataclass
+class AllowedBuildRecordingEntityIndex:
+    calls: list[tuple[list[str], int, list[str] | None]] = field(default_factory=list)
+
+    def query_entities(
+        self,
+        entity_texts: list[str],
+        top_k: int,
+        allowed_build_ids: list[str] | None = None,
+    ) -> list[MiniEntityCandidate]:
+        self.calls.append((entity_texts, top_k, allowed_build_ids))
+        return []
+
+
+@dataclass
+class AllowedBuildRecordingRelationshipIndex:
+    calls: list[tuple[str, tuple[str, ...], int, list[str] | None]] = field(
+        default_factory=list
+    )
+
+    def query_relationships(
+        self,
+        query: str,
+        answer_type_keywords: list[str],
+        top_k: int,
+        allowed_build_ids: list[str] | None = None,
+    ) -> list[MiniRelationshipCandidate]:
+        self.calls.append((query, tuple(answer_type_keywords), top_k, allowed_build_ids))
+        return []
+
+
+@dataclass
 class RecordingPathExpander:
     calls: list[tuple[tuple[str, ...], tuple[str, ...], int]] = field(
         default_factory=list
@@ -304,6 +335,31 @@ def test_mini_graph_first_retriever_grounds_before_auxiliary_chunk_retrieval() -
     assert result.chunks[0].metadata["supporting_path_ids"] == ["path_1"]
     # chunk_b 是辅助检索命中的 chunk，现在排在第二位
     assert result.chunks[1].metadata["auxiliary_chunk_hit"] is True
+
+
+def test_mini_graph_first_retriever_forwards_allowed_build_ids_when_configured() -> None:
+    entity_index = AllowedBuildRecordingEntityIndex()
+    relationship_index = AllowedBuildRecordingRelationshipIndex()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        allowed_build_ids=["build-active"],
+    )
+
+    retriever.retrieve_context("How does MiniRAG recover sources?", top_k=2)
+
+    assert entity_index.calls == [(["MiniRAG"], 60, ["build-active"])]
+    assert relationship_index.calls == [
+        (
+            "How does MiniRAG recover sources?",
+            ("mechanism",),
+            60,
+            ["build-active"],
+        )
+    ]
 
 
 def test_source_chunk_with_more_minirag_counter_support_ranks_first() -> None:

@@ -62,6 +62,7 @@ class MiniGraphFirstRetriever:
         chunk_auxiliary_candidate_n: int | None = None,
         discourse_selection_n: int | None = None,
         context_token_budget: int | None = None,
+        allowed_build_ids: list[str] | None = None,
         # ── 向后兼容别名（旧参数名） ──
         grounded_entity_k: int | None = None,
         chunk_auxiliary_retrieval_k: int | None = None,
@@ -101,6 +102,9 @@ class MiniGraphFirstRetriever:
         # discourse_selection_n 为 None 时默认等于 answer_top_n * 2（在 retrieve_context 中推导）
         self.discourse_selection_n = discourse_selection_n
         self.context_token_budget = context_token_budget
+        self.allowed_build_ids = (
+            list(allowed_build_ids) if allowed_build_ids is not None else None
+        )
         # 保留旧属性名作为只读别名，避免下游引用立即断裂
         self.grounded_entity_k = self.mini_internal_candidate_n
         self.relationship_candidate_k = self.mini_internal_candidate_n
@@ -401,15 +405,28 @@ class MiniGraphFirstRetriever:
         )
 
         # 第 3 步: 图索引查询 —— 实体名称索引 + 关系索引
-        entity_candidates = self.entity_index.query_entities(
-            query_entities,
-            top_k=entity_candidate_n,
-        )
-        relationship_candidates = self.relationship_index.query_relationships(
-            grounding_query,
-            grounded_query.answer_type_keywords,
-            top_k=relationship_candidate_n,
-        )
+        if self.allowed_build_ids is None:
+            entity_candidates = self.entity_index.query_entities(
+                query_entities,
+                top_k=entity_candidate_n,
+            )
+            relationship_candidates = self.relationship_index.query_relationships(
+                grounding_query,
+                grounded_query.answer_type_keywords,
+                top_k=relationship_candidate_n,
+            )
+        else:
+            entity_candidates = self.entity_index.query_entities(
+                query_entities,
+                top_k=entity_candidate_n,
+                allowed_build_ids=self.allowed_build_ids,
+            )
+            relationship_candidates = self.relationship_index.query_relationships(
+                grounding_query,
+                grounded_query.answer_type_keywords,
+                top_k=relationship_candidate_n,
+                allowed_build_ids=self.allowed_build_ids,
+            )
 
         # 第 4 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径，再补充无路径候选
         relation_paths = self.path_expander.expand_paths(
