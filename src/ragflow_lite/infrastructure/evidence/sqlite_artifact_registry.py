@@ -525,6 +525,41 @@ class SqliteArtifactRegistry:
             return None
         return _build_from_row(row)
 
+    def get_latest_build(
+        self, artifact_type: str, document_id: str
+    ) -> ArtifactBuildRecord | None:
+        self._validate_artifact_type(artifact_type)
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    build_id,
+                    document_id,
+                    artifact_type,
+                    builder_version,
+                    embedding_signature,
+                    status,
+                    failure_code,
+                    failure_stage,
+                    failure_retryable,
+                    error_message,
+                    attempt_count,
+                    last_attempted_at,
+                    created_at,
+                    projected_at,
+                    activated_at,
+                    failed_at
+                FROM artifact_builds
+                WHERE artifact_type = ? AND document_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (artifact_type, document_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return _build_from_row(row)
+
     def get_active_build(
         self, artifact_type: str, document_id: str
     ) -> ArtifactBuildRecord | None:

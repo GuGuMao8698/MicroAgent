@@ -120,6 +120,67 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             error_message TEXT,
             FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id)
         );
+
+        CREATE TABLE IF NOT EXISTS graph_evidence_batches (
+            batch_id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            build_id TEXT,
+            extractor_version TEXT,
+            metadata_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (document_id) REFERENCES artifact_documents(document_id),
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_entities (
+            entity_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            build_id TEXT,
+            ordinal INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            PRIMARY KEY (entity_id, document_id, build_id),
+            FOREIGN KEY (document_id) REFERENCES artifact_documents(document_id),
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_relationships (
+            relation_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            build_id TEXT,
+            ordinal INTEGER NOT NULL,
+            source_entity_id TEXT NOT NULL,
+            target_entity_id TEXT NOT NULL,
+            source_entity_name TEXT NOT NULL,
+            target_entity_name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            keywords_json TEXT NOT NULL,
+            weight REAL NOT NULL,
+            metadata_json TEXT NOT NULL,
+            PRIMARY KEY (relation_id, document_id, build_id),
+            FOREIGN KEY (document_id) REFERENCES artifact_documents(document_id),
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_entity_source_chunks (
+            entity_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            build_id TEXT,
+            chunk_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY (entity_id, document_id, build_id, ordinal)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_relationship_source_chunks (
+            relation_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            build_id TEXT,
+            chunk_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY (relation_id, document_id, build_id, ordinal)
+        );
         """
     )
     if current_version == 0:
