@@ -1,5 +1,18 @@
 # Evidence Infrastructure Active Contracts
 
+## SQLite Artifact Truth
+
+Reviewed at: `2026-07-11`
+Status: Active for Phase 1-2 graph evidence
+Owner: `SqliteGraphEvidenceStore`, `SqliteArtifactRegistry`, `SqliteGraphProjectionStore`
+
+- Runtime graph truth is each document's raw `GraphEvidenceBatch` persisted in SQLite.
+- `artifact_builds`, `artifact_projections`, and `active_artifacts` own graph artifact lifecycle truth, including activation, deletion, rebuild, repair, and projection ownership.
+- Infinity graph rows are derived retrieval projections. They are serviceable only when their owning build is active and their projection status is `projected`.
+- Cross-document canonicalization and path expansion run at read time over raw evidence. Canonical state is not a persisted truth object.
+- JSON graph evidence is no longer runtime truth. Rebuild or re-ingest is the supported transition to SQLite-backed artifacts.
+- Phase 1-2 graph deletion can mark graph builds and projections deleted, but the document remains `deleting`. Whole-document deletion is incomplete until the later cross-artifact coordinator proves graph projection cleanup, Psi projection cleanup, SQLite payload cleanup, and main chunk-index deletion.
+
 Reviewed at: `2026-05-08T19:54:53+08:00`
 Status: Active
 

@@ -105,6 +105,9 @@ class SqliteGraphProjectionStore:
             document_id, artifact_type="graph_evidence"
         )
 
+    def retry_delete_document(self, document_id: str) -> None:
+        self.delete_document(document_id)
+
     def _graph_build_ids_for_document(self, document_id: str) -> list[str]:
         with self._registry.connect() as conn:
             rows = conn.execute(

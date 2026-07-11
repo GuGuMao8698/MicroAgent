@@ -27,6 +27,17 @@ single-purpose):
 - [vector_indexes/](vector_indexes/)
 - [vlm/](vlm/)
 
+## Artifact Storage Boundary
+
+Reviewed at: `2026-07-11`
+Status: Active for Phase 1-2 graph evidence
+Owner: `evidence/sqlite_artifact_registry.py`, `evidence/sqlite_graph_projection_store.py`
+
+- SQLite owns artifact facts and lifecycle state for graph evidence and future Psi artifacts, including delete, rebuild, repair, and external projection ownership.
+- Infinity owns retrieval projections for graph candidates, source chunks, and future Psi nodes.
+- SQLite is not the dense-vector, sparse-vector, or full-text retrieval engine.
+- Graph projection cleanup alone does not complete whole-document deletion. The document remains `deleting` until the later cross-artifact coordinator proves all graph, Psi, SQLite payload, and main chunk-index cleanup.
+
 ## Adapter Boundary Contract
 
 Reviewed at: `2026-05-09T21:00:00+08:00`

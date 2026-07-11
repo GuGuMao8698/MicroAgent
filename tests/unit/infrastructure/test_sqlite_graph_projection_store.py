@@ -176,6 +176,40 @@ def test_delete_marks_tombstone_before_projection_cleanup_and_clears_active_grap
     assert candidate_index.deleted_documents == []
 
 
+def test_delete_retry_resumes_from_persisted_projection_delete_failure(
+    tmp_path: Path,
+) -> None:
+    store, registry, candidate_index = _build_store(tmp_path)
+    store.upsert_document_evidence(_batch("doc-1", suffix="a"))
+    active = registry.get_active_build("graph_evidence", "doc-1")
+    assert active is not None
+
+    candidate_index.fail_next_delete_build = True
+    with pytest.raises(RuntimeError, match="candidate delete failed"):
+        store.delete_document("doc-1")
+
+    failed_projection = registry.get_projection_for_build(
+        active.build_id, target="infinity_graph_candidate"
+    )
+    assert failed_projection is not None
+    assert failed_projection.status == "failed"
+    assert failed_projection.failure_code == "infinity_projection_delete_failed"
+    assert registry.get_build(active.build_id).status == "deleting"
+
+    store.retry_delete_document("doc-1")
+
+    deleted_build = registry.get_build(active.build_id)
+    deleted_projection = registry.get_projection(failed_projection.projection_id)
+    document = registry.get_document("doc-1")
+    assert deleted_build is not None
+    assert deleted_build.status == "deleted"
+    assert deleted_projection is not None
+    assert deleted_projection.status == "deleted"
+    assert document is not None
+    assert document.status == "deleting"
+    assert registry.get_active_build("graph_evidence", "doc-1") is None
+
+
 def test_superseded_projection_cleanup_failure_is_recorded_after_activation(
     tmp_path: Path,
 ) -> None:

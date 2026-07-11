@@ -276,6 +276,52 @@ def test_active_pointer_inconsistency_is_recorded_before_serviceability(
     assert recorder.events[-1].payload["failure_stage"] == "activate_build"
 
 
+def test_orphan_projection_detection_marks_projection_repair_required(tmp_path) -> None:
+    registry = SqliteArtifactRegistry(tmp_path / "artifacts.sqlite3")
+
+    registry.record_orphan_projection(
+        target="infinity_graph_candidate",
+        target_table="graph_candidates",
+        owner_build_id="missing-build",
+        failure_stage="reconcile_projection",
+    )
+
+    orphan = registry.list_orphan_projection_failures()[0]
+    assert orphan.target == "infinity_graph_candidate"
+    assert orphan.target_table == "graph_candidates"
+    assert orphan.owner_build_id == "missing-build"
+    assert orphan.failure_code == "orphan_projection_detected"
+    assert orphan.failure_stage == "reconcile_projection"
+
+
+def test_projection_inconsistency_marks_payload_build_repair_pending(tmp_path) -> None:
+    registry = SqliteArtifactRegistry(tmp_path / "artifacts.sqlite3")
+    build = registry.create_build(
+        document_id="doc-1",
+        artifact_type="graph_evidence",
+        builder_version="graph-v1",
+        embedding_signature="emb-v1",
+    )
+    registry.mark_payload_complete(build.build_id)
+    projection = registry.create_projection(
+        build_id=build.build_id,
+        target="infinity_graph_candidate",
+        target_table="graph_candidates",
+    )
+    registry.mark_projection_projected(projection.projection_id)
+    registry.activate_build(build.build_id)
+
+    registry.mark_projection_repair_required(
+        projection.projection_id,
+        failure_code="projection_inconsistent",
+        failure_stage="reconcile_projection",
+        error_message="projection rows do not match sqlite payload truth",
+    )
+
+    assert registry.get_projection(projection.projection_id).status == "repair_pending"
+    assert registry.get_build(build.build_id).status == "repair_pending"
+
+
 def test_active_pointer_inconsistency_rejects_mismatched_owner_without_touching_other_active(
     tmp_path,
 ) -> None:

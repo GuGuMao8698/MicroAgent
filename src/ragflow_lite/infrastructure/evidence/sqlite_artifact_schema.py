@@ -121,6 +121,17 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id)
         );
 
+        CREATE TABLE IF NOT EXISTS orphan_projection_failures (
+            orphan_failure_id TEXT PRIMARY KEY,
+            target TEXT NOT NULL,
+            target_table TEXT NOT NULL,
+            owner_build_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            failure_code TEXT NOT NULL,
+            failure_stage TEXT NOT NULL,
+            detected_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS graph_evidence_batches (
             batch_id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL,

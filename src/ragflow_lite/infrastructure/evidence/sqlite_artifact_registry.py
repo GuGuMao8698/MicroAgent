@@ -69,6 +69,18 @@ class ProjectionRecord:
     failed_at: str | None
 
 
+@dataclass(slots=True)
+class OrphanProjectionFailureRecord:
+    orphan_failure_id: str
+    target: str
+    target_table: str
+    owner_build_id: str
+    status: str
+    failure_code: str
+    failure_stage: str
+    detected_at: str
+
+
 class SqliteArtifactRegistry:
     def __init__(
         self,
@@ -640,6 +652,95 @@ class SqliteArtifactRegistry:
                     projection_id,
                 ),
             )
+            conn.execute(
+                """
+                UPDATE artifact_builds
+                SET status = ?, repair_required_at = ?, failure_code = ?,
+                    failure_stage = ?, error_message = ?
+                WHERE build_id = (
+                    SELECT build_id
+                    FROM artifact_projections
+                    WHERE projection_id = ?
+                )
+                """,
+                (
+                    "repair_pending",
+                    now,
+                    failure_code,
+                    failure_stage,
+                    error_message,
+                    projection_id,
+                ),
+            )
+
+    def record_orphan_projection(
+        self,
+        *,
+        target: str,
+        target_table: str,
+        owner_build_id: str,
+        failure_stage: str,
+    ) -> None:
+        self._validate_projection_target(target)
+        now = _now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO orphan_projection_failures (
+                    orphan_failure_id,
+                    target,
+                    target_table,
+                    owner_build_id,
+                    status,
+                    failure_code,
+                    failure_stage,
+                    detected_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    target,
+                    target_table,
+                    owner_build_id,
+                    "repair_pending",
+                    "orphan_projection_detected",
+                    failure_stage,
+                    now,
+                ),
+            )
+
+    def list_orphan_projection_failures(
+        self,
+    ) -> list[OrphanProjectionFailureRecord]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    orphan_failure_id,
+                    target,
+                    target_table,
+                    owner_build_id,
+                    status,
+                    failure_code,
+                    failure_stage,
+                    detected_at
+                FROM orphan_projection_failures
+                ORDER BY detected_at, rowid
+                """
+            ).fetchall()
+        return [
+            OrphanProjectionFailureRecord(
+                orphan_failure_id=str(row["orphan_failure_id"]),
+                target=str(row["target"]),
+                target_table=str(row["target_table"]),
+                owner_build_id=str(row["owner_build_id"]),
+                status=str(row["status"]),
+                failure_code=str(row["failure_code"]),
+                failure_stage=str(row["failure_stage"]),
+                detected_at=str(row["detected_at"]),
+            )
+            for row in rows
+        ]
 
     def get_document(self, document_id: str) -> ArtifactDocumentRecord | None:
         with self.connect() as conn:
@@ -776,6 +877,38 @@ class SqliteArtifactRegistry:
                 WHERE projection_id = ?
                 """,
                 (projection_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _projection_from_row(row)
+
+    def get_projection_for_build(
+        self, build_id: str, *, target: str
+    ) -> ProjectionRecord | None:
+        self._validate_projection_target(target)
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    projection_id,
+                    build_id,
+                    target,
+                    target_table,
+                    status,
+                    failure_code,
+                    failure_stage,
+                    failure_retryable,
+                    error_message,
+                    attempt_count,
+                    last_attempted_at,
+                    projected_at,
+                    failed_at
+                FROM artifact_projections
+                WHERE build_id = ? AND target = ?
+                ORDER BY rowid DESC
+                LIMIT 1
+                """,
+                (build_id, target),
             ).fetchone()
         if row is None:
             return None
