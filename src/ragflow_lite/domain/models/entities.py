@@ -249,6 +249,45 @@ class GroundedQuery:
     metadata: Metadata = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class GroundedAuxiliaryQuery:
+    query_text: str
+    entities_from_query: list[str]
+    answer_type_keywords: list[str]
+    retrieval_pass_id: str
+    rewrite_source: Literal["original", "enriched"]
+    grounding_state: Literal["complete", "partial", "missing", "failed"]
+    grounding_fallback: Literal["raw_query_only", "none"]
+    grounding_failure_code: str | None = None
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PsiRetrievalStatus:
+    retrieval_pass_id: str
+    rewrite_source: Literal["original", "enriched"]
+    state: Literal["success", "degraded", "fallback", "failed", "skipped"]
+    stop_reason: str
+    fallback_source: Literal["legacy_string_retriever", "none"]
+    failure_code: str | None = None
+    error_message: str | None = None
+    trees_considered: int = 0
+    selected_tree_count: int = 0
+    start_nodes_scored: int = 0
+    nodes_traversed: int = 0
+    max_layer_reached: int | None = None
+    mapped_source_chunk_count: int = 0
+    narrowed_source_chunk_count: int = 0
+    returned_chunk_count: int = 0
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GroundedAuxiliaryResult:
+    chunks: list[RetrievedChunk]
+    status: PsiRetrievalStatus
+
+
 # --- MiniRAG graph-first retrieval candidate models ---
 # 图优先检索的候选实体/关系及 chunk 支撑模型
 

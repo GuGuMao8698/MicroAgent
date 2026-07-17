@@ -7,6 +7,9 @@ from ragflow_lite.infrastructure.retrievers.deepseek_query_grounder import (
 from ragflow_lite.infrastructure.retrievers.infinity_hybrid_retriever import (
     InfinityHybridRetriever,
 )
+from ragflow_lite.infrastructure.retrievers.legacy_grounded_auxiliary_adapter import (
+    LegacyGroundedAuxiliaryAdapter,
+)
 from ragflow_lite.infrastructure.retrievers.openai_cot_grounding_rewriter import (
     OpenAIResponsesCoTGroundingRewriter,
 )
@@ -18,6 +21,7 @@ __all__ = [
     "DeepSeekChatQueryGrounder",
     "DeepSeekCoTGroundingRewriter",
     "InfinityHybridRetriever",
+    "LegacyGroundedAuxiliaryAdapter",
     "OpenAIResponsesCoTGroundingRewriter",
     "OpenAIResponsesQueryGrounder",
 ]
