@@ -1,3 +1,6 @@
+from ragflow_lite.infrastructure.evidence.artifact_delete_coordinator import (
+    ArtifactDeleteCoordinator,
+)
 from ragflow_lite.infrastructure.evidence.deepseek_discourse_extractor import (
     DeepSeekChatIntraChunkDiscourseExtractor,
 )
@@ -17,6 +20,10 @@ from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import 
     GraphCandidateInfinityConfig,
     InfinityGraphCandidateIndex,
 )
+from ragflow_lite.infrastructure.evidence.infinity_psi_node_index import (
+    InfinityPsiNodeIndex,
+    PsiNodeInfinityConfig,
+)
 from ragflow_lite.infrastructure.evidence.llm_discorag_blueprint_builder import (
     LLMDiscoRAGAnswerBlueprintBuilder,
 )
@@ -31,6 +38,9 @@ from ragflow_lite.infrastructure.evidence.local_json_store import (
 )
 from ragflow_lite.infrastructure.evidence.openai_extractor import (
     OpenAIResponsesEvidenceExtractor,
+)
+from ragflow_lite.infrastructure.evidence.psi_node_projection_store import (
+    PsiNodeProjectionStore,
 )
 from ragflow_lite.infrastructure.evidence.sqlite_artifact_registry import (
     SqliteArtifactRegistry,
@@ -49,6 +59,7 @@ from ragflow_lite.infrastructure.evidence.sqlite_psi_tree_store import (
 )
 
 __all__ = [
+    "ArtifactDeleteCoordinator",
     "ENTITY_MATCH_TEXT_FIELDS",
     "RELATIONSHIP_MATCH_TEXT_FIELDS",
     "DeepSeekChatEvidenceExtractor",
@@ -56,11 +67,14 @@ __all__ = [
     "GraphCandidateInfinityConfig",
     "GraphEvidenceInfinityStore",
     "InfinityGraphCandidateIndex",
+    "InfinityPsiNodeIndex",
     "LLMDiscoRAGAnswerBlueprintBuilder",
     "LLMInterChunkDiscourseGraphBuilder",
     "LocalJsonGraphEvidenceIndex",
     "LocalJsonGraphEvidenceStore",
     "OpenAIResponsesEvidenceExtractor",
+    "PsiNodeInfinityConfig",
+    "PsiNodeProjectionStore",
     "SqliteArtifactRegistry",
     "SqliteGraphEvidenceIndex",
     "SqliteGraphEvidenceStore",

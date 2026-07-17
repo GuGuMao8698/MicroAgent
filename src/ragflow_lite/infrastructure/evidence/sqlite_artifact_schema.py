@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 ARTIFACT_TYPES = frozenset({"graph_evidence", "psi_tree"})
 ARTIFACT_BUILD_STATUSES = frozenset(
@@ -51,6 +51,8 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             f"expected 0 through {SCHEMA_VERSION}"
         )
         raise ValueError(msg)
+    if current_version == 2:
+        _migrate_v2_psi_identity(conn)
     conn.executescript(
         """
         PRAGMA foreign_keys = ON;
@@ -64,6 +66,12 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             chunker_signature TEXT,
             embedding_signature TEXT,
             status TEXT NOT NULL DEFAULT 'active',
+            failure_code TEXT,
+            failure_stage TEXT,
+            failure_retryable INTEGER,
+            error_message TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_attempted_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             deleted_at TEXT
@@ -205,8 +213,8 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         );
 
         CREATE TABLE IF NOT EXISTS psi_tree_nodes (
-            node_id TEXT PRIMARY KEY,
             build_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
             layer INTEGER NOT NULL,
             node_type TEXT NOT NULL,
             abstract_type TEXT,
@@ -215,6 +223,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             keyword_text TEXT,
             source_document_id TEXT NOT NULL,
             metadata_json TEXT NOT NULL,
+            PRIMARY KEY (build_id, node_id),
             FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
             FOREIGN KEY (source_document_id) REFERENCES artifact_documents(document_id)
         );
@@ -228,20 +237,150 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             metadata_json TEXT NOT NULL,
             PRIMARY KEY (build_id, parent_node_id, child_node_id),
             FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
-            FOREIGN KEY (parent_node_id) REFERENCES psi_tree_nodes(node_id),
-            FOREIGN KEY (child_node_id) REFERENCES psi_tree_nodes(node_id)
+            FOREIGN KEY (build_id, parent_node_id)
+                REFERENCES psi_tree_nodes(build_id, node_id),
+            FOREIGN KEY (build_id, child_node_id)
+                REFERENCES psi_tree_nodes(build_id, node_id)
         );
 
         CREATE TABLE IF NOT EXISTS psi_node_source_chunks (
+            build_id TEXT NOT NULL,
             node_id TEXT NOT NULL,
             source_chunk_id TEXT NOT NULL,
             source_rank INTEGER NOT NULL,
             evidence_role TEXT NOT NULL,
-            PRIMARY KEY (node_id, source_chunk_id),
-            FOREIGN KEY (node_id) REFERENCES psi_tree_nodes(node_id)
+            PRIMARY KEY (build_id, node_id, source_chunk_id),
+            FOREIGN KEY (build_id, node_id)
+                REFERENCES psi_tree_nodes(build_id, node_id)
         );
+
+        CREATE INDEX IF NOT EXISTS psi_tree_nodes_node_id_idx
+            ON psi_tree_nodes(node_id);
         """
     )
+    _ensure_document_failure_columns(conn)
     if current_version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
+
+
+def _ensure_document_failure_columns(conn: sqlite3.Connection) -> None:
+    existing = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(artifact_documents)")
+    }
+    additions = {
+        "failure_code": "TEXT",
+        "failure_stage": "TEXT",
+        "failure_retryable": "INTEGER",
+        "error_message": "TEXT",
+        "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+        "last_attempted_at": "TEXT",
+    }
+    for column_name, definition in additions.items():
+        if column_name not in existing:
+            conn.execute(
+                f"ALTER TABLE artifact_documents ADD COLUMN {column_name} {definition}"
+            )
+
+
+def _migrate_v2_psi_identity(conn: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    required = {
+        "psi_tree_nodes",
+        "psi_tree_edges",
+        "psi_node_source_chunks",
+    }
+    if not required.issubset(tables):
+        return
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(
+            """
+            BEGIN;
+            ALTER TABLE psi_node_source_chunks RENAME TO psi_node_source_chunks_v2;
+            ALTER TABLE psi_tree_edges RENAME TO psi_tree_edges_v2;
+            ALTER TABLE psi_tree_nodes RENAME TO psi_tree_nodes_v2;
+
+            CREATE TABLE psi_tree_nodes (
+                build_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                layer INTEGER NOT NULL,
+                node_type TEXT NOT NULL,
+                abstract_type TEXT,
+                text TEXT NOT NULL,
+                summary_text TEXT,
+                keyword_text TEXT,
+                source_document_id TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                PRIMARY KEY (build_id, node_id),
+                FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
+                FOREIGN KEY (source_document_id)
+                    REFERENCES artifact_documents(document_id)
+            );
+
+            CREATE TABLE psi_tree_edges (
+                build_id TEXT NOT NULL,
+                parent_node_id TEXT NOT NULL,
+                child_node_id TEXT NOT NULL,
+                child_rank INTEGER NOT NULL,
+                edge_score REAL NOT NULL,
+                metadata_json TEXT NOT NULL,
+                PRIMARY KEY (build_id, parent_node_id, child_node_id),
+                FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
+                FOREIGN KEY (build_id, parent_node_id)
+                    REFERENCES psi_tree_nodes(build_id, node_id),
+                FOREIGN KEY (build_id, child_node_id)
+                    REFERENCES psi_tree_nodes(build_id, node_id)
+            );
+
+            CREATE TABLE psi_node_source_chunks (
+                build_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                source_chunk_id TEXT NOT NULL,
+                source_rank INTEGER NOT NULL,
+                evidence_role TEXT NOT NULL,
+                PRIMARY KEY (build_id, node_id, source_chunk_id),
+                FOREIGN KEY (build_id, node_id)
+                    REFERENCES psi_tree_nodes(build_id, node_id)
+            );
+
+            INSERT INTO psi_tree_nodes (
+                build_id, node_id, layer, node_type, abstract_type, text,
+                summary_text, keyword_text, source_document_id, metadata_json
+            )
+            SELECT build_id, node_id, layer, node_type, abstract_type, text,
+                   summary_text, keyword_text, source_document_id, metadata_json
+            FROM psi_tree_nodes_v2;
+
+            INSERT INTO psi_tree_edges (
+                build_id, parent_node_id, child_node_id, child_rank, edge_score,
+                metadata_json
+            )
+            SELECT build_id, parent_node_id, child_node_id, child_rank, edge_score,
+                   metadata_json
+            FROM psi_tree_edges_v2;
+
+            INSERT INTO psi_node_source_chunks (
+                build_id, node_id, source_chunk_id, source_rank, evidence_role
+            )
+            SELECT node.build_id, mapping.node_id, mapping.source_chunk_id,
+                   mapping.source_rank, mapping.evidence_role
+            FROM psi_node_source_chunks_v2 AS mapping
+            JOIN psi_tree_nodes_v2 AS node ON node.node_id = mapping.node_id;
+
+            DROP TABLE psi_node_source_chunks_v2;
+            DROP TABLE psi_tree_edges_v2;
+            DROP TABLE psi_tree_nodes_v2;
+            COMMIT;
+            """
+        )
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")

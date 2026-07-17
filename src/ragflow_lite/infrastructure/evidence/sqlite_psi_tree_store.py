@@ -45,9 +45,7 @@ class SqlitePsiTreeStore:
             conn.execute(
                 """
                 DELETE FROM psi_node_source_chunks
-                WHERE node_id IN (
-                    SELECT node_id FROM psi_tree_nodes WHERE build_id = ?
-                )
+                WHERE build_id = ?
                 """,
                 (tree.build_id,),
             )
@@ -135,14 +133,16 @@ class SqlitePsiTreeStore:
             conn.executemany(
                 """
                 INSERT INTO psi_node_source_chunks (
+                    build_id,
                     node_id,
                     source_chunk_id,
                     source_rank,
                     evidence_role
-                ) VALUES (?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 [
                     (
+                        mapping.build_id,
                         mapping.node_id,
                         mapping.source_chunk_id,
                         mapping.source_rank,
@@ -193,19 +193,22 @@ class SqlitePsiTreeStore:
             ).fetchall()
         return [_edge_from_row(row) for row in rows]
 
-    def get_source_mappings(self, node_id: str) -> list[PsiNodeSourceMapping]:
+    def get_source_mappings(
+        self, build_id: str, node_id: str
+    ) -> list[PsiNodeSourceMapping]:
         with self._registry.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT node_id, source_chunk_id, source_rank, evidence_role
+                SELECT build_id, node_id, source_chunk_id, source_rank, evidence_role
                 FROM psi_node_source_chunks
-                WHERE node_id = ?
+                WHERE build_id = ? AND node_id = ?
                 ORDER BY source_rank ASC, source_chunk_id ASC
                 """,
-                (node_id,),
+                (build_id, node_id),
             ).fetchall()
         return [
             PsiNodeSourceMapping(
+                build_id=str(row["build_id"]),
                 node_id=str(row["node_id"]),
                 source_chunk_id=str(row["source_chunk_id"]),
                 source_rank=int(row["source_rank"]),
@@ -214,10 +217,24 @@ class SqlitePsiTreeStore:
             for row in rows
         ]
 
-    def get_source_chunk_ids(self, node_id: str) -> list[str]:
+    def get_source_chunk_ids(self, build_id: str, node_id: str) -> list[str]:
         return [
-            mapping.source_chunk_id for mapping in self.get_source_mappings(node_id)
+            mapping.source_chunk_id
+            for mapping in self.get_source_mappings(build_id, node_id)
         ]
+
+    def set_highest_queryable_layer(self, build_id: str, layer: int) -> None:
+        with self._registry.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE psi_trees
+                SET highest_queryable_layer = ?
+                WHERE build_id = ?
+                """,
+                (layer, build_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"unknown Psi tree build: {build_id}")
 
     def list_active_queryable_trees(self) -> list[PsiTree]:
         with self._registry.connect() as conn:
@@ -305,6 +322,8 @@ def _validate_tree_payload(
     mapping_keys: set[tuple[str, str]] = set()
     allowed_evidence_roles = {"leaf", "descendant", "summary_source"}
     for mapping in mappings:
+        if mapping.build_id != tree.build_id:
+            raise ValueError("Psi source mapping build_id does not match its tree")
         if mapping.node_id not in nodes_by_id:
             raise ValueError("Psi source mapping references a node outside its tree")
         if not mapping.source_chunk_id:

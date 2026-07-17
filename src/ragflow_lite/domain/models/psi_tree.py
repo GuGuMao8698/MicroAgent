@@ -45,6 +45,7 @@ class PsiTreeEdge:
 
 @dataclass(slots=True)
 class PsiNodeSourceMapping:
+    build_id: str
     node_id: str
     source_chunk_id: str
     source_rank: int

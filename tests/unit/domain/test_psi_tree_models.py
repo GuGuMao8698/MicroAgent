@@ -37,6 +37,7 @@ def test_psi_tree_models_preserve_node_edge_and_source_mapping_identity() -> Non
         metadata={"merge": "original-space"},
     )
     mapping = PsiNodeSourceMapping(
+        build_id="build-1",
         node_id="psi-node-1",
         source_chunk_id="chunk-1",
         source_rank=0,

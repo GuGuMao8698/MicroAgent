@@ -61,6 +61,7 @@ def _tree_payload(
     ]
     mappings = [
         PsiNodeSourceMapping(
+            build_id=build_id,
             node_id=nodes[0].node_id,
             source_chunk_id="chunk-1",
             source_rank=0,
@@ -91,7 +92,7 @@ def test_store_and_load_document_scoped_psi_tree_payload(tmp_path) -> None:
     assert store.get_tree(build.build_id) == tree
     assert store.get_nodes(build.build_id) == nodes
     assert store.get_children(build.build_id, nodes[0].node_id) == edges
-    assert store.get_source_chunk_ids(nodes[0].node_id) == ["chunk-1"]
+    assert store.get_source_chunk_ids(build.build_id, nodes[0].node_id) == ["chunk-1"]
 
 
 def test_active_tree_query_uses_active_artifact_and_projected_pointer(tmp_path) -> None:
@@ -170,4 +171,4 @@ def test_replacing_build_payload_removes_stale_nodes_and_mappings(tmp_path) -> N
     )
 
     assert store.get_nodes(build.build_id) == [replacement_node]
-    assert store.get_source_chunk_ids(nodes[0].node_id) == []
+    assert store.get_source_chunk_ids(build.build_id, nodes[0].node_id) == []

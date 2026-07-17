@@ -27,6 +27,12 @@ _ALLOWED_PROJECTION_TARGETS_BY_ARTIFACT_TYPE = {
 class ArtifactDocumentRecord:
     document_id: str
     status: str
+    failure_code: str | None
+    failure_stage: str | None
+    failure_retryable: bool | None
+    error_message: str | None
+    attempt_count: int
+    last_attempted_at: str | None
     created_at: str
     updated_at: str
     deleted_at: str | None
@@ -497,6 +503,26 @@ class SqliteArtifactRegistry:
             )
 
     def mark_graph_projection_deleting(self, document_id: str) -> None:
+        self.mark_projection_deleting_for_document(
+            document_id,
+            artifact_type="graph_evidence",
+            target="infinity_graph_candidate",
+        )
+
+    def mark_projection_deleting_for_document(
+        self,
+        document_id: str,
+        *,
+        artifact_type: str,
+        target: str,
+    ) -> None:
+        self._validate_artifact_type(artifact_type)
+        self._validate_projection_target(target)
+        expected_target = _ALLOWED_PROJECTION_TARGETS_BY_ARTIFACT_TYPE[artifact_type]
+        if target != expected_target:
+            raise ValueError(
+                f"unsupported projection target for {artifact_type}: {target}"
+            )
         now = _now_iso()
         with self.connect() as conn:
             self._ensure_document(conn, document_id)
@@ -515,7 +541,7 @@ class SqliteArtifactRegistry:
                 WHERE document_id = ? AND artifact_type = ? AND deleted_at IS NULL
                   AND status != ?
                 """,
-                ("deleting", document_id, "graph_evidence", "deleted"),
+                ("deleting", document_id, artifact_type, "deleted"),
             )
             conn.execute(
                 """
@@ -532,8 +558,8 @@ class SqliteArtifactRegistry:
                 (
                     "deleting",
                     document_id,
-                    "graph_evidence",
-                    "infinity_graph_candidate",
+                    artifact_type,
+                    target,
                     "deleted",
                 ),
             )
@@ -541,9 +567,25 @@ class SqliteArtifactRegistry:
             "artifact_delete_started",
             {
                 "document_id": document_id,
-                "artifact_type": "graph_evidence",
+                "artifact_type": artifact_type,
             },
         )
+
+    def list_undeleted_build_ids(
+        self, document_id: str, *, artifact_type: str
+    ) -> list[str]:
+        self._validate_artifact_type(artifact_type)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT build_id
+                FROM artifact_builds
+                WHERE document_id = ? AND artifact_type = ? AND deleted_at IS NULL
+                ORDER BY created_at DESC, rowid DESC
+                """,
+                (document_id, artifact_type),
+            ).fetchall()
+        return [str(row["build_id"]) for row in rows]
 
     def mark_projection_delete_failed_for_document(
         self,
@@ -555,7 +597,9 @@ class SqliteArtifactRegistry:
         retryable: bool,
         error_message: str,
     ) -> None:
-        for projection_id in self._projection_ids_for_document(document_id, target=target):
+        for projection_id in self._projection_ids_for_document(
+            document_id, target=target
+        ):
             self.mark_projection_delete_failed(
                 projection_id,
                 failure_code=failure_code,
@@ -583,7 +627,9 @@ class SqliteArtifactRegistry:
                 error_message=error_message,
             )
 
-    def mark_projection_deleted_for_document(self, document_id: str, *, target: str) -> None:
+    def mark_projection_deleted_for_document(
+        self, document_id: str, *, target: str
+    ) -> None:
         now = _now_iso()
         with self.connect() as conn:
             conn.execute(
@@ -625,6 +671,154 @@ class SqliteArtifactRegistry:
                 """,
                 ("deleted", now, document_id, artifact_type),
             )
+
+    def mark_document_delete_failed(
+        self,
+        document_id: str,
+        *,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        error_message: str,
+    ) -> None:
+        now = _now_iso()
+        with self.connect() as conn:
+            self._ensure_document(conn, document_id)
+            conn.execute(
+                """
+                UPDATE artifact_documents
+                SET status = 'deleting', failure_code = ?, failure_stage = ?,
+                    failure_retryable = ?, error_message = ?,
+                    attempt_count = attempt_count + 1, last_attempted_at = ?,
+                    updated_at = ?
+                WHERE document_id = ?
+                """,
+                (
+                    failure_code,
+                    failure_stage,
+                    int(retryable),
+                    error_message,
+                    now,
+                    now,
+                    document_id,
+                ),
+            )
+        self._record_event(
+            "artifact_delete_failed",
+            {
+                "document_id": document_id,
+                "artifact_type": "document",
+                "failure_code": failure_code,
+                "failure_stage": failure_stage,
+            },
+        )
+
+    def mark_sqlite_payloads_deleted_for_document(self, document_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM psi_node_source_chunks
+                WHERE build_id IN (
+                    SELECT build_id FROM artifact_builds WHERE document_id = ?
+                )
+                """,
+                (document_id,),
+            )
+            conn.execute(
+                """
+                DELETE FROM psi_tree_edges
+                WHERE build_id IN (
+                    SELECT build_id FROM artifact_builds WHERE document_id = ?
+                )
+                """,
+                (document_id,),
+            )
+            conn.execute(
+                """
+                DELETE FROM psi_tree_nodes
+                WHERE build_id IN (
+                    SELECT build_id FROM artifact_builds WHERE document_id = ?
+                )
+                """,
+                (document_id,),
+            )
+            conn.execute("DELETE FROM psi_trees WHERE document_id = ?", (document_id,))
+            for table_name in (
+                "graph_entity_source_chunks",
+                "graph_relationship_source_chunks",
+                "graph_entities",
+                "graph_relationships",
+                "graph_evidence_batches",
+            ):
+                conn.execute(
+                    f"DELETE FROM {table_name} WHERE document_id = ?", (document_id,)
+                )
+
+    def mark_document_deleted(self, document_id: str) -> None:
+        now = _now_iso()
+        with self.connect() as conn:
+            active_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM active_artifacts WHERE document_id = ?",
+                    (document_id,),
+                ).fetchone()[0]
+            )
+            incomplete_build_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) FROM artifact_builds
+                    WHERE document_id = ? AND status != 'deleted'
+                    """,
+                    (document_id,),
+                ).fetchone()[0]
+            )
+            incomplete_projection_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM artifact_projections AS projection
+                    JOIN artifact_builds AS build ON build.build_id = projection.build_id
+                    WHERE build.document_id = ? AND projection.status != 'deleted'
+                    """,
+                    (document_id,),
+                ).fetchone()[0]
+            )
+            payload_count = sum(
+                int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM {table_name} WHERE document_id = ?",
+                        (document_id,),
+                    ).fetchone()[0]
+                )
+                for table_name in (
+                    "psi_trees",
+                    "graph_entities",
+                    "graph_relationships",
+                    "graph_evidence_batches",
+                )
+            )
+            if (
+                active_count
+                or incomplete_build_count
+                or incomplete_projection_count
+                or payload_count
+            ):
+                raise ValueError(
+                    "document delete cannot finalize before all artifacts and "
+                    "projections are deleted and payloads are cleaned"
+                )
+            cursor = conn.execute(
+                """
+                UPDATE artifact_documents
+                SET status = 'deleted', deleted_at = ?, updated_at = ?,
+                    failure_code = NULL, failure_stage = NULL,
+                    failure_retryable = NULL, error_message = NULL
+                WHERE document_id = ?
+                """,
+                (now, now, document_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"unknown artifact document: {document_id}")
 
     def mark_projection_repair_required(
         self,
@@ -747,6 +941,8 @@ class SqliteArtifactRegistry:
             row = conn.execute(
                 """
                 SELECT document_id, status, created_at, updated_at, deleted_at
+                       , failure_code, failure_stage, failure_retryable,
+                       error_message, attempt_count, last_attempted_at
                 FROM artifact_documents
                 WHERE document_id = ?
                 """,
@@ -1018,7 +1214,9 @@ class SqliteArtifactRegistry:
     def _record_event(self, name: str, payload: dict[str, object]) -> None:
         self._recorder.record(ArtifactEvent(name=name, payload=payload))
 
-    def _projection_ids_for_document(self, document_id: str, *, target: str) -> list[str]:
+    def _projection_ids_for_document(
+        self, document_id: str, *, target: str
+    ) -> list[str]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -1052,6 +1250,20 @@ def _document_from_row(row: sqlite3.Row) -> ArtifactDocumentRecord:
     return ArtifactDocumentRecord(
         document_id=str(row["document_id"]),
         status=str(row["status"]),
+        failure_code=None if row["failure_code"] is None else str(row["failure_code"]),
+        failure_stage=(
+            None if row["failure_stage"] is None else str(row["failure_stage"])
+        ),
+        failure_retryable=(
+            None if row["failure_retryable"] is None else bool(row["failure_retryable"])
+        ),
+        error_message=(
+            None if row["error_message"] is None else str(row["error_message"])
+        ),
+        attempt_count=int(row["attempt_count"]),
+        last_attempted_at=(
+            None if row["last_attempted_at"] is None else str(row["last_attempted_at"])
+        ),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         deleted_at=None if row["deleted_at"] is None else str(row["deleted_at"]),

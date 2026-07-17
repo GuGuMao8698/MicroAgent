@@ -74,6 +74,90 @@ def test_schema_initialization_upgrades_v1_database_with_psi_tables(tmp_path) ->
     }.issubset(table_names)
 
 
+def test_schema_v2_migration_preserves_psi_rows_and_adds_build_scoped_mapping(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "artifacts.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            PRAGMA user_version = 2;
+            CREATE TABLE artifact_documents (
+                document_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+            CREATE TABLE artifact_builds (
+                build_id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                builder_version TEXT NOT NULL,
+                embedding_signature TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE psi_tree_nodes (
+                node_id TEXT PRIMARY KEY,
+                build_id TEXT NOT NULL,
+                layer INTEGER NOT NULL,
+                node_type TEXT NOT NULL,
+                abstract_type TEXT,
+                text TEXT NOT NULL,
+                summary_text TEXT,
+                keyword_text TEXT,
+                source_document_id TEXT NOT NULL,
+                metadata_json TEXT NOT NULL
+            );
+            CREATE TABLE psi_tree_edges (
+                build_id TEXT NOT NULL,
+                parent_node_id TEXT NOT NULL,
+                child_node_id TEXT NOT NULL,
+                child_rank INTEGER NOT NULL,
+                edge_score REAL NOT NULL,
+                metadata_json TEXT NOT NULL,
+                PRIMARY KEY (build_id, parent_node_id, child_node_id)
+            );
+            CREATE TABLE psi_node_source_chunks (
+                node_id TEXT NOT NULL,
+                source_chunk_id TEXT NOT NULL,
+                source_rank INTEGER NOT NULL,
+                evidence_role TEXT NOT NULL,
+                PRIMARY KEY (node_id, source_chunk_id)
+            );
+            INSERT INTO artifact_documents VALUES (
+                'doc-1', 'active', '2026-01-01', '2026-01-01', NULL
+            );
+            INSERT INTO artifact_builds VALUES (
+                'build-1', 'doc-1', 'psi_tree', 'psi-v1', 'emb-v1',
+                'building', '2026-01-01'
+            );
+            INSERT INTO psi_tree_nodes VALUES (
+                'root', 'build-1', 1, 'root', 'keyword', '', NULL,
+                'latency', 'doc-1', '{}'
+            );
+            INSERT INTO psi_node_source_chunks VALUES (
+                'root', 'chunk-1', 0, 'descendant'
+            );
+            """
+        )
+
+    with SqliteArtifactRegistry(db_path).connect() as conn:
+        mapping = conn.execute(
+            """
+            SELECT build_id, node_id, source_chunk_id
+            FROM psi_node_source_chunks
+            """
+        ).fetchone()
+        document_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(artifact_documents)")
+        }
+
+    assert tuple(mapping) == ("build-1", "root", "chunk-1")
+    assert {"failure_code", "failure_stage", "attempt_count"}.issubset(document_columns)
+
+
 def test_build_project_activate_and_supersede_are_transactional(tmp_path) -> None:
     recorder = InMemoryArtifactEventRecorder()
     registry = SqliteArtifactRegistry(tmp_path / "artifacts.sqlite3", recorder=recorder)
