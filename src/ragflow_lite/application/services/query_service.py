@@ -10,6 +10,9 @@ import logging
 from typing import cast
 
 from ragflow_lite.application.services._query_observability import log_query_event
+from ragflow_lite.application.services.metadata_sanitizer import (
+    sanitize_retrieval_chunks,
+)
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import AnswerRequest, AnswerResult, RetrievedChunk
 from ragflow_lite.domain.ports import Answerer, Retriever, TopologyContextRetriever
@@ -97,13 +100,17 @@ class QueryService:
         request_metadata: dict[str, object] = {}
         retrieve_context = getattr(self.retriever, "retrieve_context", None)
         if not callable(retrieve_context):
-            return self.retriever.retrieve(query, top_k), request_metadata
+            return sanitize_retrieval_chunks(
+                self.retriever.retrieve(query, top_k)
+            ), request_metadata
 
-        retrieval_result = cast(TopologyContextRetriever, self.retriever).retrieve_context(
+        retrieval_result = cast(
+            TopologyContextRetriever, self.retriever
+        ).retrieve_context(
             query,
             top_k,
         )
         retrieval_rewrite = retrieval_result.metadata.get("retrieval_rewrite")
         if retrieval_rewrite is not None:
             request_metadata["retrieval_rewrite"] = retrieval_rewrite
-        return retrieval_result.chunks, request_metadata
+        return sanitize_retrieval_chunks(retrieval_result.chunks), request_metadata

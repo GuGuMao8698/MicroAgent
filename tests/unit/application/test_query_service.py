@@ -188,6 +188,30 @@ def test_build_answer_request_preserves_retrieval_rewrite_metadata_from_topology
     assert answerer.last_request is None
 
 
+def test_build_answer_request_strips_internal_psi_context_metadata() -> None:
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        document_id="d1",
+        text="source text",
+        score=0.9,
+        metadata={
+            "retrieval_source": "psi_top_down_auxiliary",
+            "psi_node_id": "psi-node-1",
+            "filename": "paper.pdf",
+        },
+    )
+    service = QueryService(
+        retriever=FakeTopologyRetriever(results=[chunk]),
+        answerer=FakeAnswerer(),
+    )
+
+    request = service.build_answer_request("q", top_k=1)
+
+    assert request.contexts[0].chunk_id == "c1"
+    assert request.contexts[0].metadata == {"filename": "paper.pdf"}
+    assert chunk.metadata["psi_node_id"] == "psi-node-1"
+
+
 def test_query_passes_through_ragflow_lite_error() -> None:
     service = _build_service(retriever_error=ProcessingError("boom"))
 

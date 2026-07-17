@@ -6,6 +6,9 @@ from ragflow_lite.application.services._query_observability import log_query_eve
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
+from ragflow_lite.application.services.metadata_sanitizer import (
+    sanitize_retrieval_chunks,
+)
 from ragflow_lite.domain.errors import ProcessingError, RagflowLiteError
 from ragflow_lite.domain.models import (
     AnswerBlueprint,
@@ -323,6 +326,7 @@ class DiscoRAGQueryService:
             retrieval_result,
             blueprint,
         )
+        answer_contexts = sanitize_retrieval_chunks(answer_contexts)
         answer_blueprint = _blueprint_for_contexts(blueprint, answer_contexts)
         answer_metadata: dict[str, object] = {
             "source_selection": retrieval_result.metadata.get("source_selection"),
@@ -355,7 +359,7 @@ class DiscoRAGQueryService:
         result = self.answerer.answer(
             AnswerRequest(
                 query=query,
-                contexts=retrieval_result.chunks,
+                contexts=sanitize_retrieval_chunks(retrieval_result.chunks),
                 mode="standard",
                 blueprint=None,
                 metadata=metadata,

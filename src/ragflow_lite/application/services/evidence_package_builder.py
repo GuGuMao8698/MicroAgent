@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from ragflow_lite.application.services.metadata_sanitizer import (
+    strip_internal_retrieval_metadata,
+)
 from ragflow_lite.domain.models import (
     EvidenceItem,
     EvidencePackage,
@@ -107,7 +110,7 @@ class EvidencePackageBuilder:
                 topology_path_ids=path_ids,
                 topology_relation_ids=relation_ids,
                 metadata={
-                    **dict(chunk.metadata),
+                    **strip_internal_retrieval_metadata(chunk.metadata),
                     **_source_metadata(source_by_chunk.get(cid)),
                 },
             )
@@ -115,7 +118,7 @@ class EvidencePackageBuilder:
             items.append(item)
             order += 1
 
-        metadata = dict(result.metadata)
+        metadata = strip_internal_retrieval_metadata(result.metadata)
         metadata["evidence_count"] = len(items)
 
         # 若存在 source selection 摘要，注入到 package 级 metadata
