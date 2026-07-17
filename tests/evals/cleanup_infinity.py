@@ -27,6 +27,7 @@ def select_eval_cleanup_tables(table_names: Iterable[str]) -> list[str]:
         or name.startswith("chunks_")
         or name.startswith("graph_entities_")
         or name.startswith("graph_relationships_")
+        or name.startswith("eval_private_bootstrap_")
         or name.startswith("test_legacy_doc_")
         or name.startswith("test_legacy_chunk_")
     }

@@ -462,13 +462,13 @@ def test_live_dense_index_writes_academic_sparse_fields(
             },
         )
         index.index_document(asset, [chunk])
-        rows = list(
+        result = (
             index._db.get_table(index._chunk_table)
             .output(["paper_title_tks", "caption_tks", "element_type_kwd"])
             .to_arrow()
-            .to_pandas()
-            .itertuples(index=False)
         )
+        frame = result[0] if isinstance(result, tuple) else result
+        rows = list(frame.to_pandas().itertuples(index=False))
         assert any(row.paper_title_tks for row in rows), (
             "paper_title_tks should be populated"
         )

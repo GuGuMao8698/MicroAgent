@@ -55,11 +55,11 @@ conftest.py `_set_deepeval_plain_prompt_variant` monkeypatches `RAGFLOW_LITE_OPE
 
 Source: [infinity_test_support.py](infinity_test_support.py).
 
-- `assign_isolated_infinity_tables(settings, tmp_path)`: uses `tmp_path` hash for table name suffix (6 tables per settings).
+- `assign_isolated_infinity_tables(settings, tmp_path)`: uses `tmp_path` hash for table name suffix (7 tables per settings).
 - `register_infinity_table_cleanup(settings)`: registers settings + table names for session-end cleanup.
 - `drop_registered_infinity_tables()`: drops all registered isolated tables (called in `pytest_sessionfinish` when `run_live_infinity` or `run_deepeval`).
 - `clear_registered_infinity_tables()`: clears registrations without dropping (called in `pytest_sessionfinish` when no live gate).
-- `_LIVE_TABLE_PREFIXES`: `("documents_", "chunks_", "graph_entities_", "graph_relationships_")`.
+- `_LIVE_TABLE_PREFIXES`: `("documents_", "chunks_", "graph_entities_", "graph_relationships_", "psi_nodes_")`.
 
 ## Session finish behavior
 
