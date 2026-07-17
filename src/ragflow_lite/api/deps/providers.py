@@ -58,12 +58,17 @@ from ragflow_lite.infrastructure.chunkers import (
     DocumentChunker,
 )
 from ragflow_lite.infrastructure.evidence import (
-    GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
+    InfinityPsiNodeIndex,
     LLMDiscoRAGAnswerBlueprintBuilder,
     LLMInterChunkDiscourseGraphBuilder,
-    LocalJsonGraphEvidenceIndex,
-    LocalJsonGraphEvidenceStore,
+    PsiNodeInfinityConfig,
+    PsiNodeProjectionStore,
+    SqliteArtifactRegistry,
+    SqliteGraphEvidenceIndex,
+    SqliteGraphEvidenceStore,
+    SqliteGraphProjectionStore,
+    SqlitePsiTreeStore,
 )
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
@@ -72,6 +77,11 @@ from ragflow_lite.infrastructure.media import LocalPdfMediaAssetStore
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
     DeepSeekCoTGroundingRewriter,
+    LegacyGroundedAuxiliaryAdapter,
+    PsiNodeScorer,
+    PsiSourceChunkNarrower,
+    PsiTopDownAuxiliaryRetriever,
+    PsiTopDownTraverser,
 )
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
     ChunkHybridRetrievalConfig,
@@ -219,7 +229,6 @@ def build_services(settings: Settings) -> AppServices:
         instructions_path=deepseek_runtime_config.prompt_path,
         render_citations=deepseek_runtime_config.render_citations,
     )
-    graph_evidence_dir = settings.local_index_dir / "graph_evidence"
     # Infinity 图候选索引：entity/relationship 混合检索（文本 + 稠密向量融合）
     graph_candidate_index = InfinityGraphCandidateIndex(
         client=vector_index.client,
@@ -237,11 +246,20 @@ def build_services(settings: Settings) -> AppServices:
             fusion_normalize=settings.graph_candidate_fusion_normalize,
         ),
     )
-    # 图证据存储：同时写 JSON + Infinity candidates
-    base_graph_store = LocalJsonGraphEvidenceStore(graph_evidence_dir)
-    graph_store = GraphEvidenceInfinityStore(
+    artifact_db_path = settings.local_index_dir / "artifacts" / "artifacts.sqlite3"
+    artifact_registry = SqliteArtifactRegistry(artifact_db_path)
+    base_graph_store = SqliteGraphEvidenceStore(
+        artifact_db_path,
+        registry=artifact_registry,
+    )
+    graph_store = SqliteGraphProjectionStore(
         graph_store=base_graph_store,
         candidate_index=graph_candidate_index,
+        registry=artifact_registry,
+        target_table=(
+            f"{graph_candidate_index.entity_table_name}:"
+            f"{graph_candidate_index.relationship_table_name}"
+        ),
     )
     evidence_extractor = DeepSeekChatEvidenceExtractor(
         api_key=deepseek_runtime_config.api_key,
@@ -259,6 +277,49 @@ def build_services(settings: Settings) -> AppServices:
     )
     # chunk 辅助检索器：Infinity hybrid 作为辅助召回通道
     chunk_auxiliary_retriever = _build_retriever(embedder, vector_index)
+    legacy_grounded_auxiliary = LegacyGroundedAuxiliaryAdapter(
+        chunk_auxiliary_retriever
+    )
+    grounded_auxiliary_retriever = legacy_grounded_auxiliary
+    if settings.psi_auxiliary_enabled:
+        psi_tree_store = SqlitePsiTreeStore(
+            artifact_db_path,
+            registry=artifact_registry,
+        )
+        psi_node_index = InfinityPsiNodeIndex(
+            client=vector_index.client,
+            client_lock=vector_index.client_lock,
+            database=settings.infinity_database,
+            embedding_dimensions=settings.ark_embedding_dimensions,
+            config=PsiNodeInfinityConfig(table_name=settings.infinity_psi_node_table),
+        )
+        psi_node_scorer = PsiNodeScorer(
+            psi_node_index=psi_node_index,
+            embedder=embedder,
+        )
+        psi_traverser = PsiTopDownTraverser(
+            tree_store=psi_tree_store,
+            scorer=psi_node_scorer,
+        )
+        psi_projection_store = PsiNodeProjectionStore(
+            tree_store=psi_tree_store,
+            psi_node_index=psi_node_index,
+            embedder=embedder,
+            registry=artifact_registry,
+            target_table=settings.infinity_psi_node_table,
+        )
+        grounded_auxiliary_retriever = PsiTopDownAuxiliaryRetriever(
+            tree_store=psi_tree_store,
+            traverser=psi_traverser,
+            narrower=PsiSourceChunkNarrower(),
+            chunk_lookup=vector_index,
+            legacy_adapter=(
+                legacy_grounded_auxiliary
+                if settings.psi_auxiliary_fallback == "legacy"
+                else None
+            ),
+            repair_marker=psi_projection_store,
+        )
     query_grounder = DeepSeekChatQueryGrounder(
         api_key=deepseek_runtime_config.api_key,
         base_url=deepseek_runtime_config.base_url,
@@ -271,10 +332,8 @@ def build_services(settings: Settings) -> AppServices:
         model=deepseek_runtime_config.model,
         reasoning_effort=deepseek_runtime_config.reasoning_effort,
     )
-    # 本地 JSON 图证据索引：仅用于拓扑路径扩展
-    local_graph_evidence_index = LocalJsonGraphEvidenceIndex(
-        evidence_dir=graph_evidence_dir,
-        reload_on_query=True,
+    graph_path_expander = SqliteGraphEvidenceIndex(
+        artifact_db_path,
         canonicalize_cross_document=True,
     )
     # 图优先检索器：先做 query grounding，再查图索引、扩展路径，最后评分与合并 chunk
@@ -282,12 +341,14 @@ def build_services(settings: Settings) -> AppServices:
         query_grounder=query_grounder,
         entity_index=graph_candidate_index,
         relationship_index=graph_candidate_index,
-        path_expander=local_graph_evidence_index,
+        path_expander=graph_path_expander,
         chunk_lookup=vector_index,
         chunk_auxiliary_retriever=chunk_auxiliary_retriever,
+        grounded_auxiliary_retriever=grounded_auxiliary_retriever,
         cot_grounding_rewriter=cot_grounding_rewriter,
         mini_internal_candidate_n=settings.mini_internal_candidate_n,
         query_entity_limit=settings.query_entity_limit,
+        auxiliary_scoring_policy=settings.auxiliary_scoring_policy,
     )
     query_service = QueryService(
         retriever=retriever,

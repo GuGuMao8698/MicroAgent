@@ -378,6 +378,44 @@ def test_discorag_query_service_returns_answerer_result_unchanged() -> None:
     assert result.metadata == {"ok": True}
 
 
+def test_discorag_strips_internal_psi_metadata_before_blueprint_and_answer() -> None:
+    chunk = RetrievedChunk(
+        chunk_id="chunk_a",
+        document_id="doc_alpha",
+        text="source text",
+        score=0.9,
+        metadata={
+            "retrieval_source": "psi_top_down_auxiliary",
+            "psi_node_id": "psi-node-1",
+            "psi_retrieval_status": {"state": "success"},
+            "filename": "paper.pdf",
+        },
+    )
+    retrieval_result = _retrieval_result([chunk])
+    retrieval_result.metadata["auxiliary_retrieval_statuses"] = [{"state": "success"}]
+    blueprint_builder = RecordingBlueprintBuilder()
+    answerer = RecordingAnswerer()
+    service = DiscoRAGQueryService(
+        retriever=FakeTopologyRetriever(result=retrieval_result),
+        evidence_package_builder=EvidencePackageBuilder(),
+        discourse_extractor=RecordingDiscourseExtractor(),
+        inter_chunk_graph_builder=RecordingGraphBuilder(),
+        blueprint_builder=blueprint_builder,
+        answerer=answerer,
+    )
+
+    service.query("q", top_k=1)
+
+    assert blueprint_builder.last_package is not None
+    package = blueprint_builder.last_package.evidence_package
+    assert package.items[0].canonical_chunk_id == "chunk_a"
+    assert package.items[0].metadata == {"filename": "paper.pdf"}
+    assert "auxiliary_retrieval_statuses" not in package.metadata
+    assert answerer.last_request is not None
+    assert answerer.last_request.contexts[0].metadata == {"filename": "paper.pdf"}
+    assert chunk.metadata["psi_node_id"] == "psi-node-1"
+
+
 def test_discorag_query_service_logs_started_and_succeeded_and_records_metric(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,

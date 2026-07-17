@@ -31,18 +31,35 @@ from ragflow_lite.infrastructure import (
     DeepSeekChatIntraChunkDiscourseExtractor,
     InfinityDenseVectorIndex,
     InfinityHybridRetriever,
-    LocalJsonGraphEvidenceStore,
 )
 from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.evidence import (
-    GraphEvidenceInfinityStore,
     InfinityGraphCandidateIndex,
+    InfinityPsiNodeIndex,
     LLMDiscoRAGAnswerBlueprintBuilder,
     LLMInterChunkDiscourseGraphBuilder,
-    LocalJsonGraphEvidenceIndex,
+    PsiNodeProjectionStore,
+    SqlitePsiTreeStore,
+)
+from ragflow_lite.infrastructure.evidence.sqlite_artifact_registry import (
+    SqliteArtifactRegistry,
+)
+from ragflow_lite.infrastructure.evidence.sqlite_graph_evidence_index import (
+    SqliteGraphEvidenceIndex,
+)
+from ragflow_lite.infrastructure.evidence.sqlite_graph_evidence_store import (
+    SqliteGraphEvidenceStore,
+)
+from ragflow_lite.infrastructure.evidence.sqlite_graph_projection_store import (
+    SqliteGraphProjectionStore,
 )
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
+    LegacyGroundedAuxiliaryAdapter,
+    PsiNodeScorer,
+    PsiSourceChunkNarrower,
+    PsiTopDownAuxiliaryRetriever,
+    PsiTopDownTraverser,
 )
 
 
@@ -104,6 +121,42 @@ def _fake_pipeline(*args: object, **kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(**kwargs, process_task=lambda document_id: None)
 
 
+def _named_stub_factory(name: str):
+    def _factory(*args: object, **kwargs: object) -> object:
+        stub_type = type(name, (), {})
+        instance = stub_type()
+        instance.args = args
+        instance.kwargs = kwargs
+        return instance
+
+    return _factory
+
+
+def _recording_named_stub_factory(name: str, sink: list[object]):
+    factory = _named_stub_factory(name)
+
+    def _factory(*args: object, **kwargs: object) -> object:
+        instance = factory(*args, **kwargs)
+        sink.append(instance)
+        return instance
+
+    return _factory
+
+
+def _build_fake_graph_candidate_index(
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    stub_type = type("InfinityGraphCandidateIndex", (), {})
+    instance = stub_type()
+    instance.args = args
+    instance.kwargs = kwargs
+    config = kwargs["config"]
+    instance.entity_table_name = config.entity_table
+    instance.relationship_table_name = config.relationship_table
+    return instance
+
+
 def _patch_non_live_build_services_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -117,17 +170,19 @@ def _patch_non_live_build_services_dependencies(
     monkeypatch.setattr(
         providers_module,
         "InfinityGraphCandidateIndex",
-        lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+        lambda *args, **kwargs: _build_fake_graph_candidate_index(args, kwargs),
     )
     monkeypatch.setattr(
         providers_module,
         "LocalJsonGraphEvidenceStore",
         lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+        raising=False,
     )
     monkeypatch.setattr(
         providers_module,
         "GraphEvidenceInfinityStore",
         _fake_graph_store,
+        raising=False,
     )
     monkeypatch.setattr(
         providers_module,
@@ -148,7 +203,38 @@ def _patch_non_live_build_services_dependencies(
         providers_module,
         "LocalJsonGraphEvidenceIndex",
         lambda *args, **kwargs: SimpleNamespace(args=args, **kwargs),
+        raising=False,
     )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteArtifactRegistry",
+        _named_stub_factory("SqliteArtifactRegistry"),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphEvidenceStore",
+        _named_stub_factory("SqliteGraphEvidenceStore"),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphProjectionStore",
+        _named_stub_factory("SqliteGraphProjectionStore"),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphEvidenceIndex",
+        _named_stub_factory("SqliteGraphEvidenceIndex"),
+    )
+    for name in (
+        "InfinityPsiNodeIndex",
+        "PsiNodeProjectionStore",
+        "PsiNodeScorer",
+        "PsiSourceChunkNarrower",
+        "PsiTopDownAuxiliaryRetriever",
+        "PsiTopDownTraverser",
+        "SqlitePsiTreeStore",
+    ):
+        monkeypatch.setattr(providers_module, name, _named_stub_factory(name))
     monkeypatch.setattr(
         providers_module,
         "MiniGraphFirstRetriever",
@@ -420,17 +506,20 @@ def test_build_services_uses_infinity_hybrid_retriever(
 def test_build_services_wires_graph_evidence_dependencies(tmp_path: Path) -> None:
     services = build_services(_build_live_settings(tmp_path))
 
-    # 图证据存储：GraphEvidenceInfinityStore 包装 JSON + Infinity candidates
     assert isinstance(
-        services.ingestion_pipeline.graph_store, GraphEvidenceInfinityStore
+        services.ingestion_pipeline.graph_store, SqliteGraphProjectionStore
     )
     assert isinstance(
         services.ingestion_pipeline.graph_store._graph_store,
-        LocalJsonGraphEvidenceStore,
+        SqliteGraphEvidenceStore,
     )
     assert isinstance(
         services.ingestion_pipeline.graph_store._candidate_index,
         InfinityGraphCandidateIndex,
+    )
+    assert isinstance(
+        services.ingestion_pipeline.graph_store._registry,
+        SqliteArtifactRegistry,
     )
     assert isinstance(
         services.ingestion_pipeline.evidence_extractor,
@@ -466,8 +555,13 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "DeepSeekChatQueryGrounder",
         "DeepSeekCoTGroundingRewriter",
         "InfinityHybridRetriever",
+        "LegacyGroundedAuxiliaryAdapter",
         "OpenAIResponsesCoTGroundingRewriter",
         "OpenAIResponsesQueryGrounder",
+        "PsiNodeScorer",
+        "PsiSourceChunkNarrower",
+        "PsiTopDownAuxiliaryRetriever",
+        "PsiTopDownTraverser",
     ]
     assert not hasattr(infrastructure, "VectorRetriever")
     assert not hasattr(infrastructure, "InfinityFullTextRetriever")
@@ -495,8 +589,8 @@ def test_build_services_wires_mini_graph_first_retriever(tmp_path: Path) -> None
         services.retriever.relationship_index, InfinityGraphCandidateIndex
     )
     assert services.retriever.entity_index is services.retriever.relationship_index
-    # 本地 JSON 图证据索引用于拓扑路径扩展（path_expander）
-    assert isinstance(services.retriever.path_expander, LocalJsonGraphEvidenceIndex)
+    # SQLite 图证据索引用于拓扑路径扩展（path_expander）
+    assert isinstance(services.retriever.path_expander, SqliteGraphEvidenceIndex)
     assert services.retriever.path_expander._canonicalize_cross_document is True
     # chunk_lookup 使用 vector_index
     assert services.retriever.chunk_lookup is services.ingestion_pipeline.vector_index
@@ -514,9 +608,141 @@ def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> 
     assert isinstance(retriever, MiniGraphFirstRetriever)
     assert isinstance(retriever.entity_index, InfinityGraphCandidateIndex)
     assert isinstance(retriever.relationship_index, InfinityGraphCandidateIndex)
-    # path_expander 使用本地 JSON 索引，不使用 Infinity 图候选索引
+    # path_expander 使用 SQLite 图证据索引，不使用 Infinity 图候选索引
     assert not isinstance(retriever.path_expander, InfinityGraphCandidateIndex)
+    assert isinstance(retriever.path_expander, SqliteGraphEvidenceIndex)
     assert isinstance(retriever.chunk_auxiliary_retriever, InfinityHybridRetriever)
+
+
+@pytest.mark.live_infinity
+def test_build_services_wires_enabled_psi_auxiliary_with_isolated_table(
+    tmp_path: Path,
+) -> None:
+    settings = _build_live_settings(tmp_path)
+    settings.psi_auxiliary_enabled = True
+    settings.psi_auxiliary_fallback = "legacy"
+
+    services = build_services(settings)
+
+    retriever = services.retriever
+    assert isinstance(retriever, MiniGraphFirstRetriever)
+    grounded = retriever.grounded_auxiliary_retriever
+    assert isinstance(grounded, PsiTopDownAuxiliaryRetriever)
+    assert isinstance(grounded._tree_store, SqlitePsiTreeStore)
+    assert isinstance(grounded._traverser, PsiTopDownTraverser)
+    assert isinstance(grounded._traverser._scorer, PsiNodeScorer)
+    assert isinstance(grounded._narrower, PsiSourceChunkNarrower)
+    assert isinstance(grounded._legacy_adapter, LegacyGroundedAuxiliaryAdapter)
+    assert isinstance(grounded._repair_marker, PsiNodeProjectionStore)
+    psi_index = grounded._traverser._scorer._psi_node_index
+    assert isinstance(psi_index, InfinityPsiNodeIndex)
+    assert psi_index.table_name == settings.infinity_psi_node_table
+    assert settings.infinity_psi_node_table.startswith("psi_nodes_")
+
+
+def test_build_services_wires_sqlite_graph_evidence_truth(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    from ragflow_lite.api.deps import providers as providers_module
+
+    settings = _build_settings(tmp_path)
+    artifact_db_path = settings.local_index_dir / "artifacts" / "artifacts.sqlite3"
+    sqlite_registry_instances: list[object] = []
+    sqlite_graph_store_instances: list[object] = []
+    sqlite_projection_store_instances: list[object] = []
+    sqlite_graph_index_instances: list[object] = []
+    json_store_calls: list[object] = []
+    json_index_calls: list[object] = []
+
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteArtifactRegistry",
+        _recording_named_stub_factory(
+            "SqliteArtifactRegistry", sqlite_registry_instances
+        ),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphEvidenceStore",
+        _recording_named_stub_factory(
+            "SqliteGraphEvidenceStore", sqlite_graph_store_instances
+        ),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphProjectionStore",
+        _recording_named_stub_factory(
+            "SqliteGraphProjectionStore", sqlite_projection_store_instances
+        ),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "SqliteGraphEvidenceIndex",
+        _recording_named_stub_factory(
+            "SqliteGraphEvidenceIndex", sqlite_graph_index_instances
+        ),
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LocalJsonGraphEvidenceStore",
+        lambda *args, **kwargs: json_store_calls.append((args, kwargs)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        providers_module,
+        "LocalJsonGraphEvidenceIndex",
+        lambda *args, **kwargs: json_index_calls.append((args, kwargs)),
+        raising=False,
+    )
+
+    services = build_services(settings)
+
+    assert len(sqlite_registry_instances) == 1
+    assert len(sqlite_graph_store_instances) == 1
+    assert len(sqlite_projection_store_instances) == 1
+    assert len(sqlite_graph_index_instances) == 1
+
+    registry = sqlite_registry_instances[0]
+    graph_store = sqlite_graph_store_instances[0]
+    projection_store = sqlite_projection_store_instances[0]
+    graph_index = sqlite_graph_index_instances[0]
+
+    assert (
+        services.ingestion_pipeline.graph_store.__class__.__name__
+        == "SqliteGraphProjectionStore"
+    )
+    assert (
+        services.retriever.entity_index.__class__.__name__
+        == "InfinityGraphCandidateIndex"
+    )
+    assert (
+        services.retriever.relationship_index.__class__.__name__
+        == "InfinityGraphCandidateIndex"
+    )
+    assert (
+        services.retriever.path_expander.__class__.__name__
+        == "SqliteGraphEvidenceIndex"
+    )
+    assert registry.args == (artifact_db_path,)
+    assert graph_store.args == (artifact_db_path,)
+    assert graph_index.args == (artifact_db_path,)
+    assert graph_store.kwargs["registry"] is registry
+    assert projection_store.kwargs["registry"] is registry
+    assert projection_store.kwargs["graph_store"] is graph_store
+    assert graph_index.kwargs["canonicalize_cross_document"] is True
+    assert projection_store.kwargs["target_table"] == (
+        f"{settings.infinity_graph_entity_table}:"
+        f"{settings.infinity_graph_relationship_table}"
+    )
+    assert (
+        projection_store.kwargs["target_table"]
+        == f"{services.retriever.entity_index.entity_table_name}:"
+        f"{services.retriever.entity_index.relationship_table_name}"
+    )
+    assert json_store_calls == []
+    assert json_index_calls == []
 
 
 def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
@@ -537,6 +763,89 @@ def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.graph_candidate_fusion_normalize == "atan"
     assert settings.infinity_graph_entity_table == "graph_entities"
     assert settings.infinity_graph_relationship_table == "graph_relationships"
+    assert settings.psi_auxiliary_enabled is False
+    assert settings.psi_auxiliary_fallback == "legacy"
+    assert settings.infinity_psi_node_table == "psi_nodes"
+    assert settings.auxiliary_scoring_policy == "minirag_counter_parity"
+
+
+def test_settings_rejects_invalid_psi_auxiliary_fallback(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="psi_auxiliary_fallback"):
+        Settings(
+            project_root=tmp_path,
+            uploads_dir=tmp_path / "uploads",
+            local_index_dir=tmp_path / "local_index",
+            temp_dir=tmp_path / "tmp",
+            psi_auxiliary_fallback="invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_settings_reads_auxiliary_scoring_policy_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "MICRORAG_AUXILIARY_SCORING_POLICY",
+        "psi_positional_5_2_10_experimental",
+    )
+
+    settings = _build_settings(tmp_path)
+
+    assert settings.auxiliary_scoring_policy == ("psi_positional_5_2_10_experimental")
+
+
+def test_settings_rejects_unknown_auxiliary_scoring_policy(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="auxiliary_scoring_policy"):
+        Settings(
+            project_root=tmp_path,
+            uploads_dir=tmp_path / "uploads",
+            local_index_dir=tmp_path / "local_index",
+            temp_dir=tmp_path / "tmp",
+            auxiliary_scoring_policy="unknown",  # type: ignore[arg-type]
+        )
+
+
+def test_provider_wires_legacy_grounded_auxiliary_when_psi_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    settings = _build_settings(tmp_path)
+    settings.psi_auxiliary_enabled = False
+
+    services = build_services(settings)
+
+    grounded = services.retriever.grounded_auxiliary_retriever
+    assert grounded.__class__.__name__ == "LegacyGroundedAuxiliaryAdapter"
+
+
+@pytest.mark.parametrize(
+    ("fallback", "expects_legacy"),
+    [("legacy", True), ("none", False)],
+)
+def test_provider_wires_internal_psi_auxiliary_and_fallback_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fallback: str,
+    expects_legacy: bool,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    settings = _build_settings(tmp_path)
+    settings.psi_auxiliary_enabled = True
+    settings.psi_auxiliary_fallback = fallback  # type: ignore[assignment]
+
+    services = build_services(settings)
+
+    grounded = services.retriever.grounded_auxiliary_retriever
+    assert grounded.__class__.__name__ == "PsiTopDownAuxiliaryRetriever"
+    assert grounded.kwargs["chunk_lookup"] is services.ingestion_pipeline.vector_index
+    legacy = grounded.kwargs["legacy_adapter"]
+    assert (legacy is not None) is expects_legacy
+    assert grounded.kwargs["repair_marker"].__class__.__name__ == (
+        "PsiNodeProjectionStore"
+    )
+    assert grounded.kwargs["tree_store"].__class__.__name__ == "SqlitePsiTreeStore"
+    assert settings.infinity_psi_node_table.startswith("psi_nodes_")
 
 
 def test_chunk_hybrid_defaults_match_spec(tmp_path: Path) -> None:

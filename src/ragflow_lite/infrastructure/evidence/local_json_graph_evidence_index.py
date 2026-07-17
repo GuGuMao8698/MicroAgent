@@ -127,12 +127,15 @@ class LocalJsonGraphEvidenceIndex:
         self,
         entity_texts: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniEntityCandidate]:
         """根据实体文本列表查询匹配的实体候选。
 
         对每个实体，计算所有查询词在其 name / entity_type / description 字段上的
         最高分之和作为总分，然后按分数降序、ID 升序排序取 top_k。
         """
+        if allowed_build_ids is not None:
+            return []
         # 预处理查询词：统一小写
         terms = [_normalize(t) for t in entity_texts]
         entities = self._get_entities()
@@ -175,6 +178,7 @@ class LocalJsonGraphEvidenceIndex:
         query: str,
         answer_type_keywords: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniRelationshipCandidate]:
         """根据查询和回答类型关键词查询匹配的关系候选。
 
@@ -182,6 +186,8 @@ class LocalJsonGraphEvidenceIndex:
         target_entity_name 上的匹配分，加上 answer_type_keywords 在同样字段上的匹配分，
         总和作为最终分数。按分数降序、ID 升序排序取 top_k。
         """
+        if allowed_build_ids is not None:
+            return []
         # 将 query 拆分为单词作为查询词
         query_terms = [_normalize(w) for w in query.split() if w.strip()]
         # 将 answer_type_keywords 额外加入匹配词列表

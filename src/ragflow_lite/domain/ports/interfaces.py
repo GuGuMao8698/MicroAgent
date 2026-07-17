@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ragflow_lite.domain.models import (
+    AnswerBlueprint,
     AnswerRequest,
     AnswerResult,
     Chunk,
@@ -14,6 +15,8 @@ from ragflow_lite.domain.models import (
     EvidencePackage,
     GraphEvidenceBatch,
     GraphEvidenceWriteResult,
+    GroundedAuxiliaryQuery,
+    GroundedAuxiliaryResult,
     GroundedQuery,
     IndexedDocument,
     IngestionTaskSnapshot,
@@ -171,6 +174,7 @@ class EntityNameIndex(Protocol):
         self,
         entity_texts: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniEntityCandidate]: ...
 
 
@@ -182,6 +186,7 @@ class RelationshipIndex(Protocol):
         query: str,
         answer_type_keywords: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniRelationshipCandidate]: ...
 
 
@@ -206,6 +211,14 @@ class TopologyContextRetriever(Protocol):
 
 class Retriever(Protocol):
     def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]: ...
+
+
+class GroundedAuxiliaryRetriever(Protocol):
+    def retrieve_grounded(
+        self,
+        request: GroundedAuxiliaryQuery,
+        top_k: int,
+    ) -> GroundedAuxiliaryResult: ...
 
 
 class Answerer(Protocol):

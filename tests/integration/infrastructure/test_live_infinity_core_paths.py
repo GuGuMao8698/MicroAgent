@@ -21,6 +21,10 @@ from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import 
     GraphCandidateInfinityConfig,
     InfinityGraphCandidateIndex,
 )
+from ragflow_lite.infrastructure.evidence.infinity_psi_node_index import (
+    InfinityPsiNodeIndex,
+    PsiNodeInfinityConfig,
+)
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
     InfinityDenseVectorIndex,
 )
@@ -273,6 +277,148 @@ def test_live_graph_candidate_index_covers_table_lifecycle_query_and_delete(
             pass
 
 
+def test_live_psi_node_index_covers_projection_filter_search_and_delete(
+    app_settings: Settings,
+) -> None:
+    table_name = _unique_table("psi_nodes_live")
+    client = _connect(app_settings)
+    embedder = _DeterministicEmbedder()
+
+    try:
+        index = InfinityPsiNodeIndex(
+            client=client,
+            database=app_settings.infinity_database,
+            embedding_dimensions=_DIMS,
+            config=PsiNodeInfinityConfig(table_name=table_name, initial_recall_n=16),
+        )
+        index.upsert_nodes(
+            [
+                {
+                    "projection_row_id": "build-psi:psi-python",
+                    "psi_node_id": "psi-python",
+                    "build_id": "build-psi",
+                    "document_id": "psi-doc",
+                    "layer": 2,
+                    "node_type": "root",
+                    "abstract_type": "keyword",
+                    "source_chunk_ids_json": '["chunk-python"]',
+                    "embedding_text": "Python graph",
+                    "psi_node_label_kwd": "Python graph",
+                    "psi_node_label_tks": "python graph",
+                    "psi_keyword_tks": "python graph",
+                    "psi_summary_tks": "",
+                    "psi_leaf_text_tks": "",
+                    "text_tks": "python graph",
+                    "metadata_json": "{}",
+                    "vec": embedder.embed_query("Python graph"),
+                },
+                {
+                    "projection_row_id": "build-psi:psi-dataset",
+                    "psi_node_id": "psi-dataset",
+                    "build_id": "build-psi",
+                    "document_id": "psi-doc",
+                    "layer": 2,
+                    "node_type": "root",
+                    "abstract_type": "keyword",
+                    "source_chunk_ids_json": '["chunk-dataset"]',
+                    "embedding_text": "Dataset binding",
+                    "psi_node_label_kwd": "Dataset binding",
+                    "psi_node_label_tks": "dataset binding",
+                    "psi_keyword_tks": "dataset binding",
+                    "psi_summary_tks": "",
+                    "psi_leaf_text_tks": "",
+                    "text_tks": "dataset binding",
+                    "metadata_json": "{}",
+                    "vec": embedder.embed_query("Dataset binding"),
+                },
+            ]
+        )
+
+        assert index.get_projected_node_ids("build-psi", layer=2) == [
+            "psi-dataset",
+            "psi-python",
+        ]
+        first_build_hits = index.search_nodes(
+            sparse_query_text="Python graph",
+            query_vector=embedder.embed_query("Python graph"),
+            allowed_projection_row_ids=["build-psi:psi-python"],
+            top_k=2,
+        )
+        assert [hit.build_id for hit in first_build_hits] == ["build-psi"]
+
+        index.upsert_nodes(
+            [
+                {
+                    "projection_row_id": "build-psi-2:psi-python",
+                    "psi_node_id": "psi-python",
+                    "build_id": "build-psi-2",
+                    "document_id": "psi-doc-2",
+                    "layer": 1,
+                    "node_type": "internal",
+                    "abstract_type": "keyword",
+                    "source_chunk_ids_json": '["chunk-python-2"]',
+                    "embedding_text": "Python graph second build",
+                    "psi_node_label_kwd": "Python graph",
+                    "psi_node_label_tks": "python graph",
+                    "psi_keyword_tks": "python graph",
+                    "psi_summary_tks": "",
+                    "psi_leaf_text_tks": "",
+                    "text_tks": "python graph",
+                    "metadata_json": "{}",
+                    "vec": embedder.embed_query("Python graph second build"),
+                }
+            ]
+        )
+        second_build_hits = index.search_nodes(
+            sparse_query_text="Python graph",
+            query_vector=embedder.embed_query("Python graph"),
+            allowed_projection_row_ids=["build-psi-2:psi-python"],
+            top_k=2,
+        )
+        assert [hit.build_id for hit in second_build_hits] == ["build-psi-2"]
+
+        index.delete_build("build-psi")
+        assert index.get_projected_node_ids("build-psi") == []
+        assert index.get_projected_node_ids("build-psi-2") == ["psi-python"]
+
+        index.delete_document("psi-doc-2")
+        assert index.get_projected_node_ids("build-psi-2") == []
+    finally:
+        _drop_tables(client, app_settings.infinity_database, [table_name])
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+
+def test_live_psi_node_index_rejects_incompatible_existing_table(
+    app_settings: Settings,
+) -> None:
+    table_name = _unique_table("psi_nodes_legacy_live")
+    client = _connect(app_settings)
+    db = client.get_database(app_settings.infinity_database)
+
+    try:
+        db.create_table(
+            table_name,
+            {"psi_node_id": {"type": "varchar", "constraints": ["primary key"]}},
+            ConflictType.Ignore,
+        )
+        with pytest.raises(RuntimeError, match="missing required column"):
+            InfinityPsiNodeIndex(
+                client=client,
+                database=app_settings.infinity_database,
+                embedding_dimensions=_DIMS,
+                config=PsiNodeInfinityConfig(table_name=table_name),
+            )
+    finally:
+        _drop_tables(client, app_settings.infinity_database, [table_name])
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+
 def test_live_dense_index_writes_academic_sparse_fields(
     app_settings: Settings,
 ) -> None:
@@ -316,13 +462,13 @@ def test_live_dense_index_writes_academic_sparse_fields(
             },
         )
         index.index_document(asset, [chunk])
-        rows = list(
+        result = (
             index._db.get_table(index._chunk_table)
             .output(["paper_title_tks", "caption_tks", "element_type_kwd"])
             .to_arrow()
-            .to_pandas()
-            .itertuples(index=False)
         )
+        frame = result[0] if isinstance(result, tuple) else result
+        rows = list(frame.to_pandas().itertuples(index=False))
         assert any(row.paper_title_tks for row in rows), (
             "paper_title_tks should be populated"
         )

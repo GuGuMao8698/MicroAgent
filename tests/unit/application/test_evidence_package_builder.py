@@ -338,6 +338,31 @@ class TestEvidenceItemMetadata:
         assert item_meta == original_meta
         assert item_meta is not original_meta
 
+    def test_strips_internal_psi_metadata_from_items_and_package(self) -> None:
+        chunks = [
+            _chunk(
+                "c1",
+                metadata={
+                    "retrieval_source": "psi_top_down_auxiliary",
+                    "psi_node_id": "psi-node-1",
+                    "filename": "paper.pdf",
+                },
+            )
+        ]
+        result = _result(
+            chunks=chunks,
+            metadata={
+                "auxiliary_retrieval_statuses": [{"state": "success"}],
+                "retrieval_rewrite": {"status": "succeeded"},
+            },
+        )
+
+        package = EvidencePackageBuilder().build(result)
+
+        assert package.items[0].metadata == {"filename": "paper.pdf"}
+        assert "auxiliary_retrieval_statuses" not in package.metadata
+        assert package.metadata["retrieval_rewrite"] == {"status": "succeeded"}
+
 
 class TestSourceSelectionMetadata:
     def test_source_selection_metadata_copied_to_evidence_items_and_package(

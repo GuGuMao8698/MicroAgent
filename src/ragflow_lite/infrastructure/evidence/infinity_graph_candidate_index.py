@@ -38,6 +38,7 @@ from ragflow_lite.infrastructure.evidence.graph_candidate_fields import (
 
 _DDL_RETRY_ATTEMPTS = 5
 _DDL_RETRY_DELAY_SECONDS = 0.05
+_REQUIRED_PROJECTION_BUILD_COLUMNS = frozenset({"projection_build_id"})
 
 
 def _is_resource_busy(exc: InfinityException) -> bool:
@@ -118,6 +119,7 @@ RELATIONSHIP_OUTPUT_FIELDS = [
     "candidate_id",
     "canonical_id",
     "document_id",
+    "projection_build_id",
     "source_entity_id",
     "target_entity_id",
     "source_entity_name",
@@ -172,6 +174,12 @@ def _dense_knn_params(similarity_threshold: float) -> dict[str, str]:
     return {"threshold": str(similarity_threshold)}
 
 
+def _build_allowed_filter(allowed_build_ids: list[str]) -> str:
+    escaped_ids = [build_id.replace("'", "\\'") for build_id in allowed_build_ids]
+    values = ", ".join(f"'{build_id}'" for build_id in escaped_ids)
+    return f"projection_build_id IN ({values})"
+
+
 def _minimum_should_match_option(minimum_should_match: float) -> str:
     """Build Infinity fulltext option using the server's percent format."""
     return f"{int(minimum_should_match * 100)}%"
@@ -196,12 +204,15 @@ def _relationship_candidate_from_row(
     candidate_id = _string_field(row_dict, "candidate_id") or canonical_id
     score = _resolve_score(row_dict)
     metadata = _parse_json_object(row_dict.get("metadata"))
+    projection_build_id = _string_field(row_dict, "projection_build_id")
     metadata.update(
         {
             "retrieval_mode": "graph_candidate_infinity_hybrid",
             "candidate_kind": "relationship",
             "candidate_id": candidate_id,
             "canonical_id": canonical_id,
+            "raw_candidate_id": metadata.get("raw_candidate_id", candidate_id),
+            "projection_build_id": projection_build_id,
             "score": score,
             "fusion_method": "weighted_sum",
             "fusion_weights": {
@@ -260,6 +271,14 @@ class InfinityGraphCandidateIndex:
         self._config = config or GraphCandidateInfinityConfig()
         self._ensure_tables()
 
+    @property
+    def entity_table_name(self) -> str:
+        return self._config.entity_table
+
+    @property
+    def relationship_table_name(self) -> str:
+        return self._config.relationship_table
+
     # ------------------------------------------------------------------
     # 表管理
     # ------------------------------------------------------------------
@@ -272,6 +291,7 @@ class InfinityGraphCandidateIndex:
                 "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
                 "canonical_id": {"type": "varchar"},
                 "document_id": {"type": "varchar"},
+                "projection_build_id": {"type": "varchar"},
                 "candidate_kind": {"type": "varchar"},
                 "entity_name_kwd": {"type": "varchar"},
                 "entity_name_tks": {"type": "varchar"},
@@ -286,6 +306,7 @@ class InfinityGraphCandidateIndex:
                 "candidate_id": {"type": "varchar", "constraints": ["primary key"]},
                 "canonical_id": {"type": "varchar"},
                 "document_id": {"type": "varchar"},
+                "projection_build_id": {"type": "varchar"},
                 "candidate_kind": {"type": "varchar"},
                 "source_entity_id": {"type": "varchar"},
                 "target_entity_id": {"type": "varchar"},
@@ -314,6 +335,8 @@ class InfinityGraphCandidateIndex:
                 relationship_columns,
                 ConflictType.Ignore,
             )
+            self._validate_projection_build_columns(self._config.entity_table)
+            self._validate_projection_build_columns(self._config.relationship_table)
             self._ensure_fulltext_indexes(
                 self._config.entity_table,
                 [
@@ -333,6 +356,55 @@ class InfinityGraphCandidateIndex:
                 ],
             )
 
+    def _validate_projection_build_columns(self, table_name: str) -> None:
+        table = self._db.get_table(table_name)
+        column_names = self._column_names(table)
+        missing = _REQUIRED_PROJECTION_BUILD_COLUMNS - column_names
+        if not missing:
+            return
+        missing_list = ", ".join(sorted(missing))
+        raise RuntimeError(
+            f"Infinity graph candidate table '{table_name}' is missing required "
+            f"column(s): {missing_list}. Drop/recreate the table before starting "
+            "this build-scoped projection runtime."
+        )
+
+    def _column_names(self, table: Any) -> set[str]:
+        show_columns = getattr(table, "show_columns", None)
+        if not callable(show_columns):
+            raise RuntimeError(
+                "Infinity graph candidate compatibility check requires show_columns()"
+            )
+        rows = show_columns()
+        if rows is None:
+            return set()
+        if isinstance(rows, tuple):
+            rows = rows[0]
+        if isinstance(rows, dict):
+            rows = [rows]
+        iter_rows = getattr(rows, "iter_rows", None)
+        if callable(iter_rows):
+            names: set[str] = set()
+            for row in iter_rows(named=True):
+                if isinstance(row, dict):
+                    name = row.get("column_name") or row.get("name")
+                else:
+                    name = getattr(row, "column_name", None) or getattr(
+                        row, "name", None
+                    )
+                if name is not None:
+                    names.add(str(name))
+            return names
+        names: set[str] = set()
+        for row in rows:
+            if isinstance(row, dict):
+                name = row.get("column_name") or row.get("name")
+            else:
+                name = getattr(row, "column_name", None) or getattr(row, "name", None)
+            if name is not None:
+                names.add(str(name))
+        return names
+
     def _embedding_dimensions(self) -> int:
         signature = getattr(self._embedder, "signature", None)
         if isinstance(signature, dict):
@@ -351,38 +423,36 @@ class InfinityGraphCandidateIndex:
         )
 
     def _ensure_fulltext_indexes(self, table_name: str, columns: list[str]) -> None:
-        with self._lock:
-            table = self._db.get_table(table_name)
-            existing_indexes = self._list_index_names(table)
-            for column in columns:
-                index_name = f"{table_name}_{column}_fulltext_idx"
-                if index_name in existing_indexes:
-                    continue
-                self._retry_ddl(
-                    table.create_index,
-                    index_name,
-                    IndexInfo(column, IndexType.FullText),
-                    ConflictType.Ignore,
-                )
+        table = self._db.get_table(table_name)
+        existing_indexes = self._list_index_names(table)
+        for column in columns:
+            index_name = f"{table_name}_{column}_fulltext_idx"
+            if index_name in existing_indexes:
+                continue
+            self._retry_ddl(
+                table.create_index,
+                index_name,
+                IndexInfo(column, IndexType.FullText),
+                ConflictType.Ignore,
+            )
 
     def _list_index_names(self, table: Any) -> set[str]:
-        with self._lock:
-            list_indexes = getattr(table, "list_indexes", None)
-            if not callable(list_indexes):
-                return set()
+        list_indexes = getattr(table, "list_indexes", None)
+        if not callable(list_indexes):
+            return set()
 
-            response = list_indexes()
-            if response is None:
-                return set()
-            if isinstance(response, tuple):
-                response = response[0]
+        response = list_indexes()
+        if response is None:
+            return set()
+        if isinstance(response, tuple):
+            response = response[0]
 
-            names = getattr(response, "index_names", None)
-            if names is None and isinstance(response, dict):
-                names = response.get("index_names")
-            if names is None:
-                return set()
-            return {str(name) for name in names}
+        names = getattr(response, "index_names", None)
+        if names is None and isinstance(response, dict):
+            names = response.get("index_names")
+        if names is None:
+            return set()
+        return {str(name) for name in names}
 
     # ------------------------------------------------------------------
     # 实体查询
@@ -392,6 +462,7 @@ class InfinityGraphCandidateIndex:
         self,
         entity_texts: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniEntityCandidate]:
         """按每个查询实体文本独立查询，再按 canonical_id 合并。
 
@@ -403,6 +474,8 @@ class InfinityGraphCandidateIndex:
             合并后的候选实体列表，按分数降序排列
         """
         if not entity_texts:
+            return []
+        if allowed_build_ids == []:
             return []
 
         # 按 canonical_id 合并结果
@@ -417,7 +490,7 @@ class InfinityGraphCandidateIndex:
                 table = self._db.get_table(self._config.entity_table)
                 recall_n = self._config.graph_initial_recall_n
 
-                df, _extra = (
+                query_builder = (
                     table.match_text(
                         fields=",".join(ENTITY_MATCH_TEXT_FIELDS),
                         matching_text=entity_text,
@@ -446,19 +519,23 @@ class InfinityGraphCandidateIndex:
                             "normalize": self._config.fusion_normalize,
                         },
                     )
-                    .output(
-                        [
-                            "candidate_id",
-                            "canonical_id",
-                            "document_id",
-                            "entity_name_kwd",
-                            "source_chunk_ids",
-                            "metadata",
-                            "_score",
-                        ]
-                    )
-                    .to_pl()
                 )
+                if allowed_build_ids is not None:
+                    query_builder = query_builder.filter(
+                        _build_allowed_filter(allowed_build_ids)
+                    )
+                df, _extra = query_builder.output(
+                    [
+                        "candidate_id",
+                        "canonical_id",
+                        "document_id",
+                        "projection_build_id",
+                        "entity_name_kwd",
+                        "source_chunk_ids",
+                        "metadata",
+                        "_score",
+                    ]
+                ).to_pl()
 
             if df.is_empty():
                 continue
@@ -471,6 +548,8 @@ class InfinityGraphCandidateIndex:
 
                 score = _resolve_score(row_dict)
                 candidate_id = str(row_dict.get("candidate_id", canonical_id))
+                projection_build_id = str(row_dict.get("projection_build_id", ""))
+                row_metadata = _parse_json_object(row_dict.get("metadata"))
 
                 if canonical_id in merged:
                     existing = merged[canonical_id]
@@ -479,6 +558,8 @@ class InfinityGraphCandidateIndex:
                         existing["score"] = score
                         existing["best_row"] = row_dict
                         existing["matched_query_entity"] = entity_text
+                        existing["projection_build_id"] = projection_build_id
+                        existing["row_metadata"] = row_metadata
                     # 收集 member candidate IDs
                     existing["member_candidate_ids"].add(candidate_id)
                 else:
@@ -488,6 +569,8 @@ class InfinityGraphCandidateIndex:
                         "best_row": row_dict,
                         "member_candidate_ids": {candidate_id},
                         "matched_query_entity": entity_text,
+                        "projection_build_id": projection_build_id,
+                        "row_metadata": row_metadata,
                     }
 
         # 4. 转换为 MiniEntityCandidate 并按分数截断
@@ -504,6 +587,10 @@ class InfinityGraphCandidateIndex:
                 "candidate_kind": "entity",
                 "candidate_id": candidate_id,
                 "canonical_id": canonical_id,
+                "raw_candidate_id": entry["row_metadata"].get(
+                    "raw_candidate_id", candidate_id
+                ),
+                "projection_build_id": entry["projection_build_id"],
                 "score": score,
                 "fusion_method": "weighted_sum",
                 "fusion_weights": {
@@ -517,6 +604,7 @@ class InfinityGraphCandidateIndex:
                 "matched_query_entity": entry["matched_query_entity"],
                 "member_candidate_ids": sorted(entry["member_candidate_ids"]),
             }
+            merged_metadata.update(entry["row_metadata"])
 
             candidate = MiniEntityCandidate(
                 entity=EntityEvidence(
@@ -547,6 +635,7 @@ class InfinityGraphCandidateIndex:
         query: str,
         answer_type_keywords: list[str],
         top_k: int,
+        allowed_build_ids: list[str] | None = None,
     ) -> list[MiniRelationshipCandidate]:
         """查询关系候选，使用原始 query 做嵌入和文本匹配。
 
@@ -558,6 +647,8 @@ class InfinityGraphCandidateIndex:
         Returns:
             关系候选列表，按分数降序排列
         """
+        if allowed_build_ids == []:
+            return []
         # 1. 嵌入原始查询
         query_vector = self._embedder.embed_query(query)
 
@@ -572,7 +663,7 @@ class InfinityGraphCandidateIndex:
             table = self._db.get_table(self._config.relationship_table)
             recall_n = self._config.graph_initial_recall_n
 
-            df, _extra = (
+            query_builder = (
                 table.match_text(
                     fields=",".join(RELATIONSHIP_MATCH_TEXT_FIELDS),
                     matching_text=matching_text,
@@ -601,9 +692,12 @@ class InfinityGraphCandidateIndex:
                         "normalize": self._config.fusion_normalize,
                     },
                 )
-                .output(RELATIONSHIP_OUTPUT_FIELDS)
-                .to_pl()
             )
+            if allowed_build_ids is not None:
+                query_builder = query_builder.filter(
+                    _build_allowed_filter(allowed_build_ids)
+                )
+            df, _extra = query_builder.output(RELATIONSHIP_OUTPUT_FIELDS).to_pl()
 
         if df.is_empty():
             return []
@@ -629,34 +723,18 @@ class InfinityGraphCandidateIndex:
         Args:
             batch: 包含实体和关系的图证据批次
         """
-        # 构建并插入实体行
-        entity_rows = [
-            build_entity_candidate_row(
-                entity,
-                vector=self._embedder.embed_query(build_entity_embedding_text(entity)),
-            )
-            for entity in batch.entities
-        ]
-
-        # 构建并插入关系行
-        relationship_rows = [
-            build_relationship_candidate_row(
-                relation,
-                vector=self._embedder.embed_query(
-                    build_relationship_embedding_text(relation)
-                ),
-            )
-            for relation in batch.relations
-        ]
-
         with self._lock:
-            self.delete_document(batch.document_id)
-            if entity_rows:
-                self._get_table(self._config.entity_table).insert(entity_rows)
-            if relationship_rows:
-                self._get_table(self._config.relationship_table).insert(
-                    relationship_rows
-                )
+            self._delete_document_rows(batch.document_id)
+            self._insert_rows(batch.document_id, batch)
+
+    def upsert_build_evidence(self, build_id: str, batch: GraphEvidenceBatch) -> None:
+        with self._lock:
+            self._delete_build_rows(build_id)
+            self._insert_rows(build_id, batch)
+
+    def delete_build(self, build_id: str) -> None:
+        with self._lock:
+            self._delete_build_rows(build_id)
 
     def delete_document(self, document_id: str) -> None:
         """删除一个文档在两张表中的全部行。
@@ -665,16 +743,52 @@ class InfinityGraphCandidateIndex:
             document_id: 要删除的文档 ID
         """
         # 防止 SQL 注入：转义单引号
+        with self._lock:
+            self._delete_document_rows(document_id)
+
+    def _insert_rows(
+        self, projection_build_id: str, batch: GraphEvidenceBatch
+    ) -> None:
+        entity_rows = [
+            build_entity_candidate_row(
+                entity,
+                projection_build_id=projection_build_id,
+                vector=self._embedder.embed_query(build_entity_embedding_text(entity)),
+            )
+            for entity in batch.entities
+        ]
+        relationship_rows = [
+            build_relationship_candidate_row(
+                relation,
+                projection_build_id=projection_build_id,
+                vector=self._embedder.embed_query(
+                    build_relationship_embedding_text(relation)
+                ),
+            )
+            for relation in batch.relations
+        ]
+        if entity_rows:
+            self._get_table(self._config.entity_table).insert(entity_rows)
+        if relationship_rows:
+            self._get_table(self._config.relationship_table).insert(
+                relationship_rows
+            )
+
+    def _delete_document_rows(self, document_id: str) -> None:
         escaped = document_id.replace("'", "\\'")
         filter_expr = f"document_id = '{escaped}'"
-        with self._lock:
-            self._get_table(self._config.entity_table).delete(filter_expr)
-            self._get_table(self._config.relationship_table).delete(filter_expr)
+        self._get_table(self._config.entity_table).delete(filter_expr)
+        self._get_table(self._config.relationship_table).delete(filter_expr)
+
+    def _delete_build_rows(self, build_id: str) -> None:
+        escaped = build_id.replace("'", "\\'")
+        filter_expr = f"projection_build_id = '{escaped}'"
+        self._get_table(self._config.entity_table).delete(filter_expr)
+        self._get_table(self._config.relationship_table).delete(filter_expr)
 
     def _get_table(self, name: str) -> Any:
         """按名称获取 Infinity 表对象。"""
-        with self._lock:
-            return self._db.get_table(name)
+        return self._db.get_table(name)
 
     @staticmethod
     def _retry_ddl(operation: Any, *args: Any) -> Any:

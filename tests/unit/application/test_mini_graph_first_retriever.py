@@ -4,20 +4,25 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from ragflow_lite.application.services import mini_graph_first_retriever as mgfr_module
 from ragflow_lite.application.services.evidence_package_builder import (
     EvidencePackageBuilder,
 )
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     CoTGroundingResult,
     EntityEvidence,
     GraphFirstSource,
     GraphFirstSourceSelection,
+    GroundedAuxiliaryQuery,
+    GroundedAuxiliaryResult,
     GroundedQuery,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
+    PsiRetrievalStatus,
     RelationEvidence,
     RetrievedChunk,
     SourceChunkSupport,
@@ -97,6 +102,39 @@ class RecordingRelationshipIndex:
 
 
 @dataclass
+class AllowedBuildRecordingEntityIndex:
+    calls: list[tuple[list[str], int, list[str] | None]] = field(default_factory=list)
+
+    def query_entities(
+        self,
+        entity_texts: list[str],
+        top_k: int,
+        allowed_build_ids: list[str] | None = None,
+    ) -> list[MiniEntityCandidate]:
+        self.calls.append((entity_texts, top_k, allowed_build_ids))
+        return []
+
+
+@dataclass
+class AllowedBuildRecordingRelationshipIndex:
+    calls: list[tuple[str, tuple[str, ...], int, list[str] | None]] = field(
+        default_factory=list
+    )
+
+    def query_relationships(
+        self,
+        query: str,
+        answer_type_keywords: list[str],
+        top_k: int,
+        allowed_build_ids: list[str] | None = None,
+    ) -> list[MiniRelationshipCandidate]:
+        self.calls.append(
+            (query, tuple(answer_type_keywords), top_k, allowed_build_ids)
+        )
+        return []
+
+
+@dataclass
 class RecordingPathExpander:
     calls: list[tuple[tuple[str, ...], tuple[str, ...], int]] = field(
         default_factory=list
@@ -155,6 +193,45 @@ class RecordingAuxiliaryRetriever:
                 metadata={},
             )
         ]
+
+
+class RecordingGroundedAuxiliaryRetriever:
+    def __init__(
+        self,
+        chunks_by_pass: dict[str, list[str]] | None = None,
+    ) -> None:
+        self.requests: list[GroundedAuxiliaryQuery] = []
+        self.chunks_by_pass = chunks_by_pass or {"initial": ["chunk_b"]}
+
+    def retrieve_grounded(
+        self,
+        request: GroundedAuxiliaryQuery,
+        top_k: int,
+    ) -> GroundedAuxiliaryResult:
+        self.requests.append(request)
+        chunks = [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                document_id="doc1",
+                text=f"auxiliary {chunk_id}",
+                score=1.0,
+                metadata={},
+            )
+            for chunk_id in self.chunks_by_pass.get(request.retrieval_pass_id, [])[
+                :top_k
+            ]
+        ]
+        return GroundedAuxiliaryResult(
+            chunks=chunks,
+            status=PsiRetrievalStatus(
+                retrieval_pass_id=request.retrieval_pass_id,
+                rewrite_source=request.rewrite_source,
+                state="success",
+                stop_reason="leaf_reached",
+                fallback_source="none",
+                returned_chunk_count=len(chunks),
+            ),
+        )
 
 
 class ManyAuxiliaryRetriever:
@@ -266,6 +343,166 @@ def test_mini_graph_first_retriever_without_rewriter_keeps_existing_metadata() -
     assert [chunk.chunk_id for chunk in result.chunks] == ["chunk_a", "chunk_b"]
 
 
+def test_structured_auxiliary_receives_grounded_initial_pass_request() -> None:
+    grounded_auxiliary = RecordingGroundedAuxiliaryRetriever()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        grounded_auxiliary_retriever=grounded_auxiliary,
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=3)
+
+    assert len(grounded_auxiliary.requests) == 1
+    request = grounded_auxiliary.requests[0]
+    assert request.retrieval_pass_id == "initial"
+    assert request.rewrite_source == "original"
+    assert request.query_text == "How does MiniRAG work?"
+    assert request.entities_from_query == ["MiniRAG"]
+    assert request.answer_type_keywords == ["mechanism"]
+    assert result.metadata["auxiliary_retrieval_statuses"][0]["state"] == "success"
+
+
+def test_no_path_candidate_bypasses_only_experimental_positional_boost() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_b"],
+        score=1.0,
+        metadata={"no_path_candidate": True},
+    )
+
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_a", "chunk_b"},
+            policy="psi_positional_5_2_10_experimental",
+        )
+        == 1.0
+    )
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_a"},
+            policy=mgfr_module._SCORING_POLICY,
+        )
+        == 10.0
+    )
+
+
+def test_default_scoring_policy_remains_current_first_chunk_10x() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_b"],
+        score=1.0,
+    )
+
+    assert mgfr_module._SCORING_POLICY == "minirag_counter_parity"
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_a"},
+            policy=mgfr_module._SCORING_POLICY,
+        )
+        == 10.0
+    )
+
+
+def test_positional_policy_uses_first_two_distinct_source_chunk_ids() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_a", "chunk_b", "chunk_c"],
+        score=1.0,
+    )
+
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_b"},
+            policy="psi_positional_5_2_10_experimental",
+        )
+        == 2.0
+    )
+
+
+def test_no_positional_boost_policy_never_amplifies_path() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_b"],
+        score=1.0,
+    )
+
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_a", "chunk_b"},
+            policy="no_positional_psi_boost",
+        )
+        == 1.0
+    )
+
+
+def test_retriever_rejects_unknown_auxiliary_scoring_policy() -> None:
+    with pytest.raises(ProcessingError, match="auxiliary_scoring_policy"):
+        MiniGraphFirstRetriever(
+            query_grounder=RecordingGrounder(),
+            entity_index=RecordingEntityIndex(),
+            relationship_index=RecordingRelationshipIndex(),
+            path_expander=RecordingPathExpander(),
+            chunk_lookup=RecordingChunkLookup(),
+            auxiliary_scoring_policy="unknown",
+        )
+
+
+def test_configured_no_boost_policy_is_used_for_scoring_and_metadata() -> None:
+    class FirstSourceAuxiliaryRetriever:
+        def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
+            return [
+                RetrievedChunk(
+                    chunk_id="chunk_a",
+                    document_id="doc1",
+                    text="first source auxiliary hit",
+                    score=1.0,
+                )
+            ]
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=FirstSourceAuxiliaryRetriever(),
+        auxiliary_scoring_policy="no_positional_psi_boost",
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=2)
+
+    assert result.metadata["source_selection"]["scoring_policy"] == (
+        "no_positional_psi_boost"
+    )
+    assert (
+        result.chunks[0].metadata["source_score_components"][
+            "auxiliary_path_multiplier"
+        ]
+        == 1.0
+    )
+
+
 def test_mini_graph_first_retriever_grounds_before_auxiliary_chunk_retrieval() -> None:
     grounder = RecordingGrounder()
     entity_index = RecordingEntityIndex()
@@ -304,6 +541,33 @@ def test_mini_graph_first_retriever_grounds_before_auxiliary_chunk_retrieval() -
     assert result.chunks[0].metadata["supporting_path_ids"] == ["path_1"]
     # chunk_b 是辅助检索命中的 chunk，现在排在第二位
     assert result.chunks[1].metadata["auxiliary_chunk_hit"] is True
+
+
+def test_mini_graph_first_retriever_forwards_allowed_build_ids_when_configured() -> (
+    None
+):
+    entity_index = AllowedBuildRecordingEntityIndex()
+    relationship_index = AllowedBuildRecordingRelationshipIndex()
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=entity_index,
+        relationship_index=relationship_index,
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        allowed_build_ids=["build-active"],
+    )
+
+    retriever.retrieve_context("How does MiniRAG recover sources?", top_k=2)
+
+    assert entity_index.calls == [(["MiniRAG"], 60, ["build-active"])]
+    assert relationship_index.calls == [
+        (
+            "How does MiniRAG recover sources?",
+            ("mechanism",),
+            60,
+            ["build-active"],
+        )
+    ]
 
 
 def test_source_chunk_with_more_minirag_counter_support_ranks_first() -> None:
@@ -1630,6 +1894,103 @@ class EmptyStepsCoTRewriter:
         )
 
 
+def test_successful_rewrite_runs_structured_auxiliary_independently_per_pass() -> None:
+    @dataclass
+    class PassAwareGrounder:
+        def ground(self, query: str) -> GroundedQuery:
+            enriched = "Solution steps:" in query
+            return GroundedQuery(
+                query=query,
+                answer_type_keywords=["relation" if enriched else "mechanism"],
+                entities_from_query=["EnrichedMiniRAG" if enriched else "MiniRAG"],
+            )
+
+    @dataclass
+    class PassAwareEntityIndex:
+        def query_entities(
+            self,
+            entity_texts: list[str],
+            top_k: int,
+            allowed_build_ids: list[str] | None = None,
+        ) -> list[MiniEntityCandidate]:
+            enriched = entity_texts == ["EnrichedMiniRAG"]
+            suffix = "enriched" if enriched else "initial"
+            return [
+                MiniEntityCandidate(
+                    entity=EntityEvidence(
+                        entity_id=f"entity_{suffix}",
+                        document_id="doc1",
+                        name=entity_texts[0],
+                        entity_type="concept",
+                        description="pass-specific evidence",
+                        source_chunk_ids=[f"chunk_{suffix}"],
+                    ),
+                    score=1.0,
+                    matched_terms=list(entity_texts),
+                )
+            ]
+
+    @dataclass
+    class EmptyRelationshipIndex:
+        def query_relationships(
+            self,
+            query: str,
+            answer_type_keywords: list[str],
+            top_k: int,
+            allowed_build_ids: list[str] | None = None,
+        ) -> list[MiniRelationshipCandidate]:
+            return []
+
+    @dataclass
+    class EmptyPathExpander:
+        def expand_paths(
+            self,
+            seed_entity_ids: list[str],
+            seed_relation_ids: list[str],
+            max_hops: int,
+        ) -> list[TopologyPath]:
+            return []
+
+    grounded_auxiliary = RecordingGroundedAuxiliaryRetriever(
+        chunks_by_pass={
+            "initial": ["chunk_initial"],
+            "enriched": ["chunk_enriched"],
+        }
+    )
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=PassAwareGrounder(),
+        entity_index=PassAwareEntityIndex(),
+        relationship_index=EmptyRelationshipIndex(),
+        path_expander=EmptyPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        grounded_auxiliary_retriever=grounded_auxiliary,
+        cot_grounding_rewriter=SuccessfulCoTRewriter(),
+    )
+
+    result = retriever.retrieve_context("ambiguous question", top_k=3)
+
+    assert [request.retrieval_pass_id for request in grounded_auxiliary.requests] == [
+        "initial",
+        "enriched",
+    ]
+    assert [request.rewrite_source for request in grounded_auxiliary.requests] == [
+        "original",
+        "enriched",
+    ]
+    statuses = result.metadata["auxiliary_retrieval_statuses"]
+    assert [status["retrieval_pass_id"] for status in statuses] == [
+        "initial",
+        "enriched",
+    ]
+    by_chunk = {chunk.chunk_id: chunk for chunk in result.chunks}
+    assert by_chunk["chunk_initial"].metadata["retrieval_rewrite_sources"] == [
+        "initial"
+    ]
+    assert by_chunk["chunk_enriched"].metadata["retrieval_rewrite_sources"] == [
+        "enriched"
+    ]
+
+
 def test_successful_rewrite_uses_original_query_and_solution_steps_for_enriched_pass() -> (
     None
 ):
@@ -1863,6 +2224,8 @@ def test_successful_rewrite_rebuilds_selection_metadata_for_merged_chunks() -> N
             auxiliary_query: str,
             top_k: int,
             discourse_selection_n: int,
+            retrieval_pass_id: str,
+            rewrite_source: str,
         ) -> TopologyRetrievalResult:
             return self.scripted_results.pop(0)
 
@@ -2138,6 +2501,8 @@ def test_successful_rewrite_preserves_topology_provenance_and_unions_support() -
             auxiliary_query: str,
             top_k: int,
             discourse_selection_n: int,
+            retrieval_pass_id: str,
+            rewrite_source: str,
         ) -> TopologyRetrievalResult:
             return self.scripted_results.pop(0)
 

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import asdict
+from typing import Literal
 
+from ragflow_lite.application.services.grounded_auxiliary_query import (
+    build_grounded_auxiliary_query,
+)
 from ragflow_lite.application.services.retrieval_rewrite import (
     assess_post_rewrite,
     build_enriched_grounding_input,
@@ -15,9 +20,12 @@ from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     GraphFirstSource,
     GraphFirstSourceSelection,
+    GroundedAuxiliaryQuery,
+    GroundedAuxiliaryResult,
     GroundedQuery,
     MiniEntityCandidate,
     MiniRelationshipCandidate,
+    PsiRetrievalStatus,
     RetrievedChunk,
     SourceChunkSupport,
     TopologyPath,
@@ -27,6 +35,7 @@ from ragflow_lite.domain.ports.interfaces import (
     ChunkLookup,
     CoTGroundingRewriter,
     EntityNameIndex,
+    GroundedAuxiliaryRetriever,
     QueryGrounder,
     ReasoningPathExpander,
     RelationshipIndex,
@@ -54,6 +63,7 @@ class MiniGraphFirstRetriever:
         path_expander: ReasoningPathExpander,
         chunk_lookup: ChunkLookup,
         chunk_auxiliary_retriever: Retriever | None = None,
+        grounded_auxiliary_retriever: GroundedAuxiliaryRetriever | None = None,
         cot_grounding_rewriter: CoTGroundingRewriter | None = None,
         mini_internal_candidate_n: int = 60,
         query_entity_limit: int = 5,
@@ -62,6 +72,8 @@ class MiniGraphFirstRetriever:
         chunk_auxiliary_candidate_n: int | None = None,
         discourse_selection_n: int | None = None,
         context_token_budget: int | None = None,
+        allowed_build_ids: list[str] | None = None,
+        auxiliary_scoring_policy: str = "minirag_counter_parity",
         # ── 向后兼容别名（旧参数名） ──
         grounded_entity_k: int | None = None,
         chunk_auxiliary_retrieval_k: int | None = None,
@@ -84,6 +96,10 @@ class MiniGraphFirstRetriever:
             raise ProcessingError("discourse_selection_n must be >= 1 when provided")
         if context_token_budget is not None and context_token_budget < 1:
             raise ProcessingError("context_token_budget must be >= 1 when provided")
+        if auxiliary_scoring_policy not in _SUPPORTED_SCORING_POLICIES:
+            raise ProcessingError(
+                f"unsupported auxiliary_scoring_policy: {auxiliary_scoring_policy!r}"
+            )
 
         self.query_grounder = query_grounder
         self.entity_index = entity_index
@@ -91,6 +107,7 @@ class MiniGraphFirstRetriever:
         self.path_expander = path_expander
         self.chunk_lookup = chunk_lookup
         self.chunk_auxiliary_retriever = chunk_auxiliary_retriever
+        self.grounded_auxiliary_retriever = grounded_auxiliary_retriever
         self.cot_grounding_rewriter = cot_grounding_rewriter
         # MiniRAG mini-mode 预算参数
         self.mini_internal_candidate_n = mini_internal_candidate_n
@@ -101,6 +118,10 @@ class MiniGraphFirstRetriever:
         # discourse_selection_n 为 None 时默认等于 answer_top_n * 2（在 retrieve_context 中推导）
         self.discourse_selection_n = discourse_selection_n
         self.context_token_budget = context_token_budget
+        self.allowed_build_ids = (
+            list(allowed_build_ids) if allowed_build_ids is not None else None
+        )
+        self.auxiliary_scoring_policy = auxiliary_scoring_policy
         # 保留旧属性名作为只读别名，避免下游引用立即断裂
         self.grounded_entity_k = self.mini_internal_candidate_n
         self.relationship_candidate_k = self.mini_internal_candidate_n
@@ -133,6 +154,8 @@ class MiniGraphFirstRetriever:
             auxiliary_query=query,
             top_k=answer_top_n,
             discourse_selection_n=discourse_selection_n,
+            retrieval_pass_id="initial",
+            rewrite_source="original",
         )
         if self.cot_grounding_rewriter is None:
             return initial_result
@@ -212,6 +235,8 @@ class MiniGraphFirstRetriever:
             auxiliary_query=enriched_query,
             top_k=answer_top_n,
             discourse_selection_n=discourse_selection_n,
+            retrieval_pass_id="enriched",
+            rewrite_source="enriched",
         )
         merged_chunks = merge_retrieval_results(
             initial=initial_result,
@@ -253,6 +278,10 @@ class MiniGraphFirstRetriever:
             source_selection=merged_selection,
             metadata={
                 **dict(enriched_result.metadata),
+                "auxiliary_retrieval_statuses": [
+                    *initial_result.metadata.get("auxiliary_retrieval_statuses", []),
+                    *enriched_result.metadata.get("auxiliary_retrieval_statuses", []),
+                ],
                 "source_selection": self._source_selection_summary(merged_selection),
                 "supplemental_discourse_chunks": merged_supplemental_chunks,
             },
@@ -338,7 +367,9 @@ class MiniGraphFirstRetriever:
                 selected_for_discourse=True,
             )
             rebuilt_sources.append(rebuilt_source)
-            rebuilt_chunks.append(_with_source_selection_metadata(chunk, rebuilt_source))
+            rebuilt_chunks.append(
+                _with_source_selection_metadata(chunk, rebuilt_source)
+            )
 
         effective_discourse_limit = max(discourse_selection_k, len(rebuilt_chunks))
         supplemental_slots = max(0, effective_discourse_limit - len(rebuilt_chunks))
@@ -371,10 +402,18 @@ class MiniGraphFirstRetriever:
         auxiliary_query: str,
         top_k: int,
         discourse_selection_n: int,
+        retrieval_pass_id: str,
+        rewrite_source: Literal["original", "enriched"],
     ) -> TopologyRetrievalResult:
         """单次检索通路：grounding -> 图索引 -> 路径扩展 -> 辅助 chunk -> 评分 -> 合并。"""
         # 第 1 步: query grounding —— 提取实体与回答类型关键词
         grounded_query = self.query_grounder.ground(grounding_query)
+        auxiliary_request = build_grounded_auxiliary_query(
+            query_text=auxiliary_query,
+            grounded_query=grounded_query,
+            retrieval_pass_id=retrieval_pass_id,
+            rewrite_source=rewrite_source,
+        )
 
         # 如果 grounding 结果为空（既无实体也无关键词），直接走辅助检索兜底
         if (
@@ -387,6 +426,7 @@ class MiniGraphFirstRetriever:
                 top_k,
                 discourse_selection_n,
                 auxiliary_query=auxiliary_query,
+                auxiliary_request=auxiliary_request,
             )
 
         # 第 2 步: 实体截断与预算推导
@@ -401,15 +441,28 @@ class MiniGraphFirstRetriever:
         )
 
         # 第 3 步: 图索引查询 —— 实体名称索引 + 关系索引
-        entity_candidates = self.entity_index.query_entities(
-            query_entities,
-            top_k=entity_candidate_n,
-        )
-        relationship_candidates = self.relationship_index.query_relationships(
-            grounding_query,
-            grounded_query.answer_type_keywords,
-            top_k=relationship_candidate_n,
-        )
+        if self.allowed_build_ids is None:
+            entity_candidates = self.entity_index.query_entities(
+                query_entities,
+                top_k=entity_candidate_n,
+            )
+            relationship_candidates = self.relationship_index.query_relationships(
+                grounding_query,
+                grounded_query.answer_type_keywords,
+                top_k=relationship_candidate_n,
+            )
+        else:
+            entity_candidates = self.entity_index.query_entities(
+                query_entities,
+                top_k=entity_candidate_n,
+                allowed_build_ids=self.allowed_build_ids,
+            )
+            relationship_candidates = self.relationship_index.query_relationships(
+                grounding_query,
+                grounded_query.answer_type_keywords,
+                top_k=relationship_candidate_n,
+                allowed_build_ids=self.allowed_build_ids,
+            )
 
         # 第 4 步: 路径扩展 —— 从种子实体/关系出发扩展拓扑路径，再补充无路径候选
         relation_paths = self.path_expander.expand_paths(
@@ -424,7 +477,8 @@ class MiniGraphFirstRetriever:
         )[: self.path_candidate_k]
 
         # 第 5 步: chunk 辅助检索（可选）—— 作为评分加成与兜底
-        auxiliary_chunks = self._retrieve_auxiliary_chunks(auxiliary_query, top_k)
+        auxiliary_result = self._retrieve_auxiliary_chunks(auxiliary_request, top_k)
+        auxiliary_chunks = auxiliary_result.chunks
 
         # 第 6 步: 源 chunk 评分与排序
         supports = _score_source_chunks(
@@ -432,6 +486,7 @@ class MiniGraphFirstRetriever:
             relationship_candidates=relationship_candidates,
             paths=paths,
             auxiliary_chunks=auxiliary_chunks,
+            scoring_policy=self.auxiliary_scoring_policy,
         )
 
         # 第 7 步: 构建 source selection —— 将评分结果转为带选择决策的结构
@@ -468,6 +523,7 @@ class MiniGraphFirstRetriever:
                 "retrieval_mode": "mini_graph_first",
                 "source_selection": self._source_selection_summary(selection),
                 "supplemental_discourse_chunks": supplemental_chunks,
+                "auxiliary_retrieval_statuses": [asdict(auxiliary_result.status)],
             },
             source_selection=selection,
         )
@@ -479,11 +535,17 @@ class MiniGraphFirstRetriever:
         top_k: int,
         discourse_selection_n: int | None = None,
         auxiliary_query: str | None = None,
+        auxiliary_request: GroundedAuxiliaryQuery | None = None,
     ) -> TopologyRetrievalResult:
         """grounding 为空时的兜底路径：仅依赖辅助检索。"""
-        auxiliary_chunks = self._retrieve_auxiliary_chunks(
-            auxiliary_query or original_query, top_k
+        request = auxiliary_request or build_grounded_auxiliary_query(
+            query_text=auxiliary_query or original_query,
+            grounded_query=grounded_query,
+            retrieval_pass_id="initial",
+            rewrite_source="original",
         )
+        auxiliary_result = self._retrieve_auxiliary_chunks(request, top_k)
+        auxiliary_chunks = auxiliary_result.chunks
         # 将辅助检索 chunk 转为 SourceChunkSupport 以复用 selection 构建
         supports = [
             SourceChunkSupport(
@@ -524,6 +586,7 @@ class MiniGraphFirstRetriever:
                 "retrieval_mode": "mini_graph_first",
                 "source_selection": self._source_selection_summary(selection),
                 "supplemental_discourse_chunks": supplemental_chunks,
+                "auxiliary_retrieval_statuses": [asdict(auxiliary_result.status)],
             },
             source_selection=selection,
         )
@@ -587,13 +650,40 @@ class MiniGraphFirstRetriever:
 
     def _retrieve_auxiliary_chunks(
         self,
-        query: str,
+        request: GroundedAuxiliaryQuery,
         top_k: int,
-    ) -> list[RetrievedChunk]:
-        """调用辅助 chunk 检索器（纯向量/全文），未配置时返回空列表。"""
-        if self.chunk_auxiliary_retriever is None:
-            return []
-        return self.chunk_auxiliary_retriever.retrieve(query, self._auxiliary_k(top_k))
+    ) -> GroundedAuxiliaryResult:
+        """调用 structured auxiliary；legacy 分支始终报告显式 fallback。"""
+        auxiliary_k = self._auxiliary_k(top_k)
+        if self.grounded_auxiliary_retriever is not None:
+            return self.grounded_auxiliary_retriever.retrieve_grounded(
+                request, auxiliary_k
+            )
+        if self.chunk_auxiliary_retriever is not None:
+            chunks = self.chunk_auxiliary_retriever.retrieve(
+                request.query_text, auxiliary_k
+            )
+            return GroundedAuxiliaryResult(
+                chunks=chunks,
+                status=PsiRetrievalStatus(
+                    retrieval_pass_id=request.retrieval_pass_id,
+                    rewrite_source=request.rewrite_source,
+                    state="fallback",
+                    stop_reason="legacy_auxiliary_used",
+                    fallback_source="legacy_string_retriever",
+                    returned_chunk_count=len(chunks),
+                ),
+            )
+        return GroundedAuxiliaryResult(
+            chunks=[],
+            status=PsiRetrievalStatus(
+                retrieval_pass_id=request.retrieval_pass_id,
+                rewrite_source=request.rewrite_source,
+                state="skipped",
+                stop_reason="no_auxiliary_available",
+                fallback_source="none",
+            ),
+        )
 
     def _auxiliary_k(self, top_k: int) -> int:
         """辅助检索的 top_k：优先使用显式配置，否则按 mini_internal_candidate_n / 2 推导。"""
@@ -677,7 +767,7 @@ class MiniGraphFirstRetriever:
     ) -> dict[str, object]:
         """将 source selection 转为 metadata 中的摘要字典。"""
         return {
-            "scoring_policy": _SCORING_POLICY,
+            "scoring_policy": self.auxiliary_scoring_policy,
             "final_context_k": selection.final_context_k,
             "discourse_selection_k": selection.discourse_selection_k,
             "context_token_budget": selection.context_token_budget,
@@ -705,6 +795,13 @@ class MiniGraphFirstRetriever:
 # MiniRAG mini-mode 评分对齐常量
 # ---------------------------------------------------------------------------
 _SCORING_POLICY = "minirag_counter_parity"
+_SUPPORTED_SCORING_POLICIES = frozenset(
+    {
+        _SCORING_POLICY,
+        "psi_positional_5_2_10_experimental",
+        "no_positional_psi_boost",
+    }
+)
 _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER = 2
 _MINIRAG_FIRST_CANDIDATE_MULTIPLIER = 2.0
 _MINIRAG_AUXILIARY_PATH_MULTIPLIER = 10.0
@@ -752,6 +849,47 @@ def _path_chunk_weight(answer_hit_count: int, edge_vote_count: int) -> float:
         + float(edge_vote_count)
         + _MINIRAG_PATH2CHUNK_BASE_BONUS
     )
+
+
+def _positional_psi_multiplier(
+    path: TopologyPath,
+    auxiliary_hit_ids: set[str],
+) -> float:
+    distinct_chunk_ids = list(dict.fromkeys(path.source_chunk_ids))[:2]
+    if not distinct_chunk_ids:
+        return 1.0
+    first_hit = distinct_chunk_ids[0] in auxiliary_hit_ids
+    if len(distinct_chunk_ids) == 1:
+        return 5.0 if first_hit else 1.0
+    second_hit = distinct_chunk_ids[1] in auxiliary_hit_ids
+    if first_hit and second_hit:
+        return 10.0
+    if first_hit:
+        return 5.0
+    if second_hit:
+        return 2.0
+    return 1.0
+
+
+def _auxiliary_path_multiplier(
+    path: TopologyPath,
+    auxiliary_hit_ids: set[str],
+    *,
+    policy: str,
+) -> float:
+    if not path.source_chunk_ids:
+        return 1.0
+    if policy == "minirag_counter_parity":
+        return (
+            _MINIRAG_AUXILIARY_PATH_MULTIPLIER
+            if path.source_chunk_ids[0] in auxiliary_hit_ids
+            else 1.0
+        )
+    if policy == "psi_positional_5_2_10_experimental":
+        if bool(path.metadata.get("no_path_candidate")):
+            return 1.0
+        return _positional_psi_multiplier(path, auxiliary_hit_ids)
+    return 1.0
 
 
 def _path_candidate_rank(path: TopologyPath) -> int | None:
@@ -879,12 +1017,13 @@ def _score_source_chunks(
     relationship_candidates: list[MiniRelationshipCandidate],
     paths: list[TopologyPath],
     auxiliary_chunks: list[RetrievedChunk],
+    scoring_policy: str = _SCORING_POLICY,
 ) -> list[SourceChunkSupport]:
     """使用 MiniRAG mini-mode Counter/vote 语义对源 chunk 评分。"""
     auxiliary_hit_ids = {chunk.chunk_id for chunk in auxiliary_chunks}
 
     # Counter 聚合：chunk_id -> 累计得分
-    chunk_counter: Counter[str] = Counter()
+    chunk_counter: defaultdict[str, float] = defaultdict(float)
     # 每个 chunk 的评分组件明细
     chunk_components: dict[str, dict[str, float]] = defaultdict(
         lambda: {
@@ -910,13 +1049,12 @@ def _score_source_chunks(
         edge_vote_count = _edge_vote_count(path, relationship_candidates)
         path_weight = _path_chunk_weight(answer_hit_count, edge_vote_count)
         candidate_multiplier = _first_candidate_multiplier(path)
-        first_chunk_id = path.source_chunk_ids[0]
         path_chunk_counts = Counter(path.source_chunk_ids)
         # 如果路径的首 chunk 命中辅助检索，整条路径获得 10x 放大
-        path_auxiliary_multiplier = (
-            _MINIRAG_AUXILIARY_PATH_MULTIPLIER
-            if first_chunk_id in auxiliary_hit_ids
-            else 1.0
+        path_auxiliary_multiplier = _auxiliary_path_multiplier(
+            path,
+            auxiliary_hit_ids,
+            policy=scoring_policy,
         )
 
         for chunk_id, count in path_chunk_counts.items():
@@ -976,7 +1114,7 @@ def _score_source_chunks(
                 ),
                 supporting_path_ids=_dedupe(supporting_path_ids.get(chunk_id, [])),
                 auxiliary_chunk_hit=chunk_id in auxiliary_hit_ids,
-                metadata={"scoring_policy": _SCORING_POLICY},
+                metadata={"scoring_policy": scoring_policy},
             )
         )
 
@@ -1123,9 +1261,7 @@ def _merged_chunk_selection_reason(
         )
     value = chunk.metadata.get("selection_reason")
     if isinstance(value, str) and value:
-        reasons.extend(
-            reason.strip() for reason in value.split("+") if reason.strip()
-        )
+        reasons.extend(reason.strip() for reason in value.split("+") if reason.strip())
     if reasons:
         return "+".join(_dedupe(reasons))
     return "retrieval_rewrite_merged_context"

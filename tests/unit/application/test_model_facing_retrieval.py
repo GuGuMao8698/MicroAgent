@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from ragflow_lite.application.services.metadata_sanitizer import (
+    INTERNAL_METADATA_KEYS,
+    INTERNAL_RETRIEVAL_METADATA_KEYS,
+    sanitize_chunk_metadata,
+    strip_internal_retrieval_metadata,
+)
 from ragflow_lite.application.services.model_facing_retrieval import (
     blueprint_payload,
     context_payload,
@@ -186,12 +192,6 @@ def test_blueprint_payload_deep_copies_mutable_fields() -> None:
     assert blueprint.ordered_chunk_ids == ["c1", "c3", "c2"]
 
 
-from ragflow_lite.application.services.metadata_sanitizer import (
-    INTERNAL_METADATA_KEYS,
-    sanitize_chunk_metadata,
-)
-
-
 def test_sanitize_chunk_metadata_strips_internal_pdf_fields() -> None:
     metadata = {
         "paper_title": "Paper",
@@ -229,3 +229,23 @@ def test_context_payload_uses_metadata_sanitizer() -> None:
     payload = context_payload(chunk)
 
     assert payload["metadata"] == {"caption": "safe"}
+
+
+def test_strip_internal_retrieval_metadata_preserves_non_internal_fields() -> None:
+    metadata = {
+        "retrieval_source": "psi_top_down_auxiliary",
+        "psi_node_id": "psi-node-1",
+        "psi_retrieval_status": {"state": "success"},
+        "auxiliary_retrieval_statuses": [{"state": "success"}],
+        "filename": "paper.pdf",
+        "source_score_components": {"path": 1.0},
+    }
+
+    sanitized = strip_internal_retrieval_metadata(metadata)
+
+    assert sanitized == {
+        "filename": "paper.pdf",
+        "source_score_components": {"path": 1.0},
+    }
+    assert "retrieval_source" in INTERNAL_RETRIEVAL_METADATA_KEYS
+    assert "psi_node_id" in INTERNAL_METADATA_KEYS
