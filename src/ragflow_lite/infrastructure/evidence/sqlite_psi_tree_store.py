@@ -179,6 +179,19 @@ class SqlitePsiTreeStore:
             ).fetchall()
         return [_node_from_row(row) for row in rows]
 
+    def get_node_ids(self, build_id: str, *, layer: int) -> list[str]:
+        with self._registry.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT node_id
+                FROM psi_tree_nodes
+                WHERE build_id = ? AND layer = ?
+                ORDER BY node_id ASC
+                """,
+                (build_id, layer),
+            ).fetchall()
+        return [str(row["node_id"]) for row in rows]
+
     def get_children(self, build_id: str, parent_node_id: str) -> list[PsiTreeEdge]:
         with self._registry.connect() as conn:
             rows = conn.execute(
@@ -192,6 +205,11 @@ class SqlitePsiTreeStore:
                 (build_id, parent_node_id),
             ).fetchall()
         return [_edge_from_row(row) for row in rows]
+
+    def get_child_node_ids(self, build_id: str, parent_node_id: str) -> list[str]:
+        return [
+            edge.child_node_id for edge in self.get_children(build_id, parent_node_id)
+        ]
 
     def get_source_mappings(
         self, build_id: str, node_id: str

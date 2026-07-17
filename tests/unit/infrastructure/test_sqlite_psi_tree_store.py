@@ -91,7 +91,11 @@ def test_store_and_load_document_scoped_psi_tree_payload(tmp_path) -> None:
 
     assert store.get_tree(build.build_id) == tree
     assert store.get_nodes(build.build_id) == nodes
+    assert store.get_node_ids(build.build_id, layer=2) == [nodes[0].node_id]
     assert store.get_children(build.build_id, nodes[0].node_id) == edges
+    assert store.get_child_node_ids(build.build_id, nodes[0].node_id) == [
+        nodes[1].node_id
+    ]
     assert store.get_source_chunk_ids(build.build_id, nodes[0].node_id) == ["chunk-1"]
 
 
