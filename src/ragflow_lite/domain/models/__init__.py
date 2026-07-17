@@ -65,6 +65,15 @@ from ragflow_lite.domain.models.entities import (
     TopologyRetrievalResult,
     utc_now,
 )
+from ragflow_lite.domain.models.psi_tree import (
+    PsiAbstractType,
+    PsiEvidenceRole,
+    PsiNode,
+    PsiNodeSourceMapping,
+    PsiNodeType,
+    PsiTree,
+    PsiTreeEdge,
+)
 
 __all__ = [
     "ACADEMIC_SPARSE_FIELD_DESCRIPTORS",
@@ -112,6 +121,13 @@ __all__ = [
     "PdfMediaAsset",
     "PdfPage",
     "PostRewriteAssessment",
+    "PsiAbstractType",
+    "PsiEvidenceRole",
+    "PsiNode",
+    "PsiNodeSourceMapping",
+    "PsiNodeType",
+    "PsiTree",
+    "PsiTreeEdge",
     "RelationEvidence",
     "RetrievedChunk",
     "SourceChunkSupport",

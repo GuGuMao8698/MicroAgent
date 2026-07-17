@@ -44,6 +44,9 @@ from ragflow_lite.infrastructure.evidence.sqlite_graph_evidence_store import (
 from ragflow_lite.infrastructure.evidence.sqlite_graph_projection_store import (
     SqliteGraphProjectionStore,
 )
+from ragflow_lite.infrastructure.evidence.sqlite_psi_tree_store import (
+    SqlitePsiTreeStore,
+)
 
 __all__ = [
     "ENTITY_MATCH_TEXT_FIELDS",
@@ -62,6 +65,7 @@ __all__ = [
     "SqliteGraphEvidenceIndex",
     "SqliteGraphEvidenceStore",
     "SqliteGraphProjectionStore",
+    "SqlitePsiTreeStore",
     "build_entity_candidate_row",
     "build_relationship_candidate_row",
 ]

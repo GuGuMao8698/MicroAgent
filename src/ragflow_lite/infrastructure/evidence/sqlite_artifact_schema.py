@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 ARTIFACT_TYPES = frozenset({"graph_evidence", "psi_tree"})
 ARTIFACT_BUILD_STATUSES = frozenset(
@@ -45,10 +45,10 @@ def connect_artifact_db(db_path: Path) -> sqlite3.Connection:
 
 def initialize_schema(conn: sqlite3.Connection) -> None:
     current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-    if current_version not in (0, SCHEMA_VERSION):
+    if current_version < 0 or current_version > SCHEMA_VERSION:
         msg = (
             f"unsupported artifact schema version: {current_version}; "
-            f"expected 0 or {SCHEMA_VERSION}"
+            f"expected 0 through {SCHEMA_VERSION}"
         )
         raise ValueError(msg)
     conn.executescript(
@@ -192,8 +192,56 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
             ordinal INTEGER NOT NULL,
             PRIMARY KEY (relation_id, document_id, build_id, ordinal)
         );
+
+        CREATE TABLE IF NOT EXISTS psi_trees (
+            build_id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            max_layer INTEGER NOT NULL,
+            highest_queryable_layer INTEGER,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
+            FOREIGN KEY (document_id) REFERENCES artifact_documents(document_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS psi_tree_nodes (
+            node_id TEXT PRIMARY KEY,
+            build_id TEXT NOT NULL,
+            layer INTEGER NOT NULL,
+            node_type TEXT NOT NULL,
+            abstract_type TEXT,
+            text TEXT NOT NULL,
+            summary_text TEXT,
+            keyword_text TEXT,
+            source_document_id TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
+            FOREIGN KEY (source_document_id) REFERENCES artifact_documents(document_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS psi_tree_edges (
+            build_id TEXT NOT NULL,
+            parent_node_id TEXT NOT NULL,
+            child_node_id TEXT NOT NULL,
+            child_rank INTEGER NOT NULL,
+            edge_score REAL NOT NULL,
+            metadata_json TEXT NOT NULL,
+            PRIMARY KEY (build_id, parent_node_id, child_node_id),
+            FOREIGN KEY (build_id) REFERENCES artifact_builds(build_id),
+            FOREIGN KEY (parent_node_id) REFERENCES psi_tree_nodes(node_id),
+            FOREIGN KEY (child_node_id) REFERENCES psi_tree_nodes(node_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS psi_node_source_chunks (
+            node_id TEXT NOT NULL,
+            source_chunk_id TEXT NOT NULL,
+            source_rank INTEGER NOT NULL,
+            evidence_role TEXT NOT NULL,
+            PRIMARY KEY (node_id, source_chunk_id),
+            FOREIGN KEY (node_id) REFERENCES psi_tree_nodes(node_id)
+        );
         """
     )
-    if current_version == 0:
+    if current_version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()

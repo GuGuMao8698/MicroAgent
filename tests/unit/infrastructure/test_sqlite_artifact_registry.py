@@ -8,6 +8,7 @@ from ragflow_lite.infrastructure.evidence.artifact_event_recorder import (
 from ragflow_lite.infrastructure.evidence.sqlite_artifact_registry import (
     SqliteArtifactRegistry,
 )
+from ragflow_lite.infrastructure.evidence.sqlite_artifact_schema import SCHEMA_VERSION
 
 
 def test_schema_initialization_enables_foreign_keys_and_user_version(tmp_path) -> None:
@@ -47,6 +48,30 @@ def test_schema_initialization_rejects_unsupported_user_version(tmp_path) -> Non
         assert "schema" in str(exc).lower() or "unsupported" in str(exc).lower()
     else:
         raise AssertionError("expected unsupported schema version to raise")
+
+
+def test_schema_initialization_upgrades_v1_database_with_psi_tables(tmp_path) -> None:
+    db_path = tmp_path / "artifacts.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA user_version = 1")
+
+    registry = SqliteArtifactRegistry(db_path)
+    with registry.connect() as conn:
+        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        table_names = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+
+    assert user_version == SCHEMA_VERSION
+    assert {
+        "psi_trees",
+        "psi_tree_nodes",
+        "psi_tree_edges",
+        "psi_node_source_chunks",
+    }.issubset(table_names)
 
 
 def test_build_project_activate_and_supersede_are_transactional(tmp_path) -> None:
@@ -397,7 +422,9 @@ def test_create_projection_requires_projection_pending_state(tmp_path) -> None:
     except ValueError as exc:
         assert "projection_pending" in str(exc)
     else:
-        raise AssertionError("expected create_projection before payload complete to raise")
+        raise AssertionError(
+            "expected create_projection before payload complete to raise"
+        )
 
 
 def test_mark_projection_projected_rejects_unknown_projection_id(tmp_path) -> None:
@@ -456,7 +483,9 @@ def test_activate_build_requires_projection_success(tmp_path) -> None:
     except ValueError as exc:
         assert "projected" in str(exc).lower()
     else:
-        raise AssertionError("expected activate_build before projection success to raise")
+        raise AssertionError(
+            "expected activate_build before projection success to raise"
+        )
 
 
 def test_create_projection_rejects_wrong_target_for_artifact_type(tmp_path) -> None:
