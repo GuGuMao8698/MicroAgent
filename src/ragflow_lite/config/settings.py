@@ -203,6 +203,23 @@ class Settings:
         )
     )
     infinity_psi_node_table: str = "psi_nodes"
+    auxiliary_scoring_policy: Literal[
+        "minirag_counter_parity",
+        "psi_positional_5_2_10_experimental",
+        "no_positional_psi_boost",
+    ] = field(
+        default_factory=lambda: cast(
+            Literal[
+                "minirag_counter_parity",
+                "psi_positional_5_2_10_experimental",
+                "no_positional_psi_boost",
+            ],
+            _read_string_env(
+                "MICRORAG_AUXILIARY_SCORING_POLICY",
+                "minirag_counter_parity",
+            ),
+        )
+    )
     # ── chunk Infinity hybrid 检索参数 ──
     chunk_initial_recall_n: int = 1024
     chunk_text_weight: float = 0.05
@@ -269,6 +286,12 @@ class Settings:
         normalize_log_format(self.log_format)
         if self.psi_auxiliary_fallback not in {"legacy", "none"}:
             raise ValueError("psi_auxiliary_fallback must be either 'legacy' or 'none'")
+        if self.auxiliary_scoring_policy not in {
+            "minirag_counter_parity",
+            "psi_positional_5_2_10_experimental",
+            "no_positional_psi_boost",
+        }:
+            raise ValueError("unsupported auxiliary_scoring_policy")
         if self.figure_vlm_enabled and not self.ark_figure_model:
             raise RuntimeError(
                 "ARK_FIGURE_MODEL is required when MICRORAG_FIGURE_VLM_ENABLED=true."

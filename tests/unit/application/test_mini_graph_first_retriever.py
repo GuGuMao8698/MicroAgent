@@ -11,6 +11,7 @@ from ragflow_lite.application.services.evidence_package_builder import (
 from ragflow_lite.application.services.mini_graph_first_retriever import (
     MiniGraphFirstRetriever,
 )
+from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import (
     CoTGroundingResult,
     EntityEvidence,
@@ -412,6 +413,93 @@ def test_default_scoring_policy_remains_current_first_chunk_10x() -> None:
             policy=mgfr_module._SCORING_POLICY,
         )
         == 10.0
+    )
+
+
+def test_positional_policy_uses_first_two_distinct_source_chunk_ids() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_a", "chunk_b", "chunk_c"],
+        score=1.0,
+    )
+
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_b"},
+            policy="psi_positional_5_2_10_experimental",
+        )
+        == 2.0
+    )
+
+
+def test_no_positional_boost_policy_never_amplifies_path() -> None:
+    path = TopologyPath(
+        path_id="path-1",
+        document_id="doc1",
+        entity_ids=[],
+        relation_ids=[],
+        source_chunk_ids=["chunk_a", "chunk_b"],
+        score=1.0,
+    )
+
+    assert (
+        mgfr_module._auxiliary_path_multiplier(
+            path,
+            {"chunk_a", "chunk_b"},
+            policy="no_positional_psi_boost",
+        )
+        == 1.0
+    )
+
+
+def test_retriever_rejects_unknown_auxiliary_scoring_policy() -> None:
+    with pytest.raises(ProcessingError, match="auxiliary_scoring_policy"):
+        MiniGraphFirstRetriever(
+            query_grounder=RecordingGrounder(),
+            entity_index=RecordingEntityIndex(),
+            relationship_index=RecordingRelationshipIndex(),
+            path_expander=RecordingPathExpander(),
+            chunk_lookup=RecordingChunkLookup(),
+            auxiliary_scoring_policy="unknown",
+        )
+
+
+def test_configured_no_boost_policy_is_used_for_scoring_and_metadata() -> None:
+    class FirstSourceAuxiliaryRetriever:
+        def retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
+            return [
+                RetrievedChunk(
+                    chunk_id="chunk_a",
+                    document_id="doc1",
+                    text="first source auxiliary hit",
+                    score=1.0,
+                )
+            ]
+
+    retriever = MiniGraphFirstRetriever(
+        query_grounder=RecordingGrounder(),
+        entity_index=RecordingEntityIndex(),
+        relationship_index=RecordingRelationshipIndex(),
+        path_expander=RecordingPathExpander(),
+        chunk_lookup=RecordingChunkLookup(),
+        chunk_auxiliary_retriever=FirstSourceAuxiliaryRetriever(),
+        auxiliary_scoring_policy="no_positional_psi_boost",
+    )
+
+    result = retriever.retrieve_context("How does MiniRAG work?", top_k=2)
+
+    assert result.metadata["source_selection"]["scoring_policy"] == (
+        "no_positional_psi_boost"
+    )
+    assert (
+        result.chunks[0].metadata["source_score_components"][
+            "auxiliary_path_multiplier"
+        ]
+        == 1.0
     )
 
 

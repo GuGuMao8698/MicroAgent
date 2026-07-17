@@ -348,6 +348,7 @@ def build_services(settings: Settings) -> AppServices:
         cot_grounding_rewriter=cot_grounding_rewriter,
         mini_internal_candidate_n=settings.mini_internal_candidate_n,
         query_entity_limit=settings.query_entity_limit,
+        auxiliary_scoring_policy=settings.auxiliary_scoring_policy,
     )
     query_service = QueryService(
         retriever=retriever,

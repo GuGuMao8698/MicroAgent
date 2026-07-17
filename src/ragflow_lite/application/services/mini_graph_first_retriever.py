@@ -73,6 +73,7 @@ class MiniGraphFirstRetriever:
         discourse_selection_n: int | None = None,
         context_token_budget: int | None = None,
         allowed_build_ids: list[str] | None = None,
+        auxiliary_scoring_policy: str = "minirag_counter_parity",
         # ── 向后兼容别名（旧参数名） ──
         grounded_entity_k: int | None = None,
         chunk_auxiliary_retrieval_k: int | None = None,
@@ -95,6 +96,10 @@ class MiniGraphFirstRetriever:
             raise ProcessingError("discourse_selection_n must be >= 1 when provided")
         if context_token_budget is not None and context_token_budget < 1:
             raise ProcessingError("context_token_budget must be >= 1 when provided")
+        if auxiliary_scoring_policy not in _SUPPORTED_SCORING_POLICIES:
+            raise ProcessingError(
+                f"unsupported auxiliary_scoring_policy: {auxiliary_scoring_policy!r}"
+            )
 
         self.query_grounder = query_grounder
         self.entity_index = entity_index
@@ -116,6 +121,7 @@ class MiniGraphFirstRetriever:
         self.allowed_build_ids = (
             list(allowed_build_ids) if allowed_build_ids is not None else None
         )
+        self.auxiliary_scoring_policy = auxiliary_scoring_policy
         # 保留旧属性名作为只读别名，避免下游引用立即断裂
         self.grounded_entity_k = self.mini_internal_candidate_n
         self.relationship_candidate_k = self.mini_internal_candidate_n
@@ -480,6 +486,7 @@ class MiniGraphFirstRetriever:
             relationship_candidates=relationship_candidates,
             paths=paths,
             auxiliary_chunks=auxiliary_chunks,
+            scoring_policy=self.auxiliary_scoring_policy,
         )
 
         # 第 7 步: 构建 source selection —— 将评分结果转为带选择决策的结构
@@ -760,7 +767,7 @@ class MiniGraphFirstRetriever:
     ) -> dict[str, object]:
         """将 source selection 转为 metadata 中的摘要字典。"""
         return {
-            "scoring_policy": _SCORING_POLICY,
+            "scoring_policy": self.auxiliary_scoring_policy,
             "final_context_k": selection.final_context_k,
             "discourse_selection_k": selection.discourse_selection_k,
             "context_token_budget": selection.context_token_budget,
@@ -788,6 +795,13 @@ class MiniGraphFirstRetriever:
 # MiniRAG mini-mode 评分对齐常量
 # ---------------------------------------------------------------------------
 _SCORING_POLICY = "minirag_counter_parity"
+_SUPPORTED_SCORING_POLICIES = frozenset(
+    {
+        _SCORING_POLICY,
+        "psi_positional_5_2_10_experimental",
+        "no_positional_psi_boost",
+    }
+)
 _DEFAULT_DISCOURSE_SELECTION_MULTIPLIER = 2
 _MINIRAG_FIRST_CANDIDATE_MULTIPLIER = 2.0
 _MINIRAG_AUXILIARY_PATH_MULTIPLIER = 10.0
@@ -1003,6 +1017,7 @@ def _score_source_chunks(
     relationship_candidates: list[MiniRelationshipCandidate],
     paths: list[TopologyPath],
     auxiliary_chunks: list[RetrievedChunk],
+    scoring_policy: str = _SCORING_POLICY,
 ) -> list[SourceChunkSupport]:
     """使用 MiniRAG mini-mode Counter/vote 语义对源 chunk 评分。"""
     auxiliary_hit_ids = {chunk.chunk_id for chunk in auxiliary_chunks}
@@ -1039,7 +1054,7 @@ def _score_source_chunks(
         path_auxiliary_multiplier = _auxiliary_path_multiplier(
             path,
             auxiliary_hit_ids,
-            policy=_SCORING_POLICY,
+            policy=scoring_policy,
         )
 
         for chunk_id, count in path_chunk_counts.items():
@@ -1099,7 +1114,7 @@ def _score_source_chunks(
                 ),
                 supporting_path_ids=_dedupe(supporting_path_ids.get(chunk_id, [])),
                 auxiliary_chunk_hit=chunk_id in auxiliary_hit_ids,
-                metadata={"scoring_policy": _SCORING_POLICY},
+                metadata={"scoring_policy": scoring_policy},
             )
         )
 

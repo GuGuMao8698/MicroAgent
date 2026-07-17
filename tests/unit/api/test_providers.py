@@ -766,6 +766,7 @@ def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.psi_auxiliary_enabled is False
     assert settings.psi_auxiliary_fallback == "legacy"
     assert settings.infinity_psi_node_table == "psi_nodes"
+    assert settings.auxiliary_scoring_policy == "minirag_counter_parity"
 
 
 def test_settings_rejects_invalid_psi_auxiliary_fallback(tmp_path: Path) -> None:
@@ -776,6 +777,31 @@ def test_settings_rejects_invalid_psi_auxiliary_fallback(tmp_path: Path) -> None
             local_index_dir=tmp_path / "local_index",
             temp_dir=tmp_path / "tmp",
             psi_auxiliary_fallback="invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_settings_reads_auxiliary_scoring_policy_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "MICRORAG_AUXILIARY_SCORING_POLICY",
+        "psi_positional_5_2_10_experimental",
+    )
+
+    settings = _build_settings(tmp_path)
+
+    assert settings.auxiliary_scoring_policy == ("psi_positional_5_2_10_experimental")
+
+
+def test_settings_rejects_unknown_auxiliary_scoring_policy(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="auxiliary_scoring_policy"):
+        Settings(
+            project_root=tmp_path,
+            uploads_dir=tmp_path / "uploads",
+            local_index_dir=tmp_path / "local_index",
+            temp_dir=tmp_path / "tmp",
+            auxiliary_scoring_policy="unknown",  # type: ignore[arg-type]
         )
 
 
