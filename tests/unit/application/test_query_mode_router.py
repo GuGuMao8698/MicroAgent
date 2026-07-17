@@ -77,3 +77,13 @@ def test_query_mode_router_rejects_unknown_runtime_mode() -> None:
 
     with pytest.raises(ValueError, match="Unsupported query mode"):
         router.query("q", top_k=1, mode="rerank_only")
+
+
+def test_query_mode_router_rejects_public_psi_mode() -> None:
+    router = QueryModeRouter(
+        standard_service=RecordingQueryPath("standard"),
+        discorag_service=RecordingQueryPath("discorag"),
+    )
+
+    with pytest.raises(ValueError, match="Unsupported query mode"):
+        router.query("q", top_k=1, mode="psi")

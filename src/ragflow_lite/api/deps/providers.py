@@ -59,12 +59,16 @@ from ragflow_lite.infrastructure.chunkers import (
 )
 from ragflow_lite.infrastructure.evidence import (
     InfinityGraphCandidateIndex,
+    InfinityPsiNodeIndex,
     LLMDiscoRAGAnswerBlueprintBuilder,
     LLMInterChunkDiscourseGraphBuilder,
+    PsiNodeInfinityConfig,
+    PsiNodeProjectionStore,
     SqliteArtifactRegistry,
     SqliteGraphEvidenceIndex,
     SqliteGraphEvidenceStore,
     SqliteGraphProjectionStore,
+    SqlitePsiTreeStore,
 )
 from ragflow_lite.infrastructure.evidence.infinity_graph_candidate_index import (
     GraphCandidateInfinityConfig,
@@ -73,6 +77,11 @@ from ragflow_lite.infrastructure.media import LocalPdfMediaAssetStore
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
     DeepSeekCoTGroundingRewriter,
+    LegacyGroundedAuxiliaryAdapter,
+    PsiNodeScorer,
+    PsiSourceChunkNarrower,
+    PsiTopDownAuxiliaryRetriever,
+    PsiTopDownTraverser,
 )
 from ragflow_lite.infrastructure.vector_indexes.infinity_dense_index import (
     ChunkHybridRetrievalConfig,
@@ -268,6 +277,49 @@ def build_services(settings: Settings) -> AppServices:
     )
     # chunk 辅助检索器：Infinity hybrid 作为辅助召回通道
     chunk_auxiliary_retriever = _build_retriever(embedder, vector_index)
+    legacy_grounded_auxiliary = LegacyGroundedAuxiliaryAdapter(
+        chunk_auxiliary_retriever
+    )
+    grounded_auxiliary_retriever = legacy_grounded_auxiliary
+    if settings.psi_auxiliary_enabled:
+        psi_tree_store = SqlitePsiTreeStore(
+            artifact_db_path,
+            registry=artifact_registry,
+        )
+        psi_node_index = InfinityPsiNodeIndex(
+            client=vector_index.client,
+            client_lock=vector_index.client_lock,
+            database=settings.infinity_database,
+            embedding_dimensions=settings.ark_embedding_dimensions,
+            config=PsiNodeInfinityConfig(table_name=settings.infinity_psi_node_table),
+        )
+        psi_node_scorer = PsiNodeScorer(
+            psi_node_index=psi_node_index,
+            embedder=embedder,
+        )
+        psi_traverser = PsiTopDownTraverser(
+            tree_store=psi_tree_store,
+            scorer=psi_node_scorer,
+        )
+        psi_projection_store = PsiNodeProjectionStore(
+            tree_store=psi_tree_store,
+            psi_node_index=psi_node_index,
+            embedder=embedder,
+            registry=artifact_registry,
+            target_table=settings.infinity_psi_node_table,
+        )
+        grounded_auxiliary_retriever = PsiTopDownAuxiliaryRetriever(
+            tree_store=psi_tree_store,
+            traverser=psi_traverser,
+            narrower=PsiSourceChunkNarrower(),
+            chunk_lookup=vector_index,
+            legacy_adapter=(
+                legacy_grounded_auxiliary
+                if settings.psi_auxiliary_fallback == "legacy"
+                else None
+            ),
+            repair_marker=psi_projection_store,
+        )
     query_grounder = DeepSeekChatQueryGrounder(
         api_key=deepseek_runtime_config.api_key,
         base_url=deepseek_runtime_config.base_url,
@@ -292,6 +344,7 @@ def build_services(settings: Settings) -> AppServices:
         path_expander=graph_path_expander,
         chunk_lookup=vector_index,
         chunk_auxiliary_retriever=chunk_auxiliary_retriever,
+        grounded_auxiliary_retriever=grounded_auxiliary_retriever,
         cot_grounding_rewriter=cot_grounding_rewriter,
         mini_internal_candidate_n=settings.mini_internal_candidate_n,
         query_entity_limit=settings.query_entity_limit,

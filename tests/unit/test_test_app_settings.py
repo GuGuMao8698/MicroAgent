@@ -42,6 +42,7 @@ def test_app_settings_use_test_scoped_infinity_table_names(app_settings) -> None
     assert app_settings.infinity_graph_relationship_table.startswith(
         "graph_relationships_"
     )
+    assert app_settings.infinity_psi_node_table.startswith("psi_nodes_")
 
 
 def test_app_settings_use_fixed_private_bootstrap_tables_for_deepeval_reuse(
@@ -96,6 +97,7 @@ def test_app_settings_use_test_scoped_tables_for_deepeval_fresh(
     assert settings.infinity_chunk_table.startswith("chunks_")
     assert settings.infinity_graph_entity_table.startswith("graph_entities_")
     assert settings.infinity_graph_relationship_table.startswith("graph_relationships_")
+    assert settings.infinity_psi_node_table.startswith("psi_nodes_")
 
 
 def test_deepeval_reuse_manifest_validates_before_app_creation(

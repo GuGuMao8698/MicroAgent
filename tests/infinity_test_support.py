@@ -14,6 +14,7 @@ _LIVE_TABLE_PREFIXES = (
     "chunks_",
     "graph_entities_",
     "graph_relationships_",
+    "psi_nodes_",
 )
 _REGISTERED_TABLES: list[tuple[Settings, list[str]]] = []
 _REGISTERED_TABLES_LOCK = threading.Lock()
@@ -36,6 +37,7 @@ def assign_isolated_infinity_tables(
     settings.infinity_chunk_table = f"chunks_{scope_suffix}"
     settings.infinity_graph_entity_table = f"graph_entities_{scope_suffix}"
     settings.infinity_graph_relationship_table = f"graph_relationships_{scope_suffix}"
+    settings.infinity_psi_node_table = f"psi_nodes_{scope_suffix}"
     return settings
 
 
@@ -48,6 +50,7 @@ def infinity_table_names_for(settings: Settings) -> list[str]:
         f"{document_table}_dataset_bindings",
         settings.infinity_graph_entity_table,
         settings.infinity_graph_relationship_table,
+        settings.infinity_psi_node_table,
     ]
 
 

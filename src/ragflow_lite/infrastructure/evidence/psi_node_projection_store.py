@@ -27,7 +27,7 @@ class PsiNodeProjectionIndex(Protocol):
 
 
 class QueryEmbedder(Protocol):
-    def embed_query(self, text: str) -> list[float]: ...
+    def embed_query(self, query: str) -> list[float]: ...
 
 
 class PsiNodeProjectionStore:

@@ -35,8 +35,11 @@ from ragflow_lite.infrastructure import (
 from ragflow_lite.infrastructure import retrievers as retrievers_module
 from ragflow_lite.infrastructure.evidence import (
     InfinityGraphCandidateIndex,
+    InfinityPsiNodeIndex,
     LLMDiscoRAGAnswerBlueprintBuilder,
     LLMInterChunkDiscourseGraphBuilder,
+    PsiNodeProjectionStore,
+    SqlitePsiTreeStore,
 )
 from ragflow_lite.infrastructure.evidence.sqlite_artifact_registry import (
     SqliteArtifactRegistry,
@@ -52,6 +55,11 @@ from ragflow_lite.infrastructure.evidence.sqlite_graph_projection_store import (
 )
 from ragflow_lite.infrastructure.retrievers import (
     DeepSeekChatQueryGrounder,
+    LegacyGroundedAuxiliaryAdapter,
+    PsiNodeScorer,
+    PsiSourceChunkNarrower,
+    PsiTopDownAuxiliaryRetriever,
+    PsiTopDownTraverser,
 )
 
 
@@ -217,6 +225,16 @@ def _patch_non_live_build_services_dependencies(
         "SqliteGraphEvidenceIndex",
         _named_stub_factory("SqliteGraphEvidenceIndex"),
     )
+    for name in (
+        "InfinityPsiNodeIndex",
+        "PsiNodeProjectionStore",
+        "PsiNodeScorer",
+        "PsiSourceChunkNarrower",
+        "PsiTopDownAuxiliaryRetriever",
+        "PsiTopDownTraverser",
+        "SqlitePsiTreeStore",
+    ):
+        monkeypatch.setattr(providers_module, name, _named_stub_factory(name))
     monkeypatch.setattr(
         providers_module,
         "MiniGraphFirstRetriever",
@@ -537,8 +555,13 @@ def test_infrastructure_exports_current_runtime_components() -> None:
         "DeepSeekChatQueryGrounder",
         "DeepSeekCoTGroundingRewriter",
         "InfinityHybridRetriever",
+        "LegacyGroundedAuxiliaryAdapter",
         "OpenAIResponsesCoTGroundingRewriter",
         "OpenAIResponsesQueryGrounder",
+        "PsiNodeScorer",
+        "PsiSourceChunkNarrower",
+        "PsiTopDownAuxiliaryRetriever",
+        "PsiTopDownTraverser",
     ]
     assert not hasattr(infrastructure, "VectorRetriever")
     assert not hasattr(infrastructure, "InfinityFullTextRetriever")
@@ -589,6 +612,32 @@ def test_build_services_wires_graph_candidate_infinity_index(tmp_path: Path) -> 
     assert not isinstance(retriever.path_expander, InfinityGraphCandidateIndex)
     assert isinstance(retriever.path_expander, SqliteGraphEvidenceIndex)
     assert isinstance(retriever.chunk_auxiliary_retriever, InfinityHybridRetriever)
+
+
+@pytest.mark.live_infinity
+def test_build_services_wires_enabled_psi_auxiliary_with_isolated_table(
+    tmp_path: Path,
+) -> None:
+    settings = _build_live_settings(tmp_path)
+    settings.psi_auxiliary_enabled = True
+    settings.psi_auxiliary_fallback = "legacy"
+
+    services = build_services(settings)
+
+    retriever = services.retriever
+    assert isinstance(retriever, MiniGraphFirstRetriever)
+    grounded = retriever.grounded_auxiliary_retriever
+    assert isinstance(grounded, PsiTopDownAuxiliaryRetriever)
+    assert isinstance(grounded._tree_store, SqlitePsiTreeStore)
+    assert isinstance(grounded._traverser, PsiTopDownTraverser)
+    assert isinstance(grounded._traverser._scorer, PsiNodeScorer)
+    assert isinstance(grounded._narrower, PsiSourceChunkNarrower)
+    assert isinstance(grounded._legacy_adapter, LegacyGroundedAuxiliaryAdapter)
+    assert isinstance(grounded._repair_marker, PsiNodeProjectionStore)
+    psi_index = grounded._traverser._scorer._psi_node_index
+    assert isinstance(psi_index, InfinityPsiNodeIndex)
+    assert psi_index.table_name == settings.infinity_psi_node_table
+    assert settings.infinity_psi_node_table.startswith("psi_nodes_")
 
 
 def test_build_services_wires_sqlite_graph_evidence_truth(
@@ -714,6 +763,63 @@ def test_graph_candidate_defaults_match_spec(tmp_path: Path) -> None:
     assert settings.graph_candidate_fusion_normalize == "atan"
     assert settings.infinity_graph_entity_table == "graph_entities"
     assert settings.infinity_graph_relationship_table == "graph_relationships"
+    assert settings.psi_auxiliary_enabled is False
+    assert settings.psi_auxiliary_fallback == "legacy"
+    assert settings.infinity_psi_node_table == "psi_nodes"
+
+
+def test_settings_rejects_invalid_psi_auxiliary_fallback(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="psi_auxiliary_fallback"):
+        Settings(
+            project_root=tmp_path,
+            uploads_dir=tmp_path / "uploads",
+            local_index_dir=tmp_path / "local_index",
+            temp_dir=tmp_path / "tmp",
+            psi_auxiliary_fallback="invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_provider_wires_legacy_grounded_auxiliary_when_psi_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    settings = _build_settings(tmp_path)
+    settings.psi_auxiliary_enabled = False
+
+    services = build_services(settings)
+
+    grounded = services.retriever.grounded_auxiliary_retriever
+    assert grounded.__class__.__name__ == "LegacyGroundedAuxiliaryAdapter"
+
+
+@pytest.mark.parametrize(
+    ("fallback", "expects_legacy"),
+    [("legacy", True), ("none", False)],
+)
+def test_provider_wires_internal_psi_auxiliary_and_fallback_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fallback: str,
+    expects_legacy: bool,
+) -> None:
+    _patch_non_live_build_services_dependencies(monkeypatch)
+    settings = _build_settings(tmp_path)
+    settings.psi_auxiliary_enabled = True
+    settings.psi_auxiliary_fallback = fallback  # type: ignore[assignment]
+
+    services = build_services(settings)
+
+    grounded = services.retriever.grounded_auxiliary_retriever
+    assert grounded.__class__.__name__ == "PsiTopDownAuxiliaryRetriever"
+    assert grounded.kwargs["chunk_lookup"] is services.ingestion_pipeline.vector_index
+    legacy = grounded.kwargs["legacy_adapter"]
+    assert (legacy is not None) is expects_legacy
+    assert grounded.kwargs["repair_marker"].__class__.__name__ == (
+        "PsiNodeProjectionStore"
+    )
+    assert grounded.kwargs["tree_store"].__class__.__name__ == "SqlitePsiTreeStore"
+    assert settings.infinity_psi_node_table.startswith("psi_nodes_")
 
 
 def test_chunk_hybrid_defaults_match_spec(tmp_path: Path) -> None:
