@@ -75,6 +75,53 @@ Invariant:
 - `QueryService` remains generic over `Retriever` + `Answerer`; do not couple it to graph-first or provider-specific internals.
 - `GraphFirstSourceSelection` is an internal application contract; downstream collaborators may consume its metadata, but public API surfaces must not expose its full internal shape.
 
+## Psi Auxiliary Retrieval Contract
+
+Reviewed at: `2026-07-11`
+Status: Active
+Owner: `MiniGraphFirstRetriever`, `QueryService`, `DiscoRAGQueryService`, `EvidencePackageBuilder`
+
+Source of truth:
+- Psi top-down retrieval is an internal grounded auxiliary path inside
+  `MiniGraphFirstRetriever`; it is not a public query mode. `QueryModeRouter`
+  continues to expose only `standard` and `discorag`.
+- Each initial or enriched rewrite pass builds and executes its own grounded
+  auxiliary request and records its own `PsiRetrievalStatus` under
+  `auxiliary_retrieval_statuses`.
+- The public retrieval handoff contains original source `RetrievedChunk`
+  objects only. `psi_node_id` is never treated as `chunk_id`, and standard or
+  DiscoRAG evidence must not contain Psi summary nodes or Psi edge ids.
+
+Fallback and status:
+- `PsiRetrievalStatus` is internal diagnostic state. It records pass identity,
+  `success`/`degraded`/`fallback`/`failed`/`skipped`, stop and failure reasons,
+  and whether fallback used `legacy_string_retriever` or `none`.
+- When Psi is disabled, provider wiring uses the explicit legacy grounded
+  adapter. When Psi is enabled but unserviceable, `psi_auxiliary_fallback`
+  selects either the same legacy source-chunk retriever or no fallback.
+- Traversal budget or narrowing limitations and missing source chunks are
+  recorded as degradation; they must not silently synthesize a chunk from Psi
+  node text.
+- Internal Psi provenance and statuses remain available on internal retrieval
+  results for diagnostics, but `EvidencePackageBuilder`, standard answer
+  requests, and DiscoRAG answer requests strip them before model-facing or
+  public HTTP handoff.
+
+Scoring:
+- The default auxiliary path corroboration policy is
+  `minirag_counter_parity`, preserving MiniRAG's existing first-source-chunk
+  `10x` path multiplier.
+- `psi_positional_5_2_10_experimental` remains opt-in and must not become the
+  default without satisfying its evaluation gate. `no_positional_psi_boost` is
+  also an explicit non-default policy.
+
+Verification:
+- [tests/unit/application/test_mini_graph_first_retriever.py](../../../tests/unit/application/test_mini_graph_first_retriever.py)
+- [tests/unit/application/test_evidence_package_builder.py](../../../tests/unit/application/test_evidence_package_builder.py)
+- [tests/unit/application/test_discorag_query_service.py](../../../tests/unit/application/test_discorag_query_service.py)
+- [tests/unit/application/test_query_mode_router.py](../../../tests/unit/application/test_query_mode_router.py)
+- [tests/unit/application/test_model_facing_retrieval.py](../../../tests/unit/application/test_model_facing_retrieval.py)
+
 ## DiscoRAG Degraded Fallback Contract
 
 Reviewed at: `2026-05-11T12:00:00+08:00`

@@ -3,15 +3,52 @@
 ## SQLite Artifact Truth
 
 Reviewed at: `2026-07-11`
-Status: Active for Phase 1-2 graph evidence
-Owner: `SqliteGraphEvidenceStore`, `SqliteArtifactRegistry`, `SqliteGraphProjectionStore`
+Status: Active for graph evidence and Psi tree artifacts
+Owner: `SqliteGraphEvidenceStore`, `SqlitePsiTreeStore`, `SqliteArtifactRegistry`, `SqliteGraphProjectionStore`, `PsiNodeProjectionStore`
 
 - Runtime graph truth is each document's raw `GraphEvidenceBatch` persisted in SQLite.
 - `artifact_builds`, `artifact_projections`, and `active_artifacts` own graph artifact lifecycle truth, including activation, deletion, rebuild, repair, and projection ownership.
 - Infinity graph rows are derived retrieval projections. They are serviceable only when their owning build is active and their projection status is `projected`.
 - Cross-document canonicalization and path expansion run at read time over raw evidence. Canonical state is not a persisted truth object.
 - JSON graph evidence is no longer runtime truth. Rebuild or re-ingest is the supported transition to SQLite-backed artifacts.
-- Phase 1-2 graph deletion can mark graph builds and projections deleted, but the document remains `deleting`. Whole-document deletion is incomplete until the later cross-artifact coordinator proves graph projection cleanup, Psi projection cleanup, SQLite payload cleanup, and main chunk-index deletion.
+- Graph deletion can mark graph builds and projections deleted, but the document remains `deleting`. Whole-document deletion is incomplete until `ArtifactDeleteCoordinator` proves graph projection cleanup, Psi projection cleanup, SQLite payload cleanup, and main chunk-index deletion.
+
+## Psi Tree Artifacts
+
+Reviewed at: `2026-07-11`
+Status: Active
+Owner: `SqlitePsiTreeStore`, `PsiNodeProjectionStore`, `InfinityPsiNodeIndex`, `PsiTopDownAuxiliaryRetriever`
+
+Source of truth:
+- SQLite owns each document-scoped Psi tree payload: tree metadata, nodes, edges,
+  node-to-source-chunk mappings, and artifact lifecycle/projection state.
+- The Infinity Psi node table is an isolated retrieval projection. It is not the
+  main source-chunk table, and its rows are derived from the SQLite-owned build.
+- `psi_node_id` is an internal node retrieval identity, never a source
+  `chunk_id`. Traversal must resolve node hits through SQLite source mappings
+  before fetching ordinary source chunks.
+- `keyword_text` and `summary_text` contribute only to Psi node projection
+  vectors and sparse fields. They never replace or augment source `Chunk.text`.
+
+Serviceability and degradation:
+- A Psi tree is query-serviceable only when its SQLite build and document are
+  active, `active_artifacts` selects the build, it has a queryable layer, and an
+  `infinity_psi_node` projection is recorded as `projected`.
+- A projected start-layer mismatch is marked `repair_pending` before the
+  configured auxiliary fallback runs.
+- Missing active trees, empty mappings, projection inconsistencies, unexpected
+  traversal failures, unavailable narrowing, and missing source chunks are not
+  silent: the auxiliary result records a specific stop/failure reason and a
+  `success`, `degraded`, `fallback`, `failed`, or `skipped` state.
+- Configured `legacy` fallback returns the legacy source-chunk results with
+  `fallback_source=legacy_string_retriever`; configured `none` returns no
+  synthesized Psi evidence and records `fallback_source=none`.
+
+Verification:
+- [tests/unit/infrastructure/test_sqlite_psi_tree_store.py](../../../../tests/unit/infrastructure/test_sqlite_psi_tree_store.py)
+- [tests/unit/infrastructure/test_psi_node_projection_store.py](../../../../tests/unit/infrastructure/test_psi_node_projection_store.py)
+- [tests/unit/infrastructure/test_infinity_psi_node_index.py](../../../../tests/unit/infrastructure/test_infinity_psi_node_index.py)
+- [tests/unit/infrastructure/test_psi_top_down_auxiliary_retriever.py](../../../../tests/unit/infrastructure/test_psi_top_down_auxiliary_retriever.py)
 
 Reviewed at: `2026-05-08T19:54:53+08:00`
 Status: Active

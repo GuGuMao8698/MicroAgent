@@ -30,13 +30,23 @@ single-purpose):
 ## Artifact Storage Boundary
 
 Reviewed at: `2026-07-11`
-Status: Active for Phase 1-2 graph evidence
-Owner: `evidence/sqlite_artifact_registry.py`, `evidence/sqlite_graph_projection_store.py`
+Status: Active for graph evidence and Psi tree artifacts
+Owner: `evidence/sqlite_artifact_registry.py`, `evidence/sqlite_graph_projection_store.py`, `evidence/sqlite_psi_tree_store.py`, `evidence/psi_node_projection_store.py`
 
-- SQLite owns artifact facts and lifecycle state for graph evidence and future Psi artifacts, including delete, rebuild, repair, and external projection ownership.
-- Infinity owns retrieval projections for graph candidates, source chunks, and future Psi nodes.
+- SQLite owns artifact payload truth, lifecycle state, and external projection
+  ownership for graph evidence and Psi trees, including delete, rebuild, and
+  repair state.
+- Infinity remains the derived retrieval projection layer for graph candidates,
+  source chunks, and Psi nodes. Psi nodes use an isolated table and cannot reuse
+  source-chunk identity or the main chunk table.
 - SQLite is not the dense-vector, sparse-vector, or full-text retrieval engine.
-- Graph projection cleanup alone does not complete whole-document deletion. The document remains `deleting` until the later cross-artifact coordinator proves all graph, Psi, SQLite payload, and main chunk-index cleanup.
+- Graph projection cleanup alone does not complete whole-document deletion. The
+  document remains `deleting` until `ArtifactDeleteCoordinator` proves all
+  graph, Psi, SQLite payload, and main chunk-index cleanup.
+- Projection disagreement is explicit state, never a silent read-through:
+  SQLite remains authoritative, inconsistent Psi projections are marked for
+  repair, and query-time degradation/fallback is recorded in the internal Psi
+  retrieval status.
 
 ## Adapter Boundary Contract
 
