@@ -1,0 +1,16 @@
+{
+	"name": "pi-goal-subagent-boundary-prototype",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"preprototype": "npm install --ignore-scripts --no-audit --no-fund",
+		"prototype": "tsx run.mjs"
+	},
+	"dependencies": {
+		"@narumitw/pi-goal": "0.20.0",
+		"pi-subagents": "0.35.1"
+	},
+	"devDependencies": {
+		"tsx": "4.22.1"
+	}
+}
