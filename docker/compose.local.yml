@@ -21,7 +21,7 @@ services:
       - -lc
       - |
         set -a
-        . data/agent-runtime/local.env
+        . data/local.env
         set +a
         exec uvicorn ragflow_lite.app:app --host 0.0.0.0 --port 8000 --reload
     environment:

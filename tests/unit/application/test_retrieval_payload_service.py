@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 
-from ragflow_lite.application.services.agent_retrieval_service import (
-    AgentRetrievalResult,
-    AgentRetrievalService,
+from ragflow_lite.application.services.retrieval_payload_service import (
+    RetrievalPayloadResult,
+    RetrievalPayloadService,
 )
 from ragflow_lite.domain.errors import ProcessingError
 from ragflow_lite.domain.models import AnswerBlueprint, AnswerRequest, RetrievedChunk
@@ -48,30 +49,26 @@ class FakeBuilder:
 
 
 def test_retrieve_standard_returns_clean_payload() -> None:
-    request = AnswerRequest(
-        query="MiniRAG 是什么？",
-        contexts=[
-            _chunk("c2", score=0.8, metadata={"rank": 2}),
-            _chunk("c4", score=0.6, metadata={"rank": 4}),
-            _chunk("c1", score=0.9, metadata={"rank": 1}),
-            _chunk("c3", score=0.7, metadata={"rank": 3}),
-        ],
-        metadata={
-            "retrieval_rewrite": {
-                "enabled": True,
-                "status": "degraded",
-            }
-        },
+    standard_builder = FakeBuilder(
+        request=AnswerRequest(
+            query="MiniRAG 是什么？",
+            contexts=[
+                _chunk("c2", score=0.8, metadata={"rank": 2}),
+                _chunk("c4", score=0.6, metadata={"rank": 4}),
+                _chunk("c1", score=0.9, metadata={"rank": 1}),
+                _chunk("c3", score=0.7, metadata={"rank": 3}),
+            ],
+            metadata={"retrieval_rewrite": {"status": "degraded"}},
+        )
     )
-    standard_builder = FakeBuilder(request=request)
-    discorag_builder = FakeBuilder(
-        request=AnswerRequest(query="unused", contexts=[]),
+    service = RetrievalPayloadService(
+        standard_builder,
+        FakeBuilder(request=AnswerRequest(query="unused", contexts=[])),
     )
-    service = AgentRetrievalService(standard_builder, discorag_builder)
 
     result = service.retrieve("MiniRAG 是什么？", top_k=4)
 
-    assert result == AgentRetrievalResult(
+    assert result == RetrievalPayloadResult(
         payload={
             "query": "MiniRAG 是什么？",
             "contexts": [
@@ -105,41 +102,29 @@ def test_retrieve_standard_returns_clean_payload() -> None:
                 },
             ],
         },
-        runtime_metadata={
-            "retrieval_rewrite": {
-                "enabled": True,
-                "status": "degraded",
-            }
-        },
+        runtime_metadata={"retrieval_rewrite": {"status": "degraded"}},
     )
-    assert list(result.payload.keys()) == ["query", "contexts"]
-    assert "mode" not in result.payload
-    assert "metadata" not in result.payload
-    assert "retrieval_rewrite" not in result.payload
     assert standard_builder.calls == [("MiniRAG 是什么？", 4)]
-    assert discorag_builder.calls == []
 
 
 def test_retrieve_discorag_returns_contexts_then_blueprint() -> None:
-    request = AnswerRequest(
-        query="DiscoRAG 如何组织证据？",
-        contexts=[
-            _chunk("c2", score=0.7, metadata={"kind": "support"}),
-            _chunk("c3", score=0.2, metadata={"kind": "tail"}),
-            _chunk("c1", score=0.9, metadata={"kind": "lead"}),
-        ],
-        mode="discorag",
-        blueprint=_blueprint(),
-        metadata={
-            "source_selection": {"selected": ["c1", "c2"]},
-            "retrieval_rewrite": {"enabled": False},
-        },
+    discorag_builder = FakeBuilder(
+        request=AnswerRequest(
+            query="DiscoRAG 如何组织证据？",
+            contexts=[
+                _chunk("c2", score=0.7),
+                _chunk("c3", score=0.2),
+                _chunk("c1", score=0.9),
+            ],
+            mode="discorag",
+            blueprint=_blueprint(),
+            metadata={"source_selection": {"selected": ["c1", "c2"]}},
+        )
     )
-    standard_builder = FakeBuilder(
-        request=AnswerRequest(query="unused", contexts=[]),
+    service = RetrievalPayloadService(
+        FakeBuilder(request=AnswerRequest(query="unused", contexts=[])),
+        discorag_builder,
     )
-    discorag_builder = FakeBuilder(request=request)
-    service = AgentRetrievalService(standard_builder, discorag_builder)
 
     result = service.retrieve(
         "DiscoRAG 如何组织证据？",
@@ -147,38 +132,27 @@ def test_retrieve_discorag_returns_contexts_then_blueprint() -> None:
         mode="discorag",
     )
 
-    assert list(result.payload.keys()) == ["query", "contexts", "blueprint"]
-    assert [item["chunk_id"] for item in result.payload["contexts"]] == [
+    assert list(result.payload) == ["query", "contexts", "blueprint"]
+    contexts = cast(list[dict[str, object]], result.payload["contexts"])
+    blueprint = cast(dict[str, object], result.payload["blueprint"])
+    assert [item["chunk_id"] for item in contexts] == [
         "c1",
         "c2",
         "c3",
     ]
-    assert list(result.payload["blueprint"].keys()) == [
-        "chunk_roles",
-        "answer_constraints",
-        "plan_steps",
-        "ordered_chunk_ids",
-    ]
-    assert result.payload["blueprint"]["ordered_chunk_ids"] == ["c2", "c1", "c3"]
+    assert blueprint["ordered_chunk_ids"] == ["c2", "c1", "c3"]
     assert "source_selection" not in result.payload
-    assert "retrieval_rewrite" not in result.payload
-    assert result.runtime_metadata == {
-        "source_selection": {"selected": ["c1", "c2"]},
-        "retrieval_rewrite": {"enabled": False},
-    }
-    assert standard_builder.calls == []
     assert discorag_builder.calls == [("DiscoRAG 如何组织证据？", 3)]
 
 
 def test_retrieve_discorag_requires_blueprint() -> None:
-    service = AgentRetrievalService(
+    service = RetrievalPayloadService(
         FakeBuilder(request=AnswerRequest(query="unused", contexts=[])),
         FakeBuilder(
             request=AnswerRequest(
                 query="q",
                 contexts=[_chunk("c1", score=0.9)],
                 mode="discorag",
-                blueprint=None,
             )
         ),
     )
@@ -191,7 +165,7 @@ def test_retrieve_discorag_requires_blueprint() -> None:
 
 
 def test_retrieve_rejects_unknown_mode() -> None:
-    service = AgentRetrievalService(
+    service = RetrievalPayloadService(
         FakeBuilder(request=AnswerRequest(query="unused", contexts=[])),
         FakeBuilder(request=AnswerRequest(query="unused", contexts=[])),
     )

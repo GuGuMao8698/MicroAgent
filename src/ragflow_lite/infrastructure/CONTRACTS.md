@@ -144,47 +144,6 @@ Verification:
 - [tests/unit/test_probe_chunking_script.py](../../../tests/unit/test_probe_chunking_script.py)
 - `scripts/probe_chunking.py --input tests/fixtures/documents/microrag-private-bootstrap.md --output-dir data/chunk-probes/token-budget-check`
 
-## ACP Runtime and Session Store Contract
-
-Reviewed at: 2026-05-18T00:00:00+08:00
-Status: Active
-Owner: `AcpClient`, `AgentSessionStore`
-
-Source of truth:
-- ACP runtime integration is a process boundary. UI-visible data must pass through MicroRAG redaction before leaving infrastructure.
-- `AgentSessionStore` stores local UI metadata only. Claude Code JSONL transcripts remain the conversation source of truth.
-
-Invariant:
-- `AcpClient.start()` uses `from None` to break exception chains; `__cause__` is always `None` on startup failure.
-- `_request()` returns raw ACP JSON-RPC result dicts (unfiltered). Backend-only keys (`transcript_path`, `cwd`, etc.) remain available to internal callers. Redaction happens at the HTTP route/response schema boundary, not inside `AcpClient`.
-- `redact_acp_event()` strips `BACKEND_ONLY_KEYS` from result dicts (shallow, top-level only). Available as a public utility but not called by `_request()`.
-- `redact_acp_error()` replaces messages containing sensitive markers with a fixed generic message.
-- `AppServices` stores an ACP client factory and constructs `AcpClient` lazily when agent routes first access `services.acp_client`; non-agent service construction must not require a prepared agent runtime.
-- Settings fields: `agent_command` (env `MICRORAG_AGENT_COMMAND`, default `scripts/run_microagent.sh`), `agent_args` (env `MICRORAG_AGENT_ARGS`, default `"--acp --setting-sources project"`), `agent_cwd` (env `MICRORAG_AGENT_CWD`, default `data/agent-runtime/workspace`), `agent_config_dir` (env `MICRORAG_AGENT_CONFIG_DIR`, default `data/agent-runtime/config`), and `microagent_dir` (env `MICRORAG_MICROAGENT_DIR`, default `src/ragflow_lite/microagent`).
-- MicroAgent skills and subagents are bundled runtime assets under `src/ragflow_lite/microagent/.claude/skills` and `src/ragflow_lite/microagent/.claude/agents`.
-- The MicroAgent project settings file is `src/ragflow_lite/microagent/.claude/settings.json`; it is copied from the local source runtime, local-only, gitignored, required before agent startup, and not content-inspected during migration.
-- Product conversation workspace state remains under `data/agent-runtime/workspace`; `setup_agent_runtime()` prepares workspace/config/shim state and must not create or populate `src/ragflow_lite/microagent`.
-- `_build_acp_client(settings)` rejects runtime paths that do not resolve to the project-owned defaults from `default_agent_runtime_paths(settings.project_root)`.
-- ACP child processes receive `CLAUDE_CONFIG_DIR`, `MICRORAG_AGENT_CWD`, `MICRORAG_AGENT_CONFIG_DIR`, `MICRORAG_MICROAGENT_DIR`, `PATH`, and `PYTHONPATH` through `AcpRuntimeConfig.env`.
-- `AgentSessionStore` schema has no `messages`, `conversation`, or `transcript_json` columns.
-- Session ordering is `ORDER BY updated_at DESC, created_at DESC, id DESC` for deterministic tiebreaking.
-
-Forbidden stale interpretations:
-- Do not re-chain exceptions from `start()` via `from exc`.
-- Do not pass raw JSON-RPC error messages through to UI without redaction.
-- Do not store conversation content in `AgentSessionStore`.
-- Do not fall back to repository root as product ACP cwd.
-- Do not treat repository-root `.claude/settings*` or real `~/.claude/settings.json` as product runtime configuration.
-- Do not reintroduce generated or copied product skills under `data/agent-runtime/workspace/.claude/skills`.
-- Do not let ambient parent-shell `CLAUDE_CONFIG_DIR` select product runtime config.
-- Do not reintroduce `src/ragflow_lite/agent_runtime/settings.json` as a source-controlled permissions template.
-
-Verification:
-- [tests/unit/infrastructure/test_acp_client_redaction.py](../../../tests/unit/infrastructure/test_acp_client_redaction.py)
-- [tests/unit/infrastructure/test_agent_session_store.py](../../../tests/unit/infrastructure/test_agent_session_store.py)
-- [tests/unit/api/test_acp_wiring.py](../../../tests/unit/api/test_acp_wiring.py)
-- [tests/unit/agent_runtime/test_setup.py](../../../tests/unit/agent_runtime/test_setup.py)
-
 ## Academic PDF Ingestion
 
 Reviewed at: `2026-06-01T12:00:00+08:00`

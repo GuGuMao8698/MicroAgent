@@ -229,25 +229,6 @@ class Settings:
     chunk_fusion_normalize: str = "atan"
     chunk_position_prior_weight: float = 0.03
     chunk_position_prior_enabled: bool = True
-    # ── ACP agent runtime 配置 ──
-    agent_command: str = field(
-        default_factory=lambda: _read_string_env("MICRORAG_AGENT_COMMAND", "claude")
-    )
-    agent_args: str = field(
-        default_factory=lambda: _read_string_env(
-            "MICRORAG_AGENT_ARGS",
-            "--acp --setting-sources project",
-        )
-    )
-    agent_cwd: str | None = field(
-        default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CWD")
-    )
-    agent_config_dir: str | None = field(
-        default_factory=lambda: _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
-    )
-    microagent_dir: str | None = field(
-        default_factory=lambda: _read_optional_env("MICRORAG_MICROAGENT_DIR")
-    )
     # ── Figure VLM / Ark 配置 ──
     figure_vlm_enabled: bool = field(
         default_factory=lambda: _read_bool_env("MICRORAG_FIGURE_VLM_ENABLED", False)
@@ -305,30 +286,11 @@ class Settings:
         运行期 provider 配置只从环境变量读取，不写死在仓库中。
         """
         root = project_root or Path(__file__).resolve().parents[3]
-        runtime_root = root / "data" / "agent-runtime"
-        default_agent_cwd = runtime_root / "workspace"
-        default_agent_command = root / "scripts" / "run_microagent.sh"
-        default_microagent_dir = root / "src" / "ragflow_lite" / "microagent"
         return cls(
             project_root=root,
             uploads_dir=root / "data" / "uploads",
             local_index_dir=root / "data" / "local_index",
             temp_dir=root / "data" / "tmp",
-            agent_command=(
-                _read_optional_env("MICRORAG_AGENT_COMMAND")
-                or str(default_agent_command)
-            ),
-            agent_cwd=(
-                _read_optional_env("MICRORAG_AGENT_CWD") or str(default_agent_cwd)
-            ),
-            agent_config_dir=(
-                _read_optional_env("MICRORAG_AGENT_CONFIG_DIR")
-                or str(runtime_root / "config")
-            ),
-            microagent_dir=(
-                _read_optional_env("MICRORAG_MICROAGENT_DIR")
-                or str(default_microagent_dir)
-            ),
         )
 
     def require_runtime_provider_configs(

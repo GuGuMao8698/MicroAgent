@@ -23,7 +23,7 @@
       "role": "authoritative",
       "topic": "docker",
       "status": "active",
-      "sha256": "bc0b04b84494ff4f0cb437b22a5f9c2f252e4e5fabec63a895e0c460fd8a5d7e"
+      "sha256": "28f66775e3362df00f6fcf2fb1ede233f0684cad18ac1107138dd413aeeb41f6"
     },
     {
       "original_path": "docs/superpowers/plans/2026-05-08-discorag-repo-native-stabilization-plan.md",
@@ -74,46 +74,6 @@
       "sha256": "d7eaaa1273b9d2474a8f8e64d41f5491e5c8f5b0c1e3be648013c0de7edbd707"
     },
     {
-      "original_path": "docs/superpowers/plans/2026-05-14-microrag-agent-demo-shell.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-14-microrag-agent-demo-shell.md",
-      "role": "distractor",
-      "topic": "2026-05-14-microrag-agent-demo-shell",
-      "status": "Ready for implementation after confirmation",
-      "sha256": "89985c7d495d8c3f2b420c889b04350be2e8b8fe24e75dfcc5ccb0ca896cf07f"
-    },
-    {
-      "original_path": "docs/superpowers/plans/2026-05-15-microrag-agent-runtime-isolation-review-fix.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-15-microrag-agent-runtime-isolation-review-fix.md",
-      "role": "distractor",
-      "topic": "2026-05-15-microrag-agent-runtime-isolation-review-fix",
-      "status": "Ready for implementation after confirmation",
-      "sha256": "a01fbc843947491cc3cc32564ebe8f538191c8cab8b668f52e95d2ef324fa371"
-    },
-    {
-      "original_path": "docs/superpowers/plans/2026-05-15-microrag-agent-runtime-workspace-isolation.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-15-microrag-agent-runtime-workspace-isolation.md",
-      "role": "distractor",
-      "topic": "2026-05-15-microrag-agent-runtime-workspace-isolation",
-      "status": "Ready for implementation after confirmation",
-      "sha256": "57127b3ef47606fae17541486e598f5d35149c6bf3034cbb9e1802d13c9e5bf8"
-    },
-    {
-      "original_path": "docs/superpowers/plans/2026-05-16-microrag-agent-claude-runtime-capabilities.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-16-microrag-agent-claude-runtime-capabilities.md",
-      "role": "distractor",
-      "topic": "2026-05-16-microrag-agent-claude-runtime-capabilities",
-      "status": "historical",
-      "sha256": "3740511bc8d4e2d04d45fe83e880d10be67f16ddc63ddb1e55ee77b5058cfee0"
-    },
-    {
-      "original_path": "docs/superpowers/plans/2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
-      "role": "distractor",
-      "topic": "2026-05-16-microrag-agent-system-prompt-identity-boundary",
-      "status": "historical",
-      "sha256": "53ecba74b672e56905632e0f431c2b7f7f556f83555d6287c32463f3dcd7212c"
-    },
-    {
       "original_path": "docs/superpowers/plans/2026-05-18-deepeval-query-mode-artifacts.md",
       "snapshot_path": "distractors/docs__superpowers__plans__2026-05-18-deepeval-query-mode-artifacts.md",
       "role": "distractor",
@@ -122,20 +82,12 @@
       "sha256": "94e53c6650260688885de06c7ca44f5c67955da76b53d9fdbaa1d94a804ea370"
     },
     {
-      "original_path": "docs/superpowers/plans/2026-05-18-microrag-microagent-runtime-bundle.md",
-      "snapshot_path": "distractors/docs__superpowers__plans__2026-05-18-microrag-microagent-runtime-bundle.md",
-      "role": "distractor",
-      "topic": "2026-05-18-microrag-microagent-runtime-bundle",
-      "status": "historical",
-      "sha256": "f42851c791eab36790ad2f1bc8d9a25ebea553ac7c87873a8ec1c2fbafebc411"
-    },
-    {
       "original_path": "docs/superpowers/plans/2026-05-19-microrag-private-bootstrap-goldens.md",
       "snapshot_path": "distractors/docs__superpowers__plans__2026-05-19-microrag-private-bootstrap-goldens.md",
       "role": "distractor",
       "topic": "2026-05-19-microrag-private-bootstrap-goldens",
       "status": "historical",
-      "sha256": "f607628085ebb64dc045c1723ed3d6a58c0f6a0ee10d642ab796476c3a05bc0d"
+      "sha256": "d0c56fed79c7faad752a317dc55cbcc774052045dac0e22914fc8830391a6dae"
     },
     {
       "original_path": "docs/superpowers/specs/2026-05-08-discorag-repo-native-stabilization.md",
@@ -186,46 +138,6 @@
       "sha256": "212a86d9db6ce48d26487c7843de771197bce0099f7d3b18a099d8ad1ba10fc2"
     },
     {
-      "original_path": "docs/superpowers/specs/2026-05-14-microrag-agent-demo-shell.md",
-      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-14-microrag-agent-demo-shell.md",
-      "role": "distractor",
-      "topic": "2026-05-14-microrag-agent-demo-shell",
-      "status": "Draft design spec",
-      "sha256": "61a269bda8c5a8b48df4ba180a5bdd6682312d48aab0408d81f6ca452f860942"
-    },
-    {
-      "original_path": "docs/superpowers/specs/2026-05-15-microrag-agent-runtime-workspace-isolation.md",
-      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-15-microrag-agent-runtime-workspace-isolation.md",
-      "role": "distractor",
-      "topic": "2026-05-15-microrag-agent-runtime-workspace-isolation",
-      "status": "Draft design spec",
-      "sha256": "122dd9780ded946fa4d6ed25504b3ff3cb6b41fe7c9c1a31c1c4a775630df0d3"
-    },
-    {
-      "original_path": "docs/superpowers/specs/2026-05-16-microrag-agent-claude-runtime-capabilities.md",
-      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-16-microrag-agent-claude-runtime-capabilities.md",
-      "role": "distractor",
-      "topic": "2026-05-16-microrag-agent-claude-runtime-capabilities",
-      "status": "Draft design spec, awaiting user approval",
-      "sha256": "d6b0f8ec7cfb58c4d4e41e07f50e329931a3f380e5f95232738bf315014b65e1"
-    },
-    {
-      "original_path": "docs/superpowers/specs/2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
-      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-16-microrag-agent-system-prompt-identity-boundary.md",
-      "role": "distractor",
-      "topic": "2026-05-16-microrag-agent-system-prompt-identity-boundary",
-      "status": "Draft design spec",
-      "sha256": "c33ffb3b5b7ec4ccffaa3638edd9a746ed91df592439a9875d753605b4eaf6ee"
-    },
-    {
-      "original_path": "docs/superpowers/specs/2026-05-17-microrag-microagent-runtime-bundle.md",
-      "snapshot_path": "distractors/docs__superpowers__specs__2026-05-17-microrag-microagent-runtime-bundle.md",
-      "role": "distractor",
-      "topic": "2026-05-17-microrag-microagent-runtime-bundle",
-      "status": "Draft design spec",
-      "sha256": "13a34f4485ba7b01a4fadf94376782e6b5b48f4be1a1c051a224175b48da35ab"
-    },
-    {
       "original_path": "docs/superpowers/specs/2026-05-18-deepeval-query-mode-artifacts-design.md",
       "snapshot_path": "distractors/docs__superpowers__specs__2026-05-18-deepeval-query-mode-artifacts-design.md",
       "role": "distractor",
@@ -239,7 +151,7 @@
       "role": "distractor",
       "topic": "2026-05-18-microrag-private-bootstrap-goldens",
       "status": "Draft design spec",
-      "sha256": "1e2157627c7d3de8f6faf54d9da787dd4f64075229d3a01eecfa57f0cafcccb7"
+      "sha256": "4b8642ca829bbfa2c00a7a91920cbce9f72305b35c2b6709b5fa7d4c28b86269"
     },
     {
       "original_path": "src/ragflow_lite/AGENTS.md",
@@ -271,7 +183,7 @@
       "role": "authoritative",
       "topic": "src/ragflow_lite/api",
       "status": "Active",
-      "sha256": "d35d4e18db32253a048c289ff7b3add4058e36861e49ac905bdbf38ae5b6f880"
+      "sha256": "dc2087e7e4af1045371b0f084db6d0085d448107073ad7ee5eb238300d868c29"
     },
     {
       "original_path": "src/ragflow_lite/application/AGENTS.md",
@@ -287,7 +199,7 @@
       "role": "authoritative",
       "topic": "src/ragflow_lite/application",
       "status": "Active",
-      "sha256": "7ba42bf9a6a8bfb80ee07271929d26dbdffa682703c82a57054ecd5431e92262"
+      "sha256": "b298930f0f28add2866d839b29015278ed2c45111a26957f3a8fe5db7c58f37c"
     },
     {
       "original_path": "src/ragflow_lite/application/pipelines/AGENTS.md",
@@ -335,7 +247,7 @@
       "role": "authoritative",
       "topic": "src/ragflow_lite/infrastructure",
       "status": "active",
-      "sha256": "1e71c8a1f1a961fd92777a30bb5a659e40c316ecd9d8c5f5015a4b4cea386332"
+      "sha256": "3f010158a492f1bbe533f42892bc3274b700ca972e099226aa2e589117bba640"
     },
     {
       "original_path": "src/ragflow_lite/infrastructure/answerers/AGENTS.md",
@@ -374,7 +286,7 @@
       "snapshot_path": "authoritative/src__ragflow_lite__infrastructure__evidence__CONTRACTS.md",
       "role": "authoritative",
       "topic": "src/ragflow_lite/infrastructure/evidence",
-      "status": "Active",
+      "status": "Active for graph evidence and Psi tree artifacts",
       "sha256": "e66e43cbae12ed0edd0daade3ca7cd23bff85be2d553fc91bef03367a8c56fae"
     },
     {

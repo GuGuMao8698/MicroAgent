@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -1456,3 +1457,31 @@ def test_academic_pdf_gate_a_does_not_construct_vlm_client_when_disabled(
         temp_dir=tmp_path / "tmp",
     )
     assert settings.figure_vlm_enabled is False
+
+
+def test_agent_surfaces_are_not_mounted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ragflow_lite.app as app_module
+
+    services = SimpleNamespace(
+        ingestion_pipeline=SimpleNamespace(
+            runner=SimpleNamespace(),
+            vector_index=SimpleNamespace(),
+        )
+    )
+    monkeypatch.setattr(app_module, "build_services", lambda _settings: services)
+    app = app_module.create_app(
+        Settings(
+            project_root=tmp_path,
+            uploads_dir=tmp_path / "uploads",
+            local_index_dir=tmp_path / "local_index",
+            temp_dir=tmp_path / "tmp",
+        )
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/api/v0/agent/sessions").status_code == 404
+        assert client.get("/agent").status_code == 404
+        assert client.get("/static/agent-shell.js").status_code == 404

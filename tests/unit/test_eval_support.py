@@ -35,7 +35,7 @@ _JUDGE_MODEL_ENV = {
 }
 
 _EXPECTED_EVAL_SOURCE_FILES = {
-    "microrag-private-bootstrap-snapshot": 60,
+    "microrag-private-bootstrap-snapshot": 50,
 }
 
 
@@ -597,7 +597,7 @@ def test_seed_dataset_tracks_generated_eval_docs_with_references() -> None:
         fixture = case.corpus_fixture or case.document_fixture
         fixture_counts[fixture] = fixture_counts.get(fixture, 0) + 1
 
-    assert len(RAG_EVAL_CASES) == 60
+    assert len(RAG_EVAL_CASES) == 50
     assert fixture_counts == _EXPECTED_EVAL_SOURCE_FILES
     assert all(case.has_reference for case in RAG_EVAL_CASES)
 

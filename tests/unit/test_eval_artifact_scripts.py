@@ -88,7 +88,6 @@ def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
     assert classify_corpus_path(Path("参考项目/网页/deepeval/Faithfulness.md")) is None
     assert classify_corpus_path(Path("tests/fixtures/documents/sample.md")) is None
     assert classify_corpus_path(Path("data/uploads/doc.md")) is None
-    assert classify_corpus_path(Path("src/ragflow_lite/microagent/README.md")) is None
 
 
 def test_private_bootstrap_discovers_only_allowed_corpus_paths(
@@ -102,7 +101,6 @@ def test_private_bootstrap_discovers_only_allowed_corpus_paths(
         "docs/superpowers/plans/2026-05-19-b.md": "# plan\n",
         "参考项目/网页/deepeval/Faithfulness.md": "# public docs\n",
         "tests/fixtures/documents/sample.md": "# old fixture\n",
-        "src/ragflow_lite/microagent/README.md": "# mixed authority\n",
     }
     for relative, text in files.items():
         path = tmp_path / relative
@@ -1084,7 +1082,7 @@ def test_golden_to_payload_preserves_eval_fixture_metadata() -> None:
 def test_checked_in_goldens_artifact_loads_via_prompt_consumer() -> None:
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 60
+    assert len(goldens) == 50
     assert all(golden.input.strip() for golden in goldens)
     assert all(
         golden.expected_output and golden.expected_output.strip() for golden in goldens
@@ -1106,7 +1104,7 @@ def test_checked_in_goldens_artifact_is_private_bootstrap_dataset() -> None:
     payload = json.loads(DEFAULT_GOLDENS_PATH.read_text(encoding="utf-8"))
     goldens = load_goldens(DEFAULT_GOLDENS_PATH)
 
-    assert len(goldens) == 60
+    assert len(goldens) == 50
     assert {golden.source_file for golden in goldens} == {
         "microrag-private-bootstrap.md"
     }

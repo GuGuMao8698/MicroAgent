@@ -106,7 +106,7 @@ def test_private_bootstrap_classifies_allowed_and_excluded_paths() -> None:
     assert classify_corpus_path(Path("参考项目/网页/deepeval/Faithfulness.md")) is None
     assert classify_corpus_path(Path("tests/fixtures/documents/sample.md")) is None
     assert classify_corpus_path(Path("data/uploads/doc.md")) is None
-    assert classify_corpus_path(Path("src/ragflow_lite/microagent/README.md")) is None
+    assert classify_corpus_path(Path("external/runtime-bundle/README.md")) is None
 ```
 
 - [ ] **Step 2: Run the failing test**
@@ -170,7 +170,7 @@ def classify_corpus_path(path: Path) -> CorpusRole | None:
             "参考项目/",
             "tests/fixtures/documents/",
             "data/uploads/",
-            "src/ragflow_lite/microagent/",
+            "external/runtime-bundle/",
         )
     ):
         return None
@@ -237,7 +237,7 @@ def test_private_bootstrap_discovers_only_allowed_corpus_paths(tmp_path: Path) -
         "docs/superpowers/plans/2026-05-19-b.md": "# plan\n",
         "参考项目/网页/deepeval/Faithfulness.md": "# public docs\n",
         "tests/fixtures/documents/sample.md": "# old fixture\n",
-        "src/ragflow_lite/microagent/README.md": "# mixed authority\n",
+        "external/runtime-bundle/README.md": "# mixed authority\n",
     }
     for relative, text in files.items():
         path = tmp_path / relative
@@ -1119,7 +1119,7 @@ PY
 
 Expected: JSON list includes authoritative `AGENTS.md` / `CONTRACTS.md` files
 and distractor `docs/superpowers` files. It must not include `参考项目/**`,
-`data/uploads/**`, `tests/fixtures/documents/**`, or `src/ragflow_lite/microagent/**`.
+`data/uploads/**`, `tests/fixtures/documents/**`, or `external/runtime-bundle/**`.
 
 - [ ] **Step 2: Draft the 20 cases from snapshot evidence**
 

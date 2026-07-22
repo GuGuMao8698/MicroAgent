@@ -176,10 +176,10 @@ data/uploads/**
 MinerU_markdown_*.md
 prompt生成与优化指南.md
 context7.md
-src/ragflow_lite/microagent/**
+external/runtime-bundle/**
 ```
 
-`src/ragflow_lite/microagent/**` is excluded from the first slice because it
+`external/runtime-bundle/**` is excluded from the first slice because it
 contains copied or bundled runtime material whose source authority is mixed.
 It can be reconsidered after a separate corpus review.
 

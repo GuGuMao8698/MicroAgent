@@ -4,18 +4,16 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Never, Protocol, cast
 
 if TYPE_CHECKING:
-    from ragflow_lite.api.deps.providers import AppServices
-    from ragflow_lite.domain.models import AnswerResult, RetrievedChunk
+    from ragflow_lite.domain.models import AnswerRequest, AnswerResult, RetrievedChunk
 
 CliMode = Literal["standard", "discorag"]
 
 
 class ExitCodeParser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> Never:
         self.print_usage(sys.stderr)
         raise CliArgumentError(f"{self.prog}: error: {message}")
 
@@ -24,11 +22,30 @@ class CliArgumentError(Exception):
     pass
 
 
+class QueryRouter(Protocol):
+    def query(self, query: str, top_k: int, mode: CliMode) -> "AnswerResult": ...
+
+
+class AnswerRequestBuilder(Protocol):
+    def build_answer_request(self, query: str, top_k: int) -> "AnswerRequest": ...
+
+
+class Services(Protocol):
+    @property
+    def query_service(self) -> AnswerRequestBuilder: ...
+
+    @property
+    def discorag_query_service(self) -> AnswerRequestBuilder: ...
+
+    @property
+    def query_router(self) -> QueryRouter: ...
+
+
 class ServicesFactory(Protocol):
-    def __call__(self) -> "AppServices": ...
+    def __call__(self) -> Services: ...
 
 
-def _default_services_factory() -> "AppServices":
+def _default_services_factory() -> Services:
     from ragflow_lite.api.deps.providers import build_services
     from ragflow_lite.config import Settings
 
@@ -53,19 +70,6 @@ def _build_parser() -> ExitCodeParser:
             action="store_true",
             help="输出 machine-readable JSON。",
         )
-
-    agent_parser = subparsers.add_parser("agent")
-    agent_subparsers = agent_parser.add_subparsers(
-        dest="agent_command",
-        required=True,
-    )
-    setup_parser = agent_subparsers.add_parser("setup")
-    setup_parser.add_argument(
-        "--project-root",
-        type=Path,
-        default=Path.cwd(),
-        help="MicroRAG project root used to prepare agent runtime config.",
-    )
 
     return parser
 
@@ -105,19 +109,15 @@ def _is_ragflow_lite_error(exc: Exception) -> bool:
     return isinstance(exc, RagflowLiteError)
 
 
-def _handle_retrieve(
-    args: argparse.Namespace,
-    services: "AppServices",
-) -> int:
-    from ragflow_lite.application.services.agent_retrieval_service import (
-        AgentRetrievalService,
+def _handle_retrieve(args: argparse.Namespace, services: Services) -> int:
+    from ragflow_lite.application.services.retrieval_payload_service import (
+        RetrievalPayloadService,
     )
 
-    retrieval_service = AgentRetrievalService(
+    result = RetrievalPayloadService(
         services.query_service,
         services.discorag_query_service,
-    )
-    result = retrieval_service.retrieve(
+    ).retrieve(
         query=cast(str, args.query),
         top_k=cast(int, args.top_n),
         mode=cast(CliMode, args.mode),
@@ -128,7 +128,7 @@ def _handle_retrieve(
 
 def _handle_answer(
     args: argparse.Namespace,
-    services: "AppServices",
+    services: Services,
 ) -> int:
     result = services.query_router.query(
         cast(str, args.query),
@@ -139,32 +139,13 @@ def _handle_answer(
     return 0
 
 
-def _handle_agent_setup(args: argparse.Namespace) -> int:
-    from ragflow_lite.agent_runtime.setup import (
-        default_agent_runtime_paths,
-        setup_agent_runtime,
-    )
-
-    paths = setup_agent_runtime(default_agent_runtime_paths(args.project_root))
-    _write_json(
-        {
-            "config_dir": str(paths.config_dir),
-            "workspace_dir": str(paths.workspace_dir),
-            "microagent_dir": str(paths.microagent_dir),
-        }
-    )
-    return 0
-
-
 def main(
     argv: Sequence[str] | None = None,
-    services_factory: Callable[[], "AppServices"] | None = None,
+    services_factory: Callable[[], Services] | None = None,
 ) -> int:
     parser = _build_parser()
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
-        if args.command == "agent" and args.agent_command == "setup":
-            return _handle_agent_setup(args)
         _require_json_flag(args, parser)
     except CliArgumentError as exc:
         print(str(exc), file=sys.stderr)

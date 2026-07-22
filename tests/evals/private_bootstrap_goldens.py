@@ -13,11 +13,11 @@ PRIVATE_BOOTSTRAP_SNAPSHOT_DIR = "microrag-private-bootstrap-snapshot"
 PRIVATE_BOOTSTRAP_DRAFT_GOLDENS = "private_bootstrap_goldens.draft.json"
 AUTHORITY_RULE = "Only CONTRACTS.md and AGENTS.md may justify current runtime behavior."
 EXPECTED_CASE_COUNTS: Mapping[str, int] = {
-    "current_contract_qa": 12,
-    "multi_doc_synthesis": 20,
-    "stale_plan_trap": 12,
-    "negative_missing_evidence": 6,
-    "comparison": 10,
+    "current_contract_qa": 11,
+    "multi_doc_synthesis": 18,
+    "stale_plan_trap": 9,
+    "negative_missing_evidence": 5,
+    "comparison": 7,
 }
 
 
@@ -50,7 +50,6 @@ def classify_corpus_path(path: Path) -> CorpusRole | None:
         "参考项目/",
         "tests/fixtures/documents/",
         "data/uploads/",
-        "src/ragflow_lite/microagent/",
     )
     if relative_path.startswith(excluded_prefixes):
         return None

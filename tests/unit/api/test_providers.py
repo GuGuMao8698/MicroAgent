@@ -64,17 +64,11 @@ from ragflow_lite.infrastructure.retrievers import (
 
 
 def _build_settings(tmp_path: Path) -> Settings:
-    from helpers.agent_runtime import setup_test_agent_runtime
-
-    paths = setup_test_agent_runtime(tmp_path)
     settings = Settings(
         project_root=tmp_path,
         uploads_dir=tmp_path / "uploads",
         local_index_dir=tmp_path / "local_index",
         temp_dir=tmp_path / "tmp",
-        agent_cwd=str(paths.workspace_dir),
-        agent_config_dir=str(paths.config_dir),
-        microagent_dir=str(paths.microagent_dir),
     )
     assign_isolated_infinity_tables(settings, tmp_path)
     settings.ensure_directories()
@@ -1168,7 +1162,7 @@ def test_build_services_wires_cot_grounding_rewriter_non_live(
     assert services.retriever.cot_grounding_rewriter.model == settings.deepseek_model
 
 
-def test_build_services_does_not_require_agent_runtime_setup(
+def test_build_services_constructs_without_optional_runtime_setup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

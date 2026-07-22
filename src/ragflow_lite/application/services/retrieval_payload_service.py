@@ -19,12 +19,12 @@ class AnswerRequestBuilder(Protocol):
 
 
 @dataclass(slots=True)
-class AgentRetrievalResult:
+class RetrievalPayloadResult:
     payload: dict[str, object]
     runtime_metadata: dict[str, object] = field(default_factory=dict)
 
 
-class AgentRetrievalService:
+class RetrievalPayloadService:
     def __init__(
         self,
         standard_service: AnswerRequestBuilder,
@@ -38,7 +38,7 @@ class AgentRetrievalService:
         query: str,
         top_k: int,
         mode: RetrievalMode = "standard",
-    ) -> AgentRetrievalResult:
+    ) -> RetrievalPayloadResult:
         if mode == "standard":
             request = self.standard_service.build_answer_request(query, top_k)
             ordered_contexts = order_standard_contexts_for_model(request.contexts)
@@ -47,7 +47,7 @@ class AgentRetrievalService:
                 contexts=ordered_contexts,
                 blueprint=None,
             )
-            return AgentRetrievalResult(
+            return RetrievalPayloadResult(
                 payload=payload,
                 runtime_metadata=dict(request.metadata),
             )
@@ -62,7 +62,7 @@ class AgentRetrievalService:
                 contexts=ordered_contexts,
                 blueprint=request.blueprint,
             )
-            return AgentRetrievalResult(
+            return RetrievalPayloadResult(
                 payload=payload,
                 runtime_metadata=dict(request.metadata),
             )

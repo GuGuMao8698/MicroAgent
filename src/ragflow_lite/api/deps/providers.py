@@ -6,9 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from fastapi import Depends, Request
 
@@ -47,11 +45,6 @@ from ragflow_lite.infrastructure import (
     InMemoryTaskStore,
     LocalDocumentStore,
     RecursiveCharacterChunker,
-)
-from ragflow_lite.infrastructure.agent import (
-    AcpClient,
-    AcpRuntimeConfig,
-    AgentSessionStore,
 )
 from ragflow_lite.infrastructure.chunkers import (
     AcademicPdfChunker,
@@ -93,8 +86,6 @@ class AppServices:
     """集中保存应用启动后可复用的核心服务对象。"""
 
     settings: Settings
-    agent_session_store: AgentSessionStore
-    acp_client_factory: Callable[[], AcpClient]
     ingestion_pipeline: IngestionPipeline
     retriever: Retriever
     query_service: QueryService
@@ -105,44 +96,6 @@ class AppServices:
     task_store: IngestionTaskStore = field(default_factory=InMemoryTaskStore)
     stage_cache: IngestionStageCache = field(default_factory=InMemoryStageCache)
     structurer_config: DiscoRAGStructurerRuntimeConfig | None = None
-    _acp_client: AcpClient | None = field(default=None, init=False, repr=False)
-
-    @property
-    def acp_client(self) -> AcpClient:
-        if self._acp_client is None:
-            self._acp_client = self.acp_client_factory()
-        return self._acp_client
-
-
-def _build_acp_client(settings: Settings) -> AcpClient:
-    from ragflow_lite.agent_runtime.setup import (
-        SETUP_INCOMPLETE_MESSAGE,
-        AgentRuntimePaths,
-        build_agent_child_env,
-        validate_agent_runtime_workspace,
-    )
-
-    if (
-        settings.agent_cwd is None
-        or settings.agent_config_dir is None
-        or settings.microagent_dir is None
-    ):
-        raise RuntimeError(SETUP_INCOMPLETE_MESSAGE)
-
-    paths = AgentRuntimePaths(
-        project_root=settings.project_root,
-        config_dir=Path(settings.agent_config_dir),
-        workspace_dir=Path(settings.agent_cwd),
-        microagent_dir=Path(settings.microagent_dir),
-    )
-    validate_agent_runtime_workspace(paths)
-    config = AcpRuntimeConfig(
-        command=settings.agent_command,
-        args=settings.agent_args.split(),
-        cwd=str(paths.workspace_dir),
-        env=build_agent_child_env(paths),
-    )
-    return AcpClient(config=config)
 
 
 def _build_vector_index(
@@ -188,9 +141,6 @@ def build_services(settings: Settings) -> AppServices:
     )
 
     document_store = LocalDocumentStore(settings.uploads_dir, settings.temp_dir)
-    agent_session_store = AgentSessionStore(
-        settings.local_index_dir / "agent_sessions.sqlite3"
-    )
     parser = CompositeParser()
     generic_chunker = RecursiveCharacterChunker(
         chunk_size=settings.chunk_size,
@@ -406,8 +356,6 @@ def build_services(settings: Settings) -> AppServices:
 
     return AppServices(
         settings=settings,
-        agent_session_store=agent_session_store,
-        acp_client_factory=lambda: _build_acp_client(settings),
         ingestion_pipeline=pipeline,
         retriever=retriever,
         query_service=query_service,

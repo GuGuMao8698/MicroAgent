@@ -52,7 +52,7 @@ def _validate_deepeval_reuse_corpus_for_settings(settings, request):
     return validate_private_bootstrap_reuse_ready(settings)
 
 
-load_export_env_file(PROJECT_ROOT / "data" / "agent-runtime" / "local.env")
+load_export_env_file(PROJECT_ROOT / "data" / "local.env")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-api-key")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 os.environ.setdefault("ARK_API_KEY", "test-ark-api-key")
@@ -191,9 +191,6 @@ def pytest_sessionfinish(
         clear_registered_infinity_tables()
 
 
-from helpers.agent_runtime import setup_test_agent_runtime
-
-
 def _configure_infinity_tables_for_test_settings(
     settings,
     tmp_path: Path,
@@ -213,15 +210,11 @@ def _configure_infinity_tables_for_test_settings(
 def app_settings(tmp_path: Path, request: pytest.FixtureRequest):
     from ragflow_lite.config import Settings
 
-    paths = setup_test_agent_runtime(tmp_path)
     settings = Settings(
         project_root=tmp_path,
         uploads_dir=tmp_path / "uploads",
         local_index_dir=tmp_path / "local_index",
         temp_dir=tmp_path / "tmp",
-        agent_cwd=str(paths.workspace_dir),
-        agent_config_dir=str(paths.config_dir),
-        microagent_dir=str(paths.microagent_dir),
     )
     _configure_infinity_tables_for_test_settings(settings, tmp_path, request)
     settings.ensure_directories()

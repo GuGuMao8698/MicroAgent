@@ -20,16 +20,16 @@ Local-only development, observability, and smoke testing. Not for production, CI
 ## App Service Details
 
 - **Working dir:** `/workspace`
-- **Command:** `sh -lc 'set -a; . data/agent-runtime/local.env; set +a; exec uvicorn ragflow_lite.app:app --host 0.0.0.0 --port 8000 --reload'`
+- **Command:** `sh -lc 'set -a; . data/local.env; set +a; exec uvicorn ragflow_lite.app:app --host 0.0.0.0 --port 8000 --reload'`
 
 ## App Environment Variables (source: compose.local.yml)
 
 | Variable | Value | Source |
 |---|---|---|
 | `PYTHONPATH` | `/workspace/src` | hardcoded |
-| `DEEPSEEK_API_KEY` | from `data/agent-runtime/local.env` | local env file |
-| `ARK_API_KEY` | from `data/agent-runtime/local.env` | local env file |
-| `ARK_EMBEDDING_MODEL` | from `data/agent-runtime/local.env` | local env file |
+| `DEEPSEEK_API_KEY` | from `data/local.env` | local env file |
+| `ARK_API_KEY` | from `data/local.env` | local env file |
+| `ARK_EMBEDDING_MODEL` | from `data/local.env` | local env file |
 | `RAGFLOW_LITE_LOG_LEVEL` | `INFO` | hardcoded |
 | `RAGFLOW_LITE_LOG_FORMAT` | `json` | hardcoded |
 | `RAGFLOW_LITE_METRICS_ENABLED` | `true` | hardcoded |
@@ -37,7 +37,7 @@ Local-only development, observability, and smoke testing. Not for production, CI
 | `RAGFLOW_LITE_INFINITY_PORT` | `23817` | hardcoded |
 
 ### Provider Env Note
-[src/ragflow_lite/config/settings.py](../src/ragflow_lite/config/settings.py) reads provider credentials from the process environment. The local observability app sources `data/agent-runtime/local.env` before starting Uvicorn, reusing the same local credential source as the agent runtime without committing secrets.
+[src/ragflow_lite/config/settings.py](../src/ragflow_lite/config/settings.py) reads provider credentials from the process environment. The local observability app sources `data/local.env` before starting Uvicorn without committing secrets.
 
 ## Grafana Defaults
 - Admin user/password: `admin` / `admin`
